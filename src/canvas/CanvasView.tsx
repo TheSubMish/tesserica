@@ -193,7 +193,7 @@ export function CanvasView() {
       if (down) tool.onPointerDown(ctx, x, y);
       else tool.onPointerMove(ctx, x, y, prevX, prevY);
 
-      if (!tool.readOnly) doc.touch();
+      if (!tool.readOnly) doc.touch(cel.id);
     },
     [],
   );
@@ -287,7 +287,7 @@ export function CanvasView() {
       if (snapshot) {
         const buffer = getBuffer(snapshot.celId);
         if (buffer) restoreStroke(snapshot, buffer);
-        useDocumentStore.getState().touch();
+        useDocumentStore.getState().touch(snapshot.celId);
       }
       stroke.current = null;
       drawing.current = false;

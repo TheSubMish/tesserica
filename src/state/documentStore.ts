@@ -14,7 +14,7 @@
 
 import { create } from 'zustand';
 import type { Cel, CelId, Frame, Layer, LayerId, Sprite } from '../model/types';
-import { allocateBuffer, getBuffer, releaseBuffer } from '../model/pixelBuffers';
+import { allocateBuffer, bumpCelRevision, getBuffer, releaseBuffer } from '../model/pixelBuffers';
 
 let nextId = 1;
 export const makeId = (prefix: string): string => `${prefix}${nextId++}`;
@@ -26,7 +26,11 @@ interface DocumentState {
   /** Bumped on every pixel mutation; the canvas redraws when it changes. */
   revision: number;
 
-  touch(): void;
+  /**
+   * Signal a change. Passing the cel that changed lets the renderer re-upload
+   * only that layer; omitting it invalidates the whole composite.
+   */
+  touch(celId?: CelId): void;
 
   // ---- primitives ----
   /** Build a detached raster layer plus one cel per frame. */
@@ -97,7 +101,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   activeFrameId: initial.activeFrameId,
   revision: 0,
 
-  touch: () => set((s) => ({ revision: s.revision + 1 })),
+  touch: (celId) => {
+    if (celId) bumpCelRevision(celId);
+    set((s) => ({ revision: s.revision + 1 }));
+  },
 
   createLayer: (name) => {
     const s = get();

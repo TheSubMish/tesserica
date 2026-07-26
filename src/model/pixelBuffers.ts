@@ -14,9 +14,28 @@ import type { CelId } from './types';
 
 const buffers = new Map<CelId, Uint8ClampedArray>();
 
+/**
+ * Per-cel change counters.
+ *
+ * The store's single `revision` says *something* changed; these say *what*.
+ * The renderer needs the finer signal to cache each layer's upload separately
+ * — otherwise one pencil dot on the top layer re-uploads every layer below it
+ * (`docs/02-architecture.md` §7).
+ */
+const revisions = new Map<CelId, number>();
+
+export function celRevision(id: CelId): number {
+  return revisions.get(id) ?? 0;
+}
+
+export function bumpCelRevision(id: CelId): void {
+  revisions.set(id, celRevision(id) + 1);
+}
+
 export function allocateBuffer(id: CelId, width: number, height: number): Uint8ClampedArray {
   const buf = new Uint8ClampedArray(width * height * 4); // transparent
   buffers.set(id, buf);
+  bumpCelRevision(id);
   return buf;
 }
 
@@ -30,14 +49,17 @@ export function getBuffer(id: CelId): Uint8ClampedArray | undefined {
  */
 export function setBuffer(id: CelId, buf: Uint8ClampedArray): void {
   buffers.set(id, buf);
+  bumpCelRevision(id);
 }
 
 export function releaseBuffer(id: CelId): void {
   buffers.delete(id);
+  bumpCelRevision(id);
 }
 
 export function clearAllBuffers(): void {
   buffers.clear();
+  revisions.clear();
 }
 
 /**

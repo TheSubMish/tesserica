@@ -11,8 +11,8 @@
  *   4. cursor cell preview
  */
 
-import type { Sprite } from '../model/types';
-import { getBuffer } from '../model/pixelBuffers';
+import type { Cel, CelId, Layer, Sprite } from '../model/types';
+import { celRevision, getBuffer } from '../model/pixelBuffers';
 import type { Viewport } from './coords';
 
 /**
@@ -34,6 +34,91 @@ function getScratch(w: number, h: number): HTMLCanvasElement {
     scratch.height = h;
   }
   return scratch;
+}
+
+// ---------------------------------------------------------------------------
+// Dirty-layer caching (docs/02-architecture.md §7)
+//
+// Two levels, because there are two distinct kinds of wasted work:
+//
+//  1. **Per-cel.** `putImageData` is an upload. Without a cache, one pencil dot
+//     on the top layer re-uploads every layer beneath it on every pointer
+//     event. Each cel therefore keeps its own canvas, refreshed only when that
+//     cel's revision moves.
+//  2. **Whole composite.** Pan, zoom, grid toggling and cursor movement all
+//     force a redraw while the artwork is completely unchanged. A signature
+//     over the layer stack lets those redraws reuse the previous composite and
+//     do nothing but blit.
+// ---------------------------------------------------------------------------
+
+interface CelCacheEntry {
+  canvas: HTMLCanvasElement;
+  revision: number;
+  width: number;
+  height: number;
+}
+
+const celCache = new Map<CelId, CelCacheEntry>();
+let compositeSignature: string | null = null;
+
+/** Drop every cache. Called when the document is replaced wholesale. */
+export function invalidateRenderCache(): void {
+  celCache.clear();
+  compositeSignature = null;
+}
+
+/**
+ * What the composite depends on. Anything not in here must not be able to
+ * change the output, or the cache will serve a stale frame.
+ */
+function signatureOf(sprite: Sprite, frameId: string): string {
+  const parts: string[] = [`${sprite.width}x${sprite.height}@${frameId}`];
+  for (const layer of sprite.layers) {
+    const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+    parts.push(
+      `${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.blendMode}:` +
+        `${cel ? `${cel.id}@${cel.x},${cel.y}#${celRevision(cel.id)}` : '-'}`,
+    );
+  }
+  return parts.join('|');
+}
+
+/** The cel's pixels on their own canvas, re-uploaded only when they changed. */
+function celCanvas(cel: Cel): HTMLCanvasElement | null {
+  const buf = getBuffer(cel.id);
+  if (!buf) return null;
+
+  const revision = celRevision(cel.id);
+  const cached = celCache.get(cel.id);
+  if (cached && cached.revision === revision) return cached.canvas;
+
+  const canvas = cached?.canvas ?? document.createElement('canvas');
+  if (canvas.width !== cel.width || canvas.height !== cel.height) {
+    canvas.width = cel.width;
+    canvas.height = cel.height;
+  }
+  // Fetched per call rather than cached: a stored context outlives canvas
+  // resizes and test doubles, and getting it again is cheap.
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, cel.width, cel.height);
+  ctx.putImageData(new ImageData(buf, cel.width, cel.height), 0, 0);
+
+  celCache.set(cel.id, { canvas, revision, width: cel.width, height: cel.height });
+  return canvas;
+}
+
+/** Forget cels the document no longer contains. */
+function pruneCelCache(sprite: Sprite): void {
+  if (celCache.size <= sprite.cels.length) return;
+  const live = new Set(sprite.cels.map((c) => c.id));
+  for (const id of celCache.keys()) {
+    if (!live.has(id)) celCache.delete(id);
+  }
+}
+
+function isDrawable(layer: Layer): boolean {
+  return layer.visible && layer.opacity > 0;
 }
 
 export function drawCheckerboard(
@@ -76,34 +161,34 @@ export function drawCheckerboard(
  */
 export function compositeSprite(sprite: Sprite, frameId: string): HTMLCanvasElement {
   const canvas = getScratch(sprite.width, sprite.height);
-  const ctx = canvas.getContext('2d')!;
+
+  const signature = signatureOf(sprite, frameId);
+  if (signature === compositeSignature) return canvas;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
   ctx.clearRect(0, 0, sprite.width, sprite.height);
 
   for (const layer of sprite.layers) {
-    if (!layer.visible || layer.opacity === 0) continue;
+    if (!isDrawable(layer)) continue;
 
     const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
     if (!cel) continue;
 
-    const buf = getBuffer(cel.id);
-    if (!buf) continue;
+    const source = celCanvas(cel);
+    if (!source) continue;
 
-    const img = new ImageData(buf, cel.width, cel.height);
-
-    if (layer.opacity >= 1) {
-      ctx.putImageData(img, cel.x, cel.y);
-    } else {
-      // putImageData ignores globalAlpha, so route through a temp canvas.
-      const tmp = document.createElement('canvas');
-      tmp.width = cel.width;
-      tmp.height = cel.height;
-      tmp.getContext('2d')!.putImageData(img, 0, 0);
-      ctx.globalAlpha = layer.opacity;
-      ctx.drawImage(tmp, cel.x, cel.y);
-      ctx.globalAlpha = 1;
-    }
+    // `putImageData` ignores `globalAlpha`, so layer opacity has to come from
+    // `drawImage` off the cel's own canvas. Straight alpha is preserved:
+    // Canvas2D's source-over on unassociated ImageData is what we want, and no
+    // premultiplication is introduced anywhere on this path.
+    ctx.globalAlpha = layer.opacity;
+    ctx.drawImage(source, cel.x, cel.y);
+    ctx.globalAlpha = 1;
   }
 
+  pruneCelCache(sprite);
+  compositeSignature = signature;
   return canvas;
 }
 

@@ -29,14 +29,14 @@ export class PixelDeltaCommand implements Command {
     const buf = getBuffer(this.delta.celId);
     if (!buf) return;
     blitRegion(buf, this.celWidth, this.delta.rect, this.delta.after);
-    doc.touch();
+    doc.touch(this.delta.celId);
   }
 
   invert(doc: DocumentApi): void {
     const buf = getBuffer(this.delta.celId);
     if (!buf) return;
     blitRegion(buf, this.celWidth, this.delta.rect, this.delta.before);
-    doc.touch();
+    doc.touch(this.delta.celId);
   }
 
   coalesceWith(next: Command): Command | null {

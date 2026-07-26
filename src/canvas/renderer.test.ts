@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { allocateBuffer, clearAllBuffers, setPixel } from '../model/pixelBuffers';
+import {
+  allocateBuffer,
+  bumpCelRevision,
+  clearAllBuffers,
+  getBuffer,
+  setPixel,
+} from '../model/pixelBuffers';
 import type { Sprite } from '../model/types';
-import { drawCheckerboard, drawGrid, drawSprite } from './renderer';
+import { drawCheckerboard, drawGrid, drawSprite, invalidateRenderCache } from './renderer';
 
 /**
  * jsdom has no 2D context and no `ImageData`, so the renderer is exercised
@@ -95,6 +101,9 @@ function makeSprite(width: number, height: number): Sprite {
 
 beforeEach(() => {
   clearAllBuffers();
+  // The renderer caches across calls by design; every test here starts from a
+  // cold cache so it measures its own work, not the previous test's.
+  invalidateRenderCache();
 });
 
 describe('drawSprite', () => {
@@ -174,6 +183,74 @@ describe('drawSprite', () => {
     const put = contexts.flatMap((c) => c.calls).find((c) => c.fn === 'putImageData');
     const image = put!.args[0] as FakeImageData;
     expect(Array.from(image.data.slice(0, 4))).toEqual([255, 0, 0, 128]);
+  });
+});
+
+describe('dirty-layer caching', () => {
+  it('does not re-upload anything when nothing changed', () => {
+    // Pan, zoom, grid toggling and cursor movement all force a redraw while
+    // the artwork is untouched. Those redraws must cost a blit, not an upload.
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(16, 16);
+    const ctx = stubContext();
+    const vp = { zoom: 4, panX: 0, panY: 0 };
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    const afterFirst = contexts
+      .flatMap((c) => c.calls)
+      .filter((c) => c.fn === 'putImageData').length;
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', { ...vp, panX: 40 });
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', { ...vp, zoom: 32 });
+
+    expect(afterFirst).toBe(1);
+    expect(contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData')).toHaveLength(1);
+    // The blit still happens every time — the frame is still drawn.
+    expect(ctx.calls.filter((c) => c.fn === 'drawImage')).toHaveLength(3);
+  });
+
+  it('re-uploads only the cel whose pixels changed', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(8, 8);
+    // A second layer, so there is something that must *not* be re-uploaded.
+    allocateBuffer('cel2', 8, 8);
+    sprite.layers.push({ ...sprite.layers[0], id: 'l2', name: 'Layer 2' });
+    sprite.cels.push({ id: 'cel2', layerId: 'l2', frameId: 'f1', x: 0, y: 0, width: 8, height: 8 });
+
+    const ctx = stubContext();
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+      zoom: 4,
+      panX: 0,
+      panY: 0,
+    });
+    expect(contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData')).toHaveLength(2);
+
+    // Edit one cel and redraw.
+    setPixel(getBuffer('cel2')!, 8, 8, 1, 1, [1, 2, 3, 255]);
+    bumpCelRevision('cel2');
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+      zoom: 4,
+      panX: 0,
+      panY: 0,
+    });
+
+    // Three uploads total: two cold, one for the cel that changed.
+    expect(contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData')).toHaveLength(3);
+  });
+
+  it('recomposites when a layer property changes without any pixel changing', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(8, 8);
+    const ctx = stubContext();
+    const vp = { zoom: 4, panX: 0, panY: 0 };
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    const scratchCalls = () => contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'drawImage');
+    const before = scratchCalls().length;
+
+    sprite.layers[0].opacity = 0.5;
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    expect(scratchCalls().length).toBeGreaterThan(before);
   });
 });
 
