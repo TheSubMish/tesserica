@@ -1,5 +1,5 @@
 /**
- * Canvas viewport: pan and zoom over the document.
+ * Canvas viewport: pan, zoom, and pointer routing to the active tool.
  *
  * Redraws are driven by `revision` from the document store rather than by React
  * re-rendering on pixel data — the pixels never enter React state
@@ -7,8 +7,11 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { getBuffer } from '../model/pixelBuffers';
 import { useDocumentStore } from '../state/documentStore';
+import { useToolStore } from '../state/toolStore';
 import { GRID_AUTO_ZOOM, useUIStore } from '../state/uiStore';
+import { getTool } from '../tools/registry';
 import { centerPan, fitZoom, screenToDoc } from './coords';
 import { drawBorder, drawCheckerboard, drawCursorCell, drawGrid, drawSprite } from './renderer';
 
@@ -21,8 +24,10 @@ export function CanvasView() {
 
   // Interaction state kept in refs — it changes per pointer event and must not
   // trigger React renders.
+  const drawing = useRef(false);
   const panning = useRef(false);
   const spaceHeld = useRef(false);
+  const last = useRef({ x: 0, y: 0 });
   const lastScreen = useRef({ x: 0, y: 0 });
 
   const sprite = useDocumentStore((s) => s.sprite);
@@ -34,6 +39,8 @@ export function CanvasView() {
   const panY = useUIStore((s) => s.panY);
   const showGrid = useUIStore((s) => s.showGrid);
   const cursor = useUIStore((s) => s.cursor);
+
+  const brushSize = useToolStore((s) => s.brushSize);
 
   /** Center the sprite on first mount. */
   useLayoutEffect(() => {
@@ -96,20 +103,64 @@ export function CanvasView() {
     if (showGrid && zoom >= GRID_AUTO_ZOOM) drawGrid(ctx, sprite, vp);
     drawBorder(ctx, sprite, vp);
     if (cursor && !panning.current) {
-      drawCursorCell(ctx, vp, cursor.x, cursor.y, 1);
+      drawCursorCell(ctx, vp, cursor.x, cursor.y, brushSize);
     }
-  }, [sprite, activeFrameId, revision, zoom, panX, panY, showGrid, cursor]);
+  }, [sprite, activeFrameId, revision, zoom, panX, panY, showGrid, cursor, brushSize]);
 
-  const onPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    lastScreen.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  /** Apply the active tool to the active cel. */
+  const paint = useCallback(
+    (x: number, y: number, prevX: number, prevY: number, down: boolean, button: number) => {
+      const doc = useDocumentStore.getState();
+      const layer = doc.sprite.layers.find((l) => l.id === doc.activeLayerId);
+      if (!layer || layer.locked || !layer.visible) return;
 
-    // Middle-drag or space-drag pans from any tool (docs/05-ui-design.md §7.1).
-    if (e.button === 1 || spaceHeld.current) {
-      panning.current = true;
+      const cel = doc.activeCel();
+      if (!cel) return;
+      const buffer = getBuffer(cel.id);
+      if (!buffer) return;
+
+      const toolState = useToolStore.getState();
+      const tool = getTool(toolState.activeTool);
+      const ctx = {
+        buffer,
+        width: cel.width,
+        height: cel.height,
+        primary: toolState.primary,
+        secondary: toolState.secondary,
+        brushSize: toolState.brushSize,
+        button,
+      };
+
+      if (down) tool.onPointerDown(ctx, x, y);
+      else tool.onPointerMove(ctx, x, y, prevX, prevY);
+
+      doc.touch();
+    },
+    [],
+  );
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      lastScreen.current = { x: sx, y: sy };
+
+      // Middle-drag or space-drag pans from any tool (docs/05-ui-design.md §7.1).
+      if (e.button === 1 || spaceHeld.current) {
+        panning.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      const { x, y } = screenToDoc(useUIStore.getState(), sx, sy);
+      drawing.current = true;
+      last.current = { x, y };
       e.currentTarget.setPointerCapture(e.pointerId);
-    }
-  }, []);
+      paint(x, y, x, y, true, e.button);
+    },
+    [paint],
+  );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -129,11 +180,22 @@ export function CanvasView() {
       const { x, y } = screenToDoc(useUIStore.getState(), sx, sy);
       const inBounds = x >= 0 && y >= 0 && x < sprite.width && y < sprite.height;
       useUIStore.getState().setCursor(inBounds ? { x, y } : null);
+
+      if (drawing.current) {
+        // Pointer events fire every few milliseconds, so a fast drag reports
+        // positions many pixels apart; the tool interpolates between them.
+        const prev = last.current;
+        if (prev.x !== x || prev.y !== y) {
+          paint(x, y, prev.x, prev.y, false, e.buttons === 2 ? 2 : 0);
+          last.current = { x, y };
+        }
+      }
     },
-    [sprite.width, sprite.height],
+    [paint, sprite.width, sprite.height],
   );
 
   const endStroke = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    drawing.current = false;
     panning.current = false;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
   }, []);

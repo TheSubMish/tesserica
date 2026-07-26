@@ -89,8 +89,79 @@ body {
 
 .body {
   display: grid;
-  grid-template-columns: 1fr 220px;
+  grid-template-columns: 44px 1fr 220px;
   min-height: 0;
+}
+
+/* ---- Tool rail ---- */
+
+.tool-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  align-items: center;
+}
+
+.tool-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  position: relative;
+}
+
+.tool-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+/* State is never encoded in colour alone — active gets a bar too
+   (docs/05-ui-design.md §8). */
+.tool-btn[aria-pressed='true'] {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.tool-btn[aria-pressed='true']::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.tool-btn:focus-visible,
+.swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rail-sep {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: var(--space-1) 0;
+}
+
+.swatch {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
 }
 
 /* ---- Canvas ---- */
@@ -199,6 +270,28 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.field input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.field .value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  min-width: 28px;
+  text-align: right;
 }
 
 /* ---- Status bar ---- */

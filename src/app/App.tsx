@@ -1,10 +1,13 @@
 import { CanvasView } from '../canvas/CanvasView';
 import { LayerPanel } from '../panels/LayerPanel';
 import { StatusBar } from '../panels/StatusBar';
+import { ToolRail } from '../panels/ToolRail';
 import { useUIStore } from '../state/uiStore';
+import { useShortcuts } from './shortcuts';
 
 export function App() {
   const mode = useUIStore((s) => s.mode);
+  useShortcuts();
 
   return (
     <div className="app">
@@ -34,6 +37,7 @@ export function App() {
       </header>
 
       <div className="body">
+        <ToolRail />
         <CanvasView />
         <aside className="panels">
           <LayerPanel />

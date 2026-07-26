@@ -1,4 +1,5 @@
 import { useDocumentStore } from '../state/documentStore';
+import { useToolStore } from '../state/toolStore';
 import { useUIStore } from '../state/uiStore';
 
 export function StatusBar() {
@@ -8,11 +9,17 @@ export function StatusBar() {
 
   const zoom = useUIStore((s) => s.zoom);
   const cursor = useUIStore((s) => s.cursor);
+  const tool = useToolStore((s) => s.activeTool);
+  const brushSize = useToolStore((s) => s.brushSize);
 
   return (
     <footer className="statusbar">
       <span>
         {sprite.width}×{sprite.height}
+      </span>
+      <span className="sep">·</span>
+      <span>
+        {tool} {brushSize}px
       </span>
       <span className="sep">·</span>
       <span>{layerName}</span>

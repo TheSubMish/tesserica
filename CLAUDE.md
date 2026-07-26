@@ -4,13 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-**Pre-implementation.** As of 2026-07-26 this repo contains `docs/`, `CLAUDE.md` and
-`LICENSE` — no application code. There is no `package.json`, no `src/`, and no
-`src-tauri/`. Git is initialized on `main`.
+**Phase 0 complete** (2026-07-26). The Tauri v2 + React + TS + Vite app is scaffolded,
+the tooling is wired (prettier, eslint, rustfmt, clippy, vitest, pre-commit hook), and
+the app opens a window in which you can draw with a pencil on a checkerboard-backed
+canvas and zoom in. That is the whole of Phase 0's exit criterion — nothing else works.
 
-Phase 0 of `docs/08-roadmap.md` is scaffolding the Tauri app. Until that lands, **the
-build/test commands below do not exist yet** — do not run them expecting them to work,
-and do not tell the user they passed.
+The commands in "Commands" below all run. `src/pipeline/` and `src-tauri/src/pipeline/`
+do **not** exist yet; they arrive in Phase 2, and `npm run test:golden` reports todos
+until they do.
+
+Next up is Phase 1 (editor core) in `docs/08-roadmap.md`.
 
 ## The docs are the source of truth
 
