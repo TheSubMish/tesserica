@@ -8,7 +8,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getBuffer } from '../model/pixelBuffers';
+import { beginStroke, finishStroke, type StrokeSnapshot } from '../history/strokeRecorder';
 import { useDocumentStore } from '../state/documentStore';
+import { useHistoryStore } from '../state/historyStore';
 import { useToolStore } from '../state/toolStore';
 import { GRID_AUTO_ZOOM, useUIStore } from '../state/uiStore';
 import { getTool } from '../tools/registry';
@@ -29,6 +31,9 @@ export function CanvasView() {
   const spaceHeld = useRef(false);
   const last = useRef({ x: 0, y: 0 });
   const lastScreen = useRef({ x: 0, y: 0 });
+  /** Pointer-down copy of the active cel; becomes one undo step on release. */
+  const stroke = useRef<StrokeSnapshot | null>(null);
+  const strokeLabel = useRef('Edit');
 
   const sprite = useDocumentStore((s) => s.sprite);
   const activeFrameId = useDocumentStore((s) => s.activeFrameId);
@@ -131,13 +136,31 @@ export function CanvasView() {
         button,
       };
 
-      if (down) tool.onPointerDown(ctx, x, y);
-      else tool.onPointerMove(ctx, x, y, prevX, prevY);
+      if (down) {
+        // One copy per gesture. The dirty rect is diffed out of it on release
+        // (docs/03-data-model.md §6).
+        stroke.current = beginStroke(cel.id, buffer, cel.width, cel.height);
+        strokeLabel.current = tool.label;
+        tool.onPointerDown(ctx, x, y);
+      } else {
+        tool.onPointerMove(ctx, x, y, prevX, prevY);
+      }
 
       doc.touch();
     },
     [],
   );
+
+  /** Close the gesture and record it as a single undo step. */
+  const commitStroke = useCallback(() => {
+    const snapshot = stroke.current;
+    stroke.current = null;
+    if (!snapshot) return;
+    const buffer = getBuffer(snapshot.celId);
+    if (!buffer) return;
+    const cmd = finishStroke(snapshot, buffer, strokeLabel.current);
+    if (cmd) useHistoryStore.getState().push(cmd);
+  }, []);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -194,11 +217,15 @@ export function CanvasView() {
     [paint, sprite.width, sprite.height],
   );
 
-  const endStroke = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    drawing.current = false;
-    panning.current = false;
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
-  }, []);
+  const endStroke = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (drawing.current) commitStroke();
+      drawing.current = false;
+      panning.current = false;
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+    },
+    [commitStroke],
+  );
 
   /**
    * `Ctrl`+wheel zooms toward the cursor, plain wheel scrolls vertically,

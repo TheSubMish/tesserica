@@ -9,6 +9,7 @@ function colorFor(ctx: ToolContext) {
 
 export const pencil: Tool = {
   id: 'pencil',
+  label: 'Pencil',
   onPointerDown(ctx, x, y) {
     stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, colorFor(ctx));
   },
@@ -19,6 +20,7 @@ export const pencil: Tool = {
 
 export const eraser: Tool = {
   id: 'eraser',
+  label: 'Eraser',
   onPointerDown(ctx, x, y) {
     stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, TRANSPARENT);
   },

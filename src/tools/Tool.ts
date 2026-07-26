@@ -23,6 +23,8 @@ export interface ToolContext {
 
 export interface Tool {
   id: string;
+  /** Shown as the undo step name, e.g. "Pencil". */
+  label: string;
   onPointerDown(ctx: ToolContext, x: number, y: number): void;
   onPointerMove(ctx: ToolContext, x: number, y: number, prevX: number, prevY: number): void;
   onPointerUp?(ctx: ToolContext): void;

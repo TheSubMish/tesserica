@@ -4,6 +4,7 @@
  */
 
 import { useEffect } from 'react';
+import { useHistoryStore } from '../state/historyStore';
 import { useToolStore } from '../state/toolStore';
 import { useUIStore } from '../state/uiStore';
 
@@ -12,6 +13,23 @@ export function useShortcuts(): void {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+
+      // `Ctrl+Z` is global (docs/05-ui-design.md §7.7). Handled before the
+      // modifier bail-out below.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z' && !e.shiftKey) {
+          useHistoryStore.getState().undo();
+          e.preventDefault();
+          return;
+        }
+        if ((key === 'z' && e.shiftKey) || key === 'y') {
+          useHistoryStore.getState().redo();
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       const tools = useToolStore.getState();
