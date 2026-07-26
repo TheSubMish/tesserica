@@ -21,21 +21,30 @@ No blockers for Tauri v2 on this machine.
 
 ## 2. Frontend dependencies
 
-| Package | Latest | Use |
-|---|---|---|
-| `@tauri-apps/api` | 2.11.1 | IPC, dialogs, fs |
-| `@tauri-apps/cli` | 2.11.4 | dev/build tooling |
-| `react` / `react-dom` | 19.2.8 | UI |
-| `vite` | 8.1.5 | bundler / dev server |
-| `typescript` | 7.0.2 | types |
-| `zustand` | 5.0.14 | state (`02-architecture.md` §4) |
+| Package | Latest | Installed (Phase 0) | Use |
+|---|---|---|---|
+| `@tauri-apps/api` | 2.11.1 | 2.11.1 | IPC, dialogs, fs |
+| `@tauri-apps/cli` | 2.11.4 | 2.11.4 | dev/build tooling |
+| `react` / `react-dom` | 19.2.8 | 19.2.8 | UI |
+| `vite` | 8.1.5 | 8.1.5 | bundler / dev server |
+| `typescript` | 7.0.2 | **5.8.3** ⚠️ | types |
+| `zustand` | 5.0.14 | 5.0.14 | state (`02-architecture.md` §4) |
 
 > ⚠️ **TypeScript 7.0 is the native (Go) compiler port.** Substantially faster, but new.
 > If tooling friction appears, pinning to the latest 5.x is a legitimate fallback — this
 > is not a load-bearing choice.
+>
+> **Phase 0 took that fallback.** `typescript-eslint@8.65.0` declares
+> `peerDependencies.typescript: ">=4.8.4 <6.1.0"`, so TS 7 cannot be linted. Since the
+> lint gate is worth more than compiler speed at this size, the project is pinned to
+> `typescript@~5.8.3`. Revisit when `typescript-eslint` supports 7.x.
 
 > ⚠️ **Vite 8 and React 19** are both current majors. Verify the Tauri v2 template
 > targets them before assuming; the official template may lag.
+>
+> It did: `create-tauri-app` scaffolds `vite@^7` / `@vitejs/plugin-react@^4`. Phase 0
+> upgraded to `vite@8.1.5` + `@vitejs/plugin-react@6.0.4` (which peers on `vite@^8`) and
+> re-verified `tauri dev` and `tauri build` on Linux afterwards.
 
 **Deliberately not using:**
 
