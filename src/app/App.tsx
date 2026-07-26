@@ -1,14 +1,42 @@
-/**
- * Application root.
- *
- * Scaffold only at this point — the app shell, design tokens and mode switcher
- * are the next item in Phase 0 (`docs/08-roadmap.md`).
- */
+import { useUIStore } from '../state/uiStore';
+
 export function App() {
+  const mode = useUIStore((s) => s.mode);
+
   return (
-    <main>
-      <h1>Tesserica</h1>
-      <p>Tauri v2 + React + TypeScript + Vite scaffold.</p>
-    </main>
+    <div className="app">
+      <header className="titlebar">
+        <span className="wordmark">Tesserica</span>
+        {/* Two modes, not three — D6/D7. Convert lands in Phase 2, so both
+            tabs are inert for now (docs/08-roadmap.md Phase 0). */}
+        <div className="modes" role="tablist" aria-label="Mode">
+          <button
+            className="mode-tab"
+            role="tab"
+            aria-selected={mode === 'convert'}
+            disabled
+            title="Convert mode arrives in Phase 2"
+          >
+            Convert
+          </button>
+          <button
+            className="mode-tab"
+            role="tab"
+            aria-selected={mode === 'edit'}
+            onClick={() => useUIStore.getState().setMode('edit')}
+          >
+            Edit
+          </button>
+        </div>
+      </header>
+
+      <div className="body">
+        <div className="placeholder">
+          The canvas viewport is the next item in Phase 0.
+          <br />
+          See docs/08-roadmap.md.
+        </div>
+      </div>
+    </div>
   );
 }

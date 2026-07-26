@@ -19,7 +19,7 @@ the app in a state where nothing works until the next phase lands.
 
 - [x] Scaffold Tauri v2 + React + TS + Vite; verify `tauri dev` and `tauri build` on Linux
 - [x] Repo layout per `07-tech-stack.md` §4; formatters, linters, pre-commit
-- [ ] Design tokens (`05-ui-design.md` §6.2), app shell, mode switcher (tabs inert)
+- [x] Design tokens (`05-ui-design.md` §6.2), app shell, mode switcher (tabs inert)
 - [ ] Canvas viewport: pan, zoom, nearest-neighbour, checkerboard, grid overlay
 - [ ] `documentStore` with a single raster layer
 - [ ] Pencil tool → visible pixels
