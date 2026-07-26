@@ -1,5 +1,6 @@
 import { CanvasView } from '../canvas/CanvasView';
 import { LayerPanel } from '../panels/LayerPanel';
+import { PalettePanel } from '../panels/PalettePanel';
 import { StatusBar } from '../panels/StatusBar';
 import { ToolOptions } from '../panels/ToolOptions';
 import { ToolRail } from '../panels/ToolRail';
@@ -43,6 +44,7 @@ export function App() {
         <aside className="panels">
           <ToolOptions />
           <LayerPanel />
+          <PalettePanel />
         </aside>
       </div>
 

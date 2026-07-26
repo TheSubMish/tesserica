@@ -36,7 +36,7 @@ the app in a state where nothing works until the next phase lands.
 - [x] Tools: pencil (pixel-perfect), eraser, fill, line, rect, ellipse, eyedropper
 - [x] Layers: add/delete/reorder/rename/opacity/visibility/lock; normal blend
 - [x] Layer panel; compositing renderer with dirty-layer caching
-- [ ] Palette panel; built-in hardware palettes
+- [x] Palette panel; built-in hardware palettes
 - [ ] Palette import: `.hex`, `.gpl`, `.pal`, Paint.net `.txt` (`03` §3)
 - [ ] Export PNG at integer scales
 - [ ] `.tess` save/load (`03` §7)

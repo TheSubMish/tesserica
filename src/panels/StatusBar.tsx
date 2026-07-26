@@ -1,4 +1,5 @@
 import { useDocumentStore } from '../state/documentStore';
+import { usePaletteStore } from '../state/paletteStore';
 import { useToolStore } from '../state/toolStore';
 import { useUIStore } from '../state/uiStore';
 
@@ -6,6 +7,10 @@ export function StatusBar() {
   const sprite = useDocumentStore((s) => s.sprite);
   const activeLayerId = useDocumentStore((s) => s.activeLayerId);
   const layerName = sprite.layers.find((l) => l.id === activeLayerId)?.name ?? '—';
+
+  const palettes = usePaletteStore((s) => s.palettes);
+  const activePaletteId = usePaletteStore((s) => s.activePaletteId);
+  const palette = palettes.find((p) => p.id === activePaletteId);
 
   const zoom = useUIStore((s) => s.zoom);
   const cursor = useUIStore((s) => s.cursor);
@@ -21,6 +26,8 @@ export function StatusBar() {
       <span>
         {tool} {brushSize}px
       </span>
+      <span className="sep">·</span>
+      <span>{palette ? `${palette.name} (${palette.colors.length})` : '—'}</span>
       <span className="sep">·</span>
       <span>{layerName}</span>
       <span className="sep">·</span>

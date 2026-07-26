@@ -54,6 +54,19 @@ export interface Cel {
   height: number;
 }
 
+/**
+ * `docs/03-data-model.md` §3.
+ *
+ * D9: v1 is RGBA only, so a palette is a *swatch list* — nothing indexes into
+ * it. Indexed mode and live palette swapping are Phase 7.
+ */
+export interface Palette {
+  id: string;
+  name: string;
+  colors: RGBA[];
+  source?: { kind: 'builtin' | 'lospec' | 'file' | 'custom'; ref?: string };
+}
+
 export interface Sprite {
   width: number;
   height: number;

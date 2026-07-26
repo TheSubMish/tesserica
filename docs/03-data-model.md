@@ -154,8 +154,15 @@ interface Palette {
 }
 ```
 
-**Built-ins for v1:** Game Boy (4), PICO-8 (16), NES (54), CGA (16), Sweetie-16 (16),
-Dawnbringer-16 / -32, Commodore 64 (16), ZX Spectrum (15), plus grayscale ramps.
+**Built-ins for v1 — hardware palettes only:** Game Boy (4), NES (55), CGA (16),
+Commodore 64 (16), ZX Spectrum (15), plus grayscale ramps (4/8/16).
+
+> Earlier drafts of this section also listed PICO-8, Sweetie-16 and Dawnbringer-16/-32.
+> Those are **authored** palettes, and bundling them contradicts `07-tech-stack.md` §8,
+> which permits only factual hardware colour lists. They are removed from the built-in
+> set; users import them with the parsers below. Counts are after de-duplication — the
+> NES PPU has 64 register values but only 55 distinct colours (nine of them are black),
+> and the ZX Spectrum's two blacks are identical.
 
 **Import formats** (all four unlock the ~4,400-palette Lospec catalog):
 

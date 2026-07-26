@@ -341,6 +341,49 @@ body {
   font-size: 11px;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- Palette ---- */
+
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(24px, 1fr));
+  gap: 2px;
+  padding: 0 var(--space-2) var(--space-2);
+  overflow-y: auto;
+  max-height: 220px;
+}
+
+.palette-swatch {
+  /* Docs §8: all targets ≥24×24, even in dense grids. */
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.palette-swatch[aria-pressed='true'] {
+  /* State is a ring and an outline, never colour alone — the swatch's own
+     colour is already carrying meaning. */
+  outline: 2px solid var(--text);
+  outline-offset: -3px;
+  border-color: var(--text);
+}
+
+.palette-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ---- Status bar ---- */
 
 .statusbar {
