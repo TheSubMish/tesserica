@@ -171,7 +171,12 @@ Commodore 64 (16), ZX Spectrum (15), plus grayscale ramps (4/8/16).
 | Plain hex | `.hex` | One `RRGGBB` per line. Trivial. |
 | GIMP | `.gpl` | `GIMP Palette` header, then `R G B  Name` rows |
 | JASC | `.pal` | `JASC-PAL\n0100\n<count>` then `R G B` rows |
+| RIFF | `.pal` | binary `RIFF…PAL data`; sniffed by magic, since `.pal` is two unrelated formats |
 | Paint.net | `.txt` | `AARRGGBB` per line, `;` comments |
+
+**Byte order is the trap.** `.hex` puts alpha *last* (`RRGGBBAA`) when it carries alpha at
+all; Paint.NET puts it *first* (`AARRGGBB`). Getting that backwards produces a palette of
+nearly-transparent colours and no error at all, so both orderings are pinned by tests.
 
 **Indexed color mode** stores palette indices instead of RGBA. Palette swapping becomes
 free — recolor a whole character by swapping the palette, which is exactly how retro

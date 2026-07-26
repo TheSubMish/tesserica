@@ -350,6 +350,10 @@ body {
   white-space: nowrap;
 }
 
+.hint.error {
+  color: var(--danger);
+}
+
 /* ---- Palette ---- */
 
 .swatch-grid {

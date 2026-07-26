@@ -37,7 +37,7 @@ the app in a state where nothing works until the next phase lands.
 - [x] Layers: add/delete/reorder/rename/opacity/visibility/lock; normal blend
 - [x] Layer panel; compositing renderer with dirty-layer caching
 - [x] Palette panel; built-in hardware palettes
-- [ ] Palette import: `.hex`, `.gpl`, `.pal`, Paint.net `.txt` (`03` §3)
+- [x] Palette import: `.hex`, `.gpl`, `.pal`, Paint.net `.txt` (`03` §3)
 - [ ] Export PNG at integer scales
 - [ ] `.tess` save/load (`03` §7)
 
