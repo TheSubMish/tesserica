@@ -19,6 +19,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+thiserror = "2.0.19"
+tauri-plugin-dialog = "2.7.2"
 
 # Image pipeline dependencies are added in Phase 2 (see docs/08-roadmap.md).
 # Note: the `palette` crate is deliberately NOT used — Oklab is hand-rolled in

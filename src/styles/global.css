@@ -424,3 +424,148 @@ body {
     transition: none !important;
   }
 }
+
+/* ---- File menu ---- */
+
+.file-menu {
+  position: relative;
+}
+
+.menu-trigger {
+  width: 28px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.menu-trigger:hover,
+.menu-trigger[aria-expanded='true'] {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.menu-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  padding: var(--space-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+}
+
+.menu-popover button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.menu-popover button:hover {
+  background: var(--accent-muted);
+}
+
+.menu-key {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ---- Modal ---- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 55%);
+}
+
+.modal {
+  min-width: 320px;
+  max-width: 480px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
+}
+
+.modal .panel-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.scale-row {
+  display: flex;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3) var(--space-2) 0;
+  border: 0;
+}
+
+.scale-btn {
+  flex: 1;
+  height: var(--control-h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.scale-btn[aria-pressed='true'] {
+  /* State is a border and a label weight, not colour alone (docs §8). */
+  border-color: var(--accent);
+  background: var(--accent-muted);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.modal-actions button {
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.modal-actions button.primary {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.modal-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
