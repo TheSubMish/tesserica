@@ -1,0 +1,101 @@
+# Open Questions
+
+> Status: **most questions resolved 2026-07-26** · See `10-decisions.md` for locked decisions.
+>
+> This file now tracks **only what is still genuinely undecided.** Everything else moved
+> to the decision log.
+
+---
+
+## Resolved — see `10-decisions.md`
+
+| Was | Now | Decision |
+|---|---|---|
+| Q1 Product name | **Tesserica** | D1 |
+| Q2 License | **MIT** | D2 |
+| Q3 Git repository | ✅ initialized | — |
+| — File extension | **`.tess`** | D3 |
+| — Build order | **Editor first** | D4 |
+| — Target platforms | **Linux only for now** | D5 |
+| Q4 Convert: mode or dialog | **Top-level mode** | D6 |
+| Q5 Animate: mode or panel | **Panel inside Edit** | D7 |
+| Q6 Oklab: hand-roll or crate | **Hand-roll both** | D10 |
+| Q11 Generative AI | **Never** | D8 |
+| Q12 Aseprite export | **Import only** | D11 |
+| — Color mode | **RGBA only in v1** | D9 |
+
+---
+
+## Still open — needs measurement, not preference
+
+These four are deliberately deferred. Each is scheduled against a phase where the
+information needed to decide will actually exist. **Do not resolve them by intuition.**
+
+### Q7 · How do hand-drawn editor layers cross IPC on export?
+
+**Decide in Phase 2.**
+
+Source images stay in Rust (`02-architecture.md` §6.2), but layers the user drew by hand
+live in the frontend and must reach Rust on export.
+
+Options: custom Tauri URI protocol · Tauri v2 Channels · temp file handoff.
+
+**Method:** benchmark all three with a realistic payload — 10 layers × 512×512 ≈ 10 MB.
+This is exactly the kind of question where the obvious answer is often wrong, and it sits
+directly on the architecture's main risk (IPC serialization cost).
+
+### Q8 · Canvas2D or WebGL2 renderer?
+
+**Decide in Phase 4.**
+
+Canvas2D is the starting point (`02-architecture.md` §7). Revisit with real measurements.
+
+**Likely triggers for switching:** blend modes (Canvas2D `globalCompositeOperation` does
+not cover all of them, and manual per-pixel blending in JS is slow) and animation playback
+dropping frames.
+
+### Q9 · ONNX Runtime size vs installer budget
+
+**Decide in Phase 5.**
+
+The native runtime (~10–15 MB) likely breaks the 20 MB budget on its own
+(`07-tech-stack.md` §6).
+
+Options: download runtime + model on first use · ship lite and full builds · raise the
+budget to ~40 MB.
+
+**Leaning:** download on first use — consistent with local-first (nothing over the
+network unless asked), and background removal is inherently opt-in.
+
+### Q10 · Which segmentation model ships by default?
+
+**Decide in Phase 5.**
+
+`u2netp` (4.7 MB) vs `isnet-general-use` (170 MB).
+
+**Method:** benchmark both *on 64×64 pixel-art output*, not on full-resolution mattes.
+The insight in `04-image-pipeline.md` §8.4 is that downscaling 60× and snapping alpha to
+1-bit hides most mask imperfection — wispy hair edges simply do not survive to the output.
+**The small model may be indistinguishable, in which case we skip the download entirely.**
+
+⚠️ **License check is mandatory before bundling any model.** U2-Net is Apache-2.0 (safe);
+BRIA RMBG is non-commercial only (never bundle).
+
+---
+
+## Deferred past v2
+
+### Q13 · Plugin / scripting API
+
+Both Pixelorama (custom effects) and Aseprite (Lua) have one.
+
+Not before v2. **Keep the effect system data-driven** (`03-data-model.md` §5) so it stays
+a natural extension point rather than a rewrite.
+
+Note that D8 (no generative AI) means no plugin seam is needed in Convert mode — this
+question is only about the *editor's* effect system.
+
+### Panel docking behaviour
+
+Floating vs docked panels, and whether panels should be detachable into separate windows
+at all. Lower stakes given the Linux-only target (D5). Decide during Phase 3 polish.
