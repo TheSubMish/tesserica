@@ -41,7 +41,19 @@ the app in a state where nothing works until the next phase lands.
 - [x] Export PNG at integer scales
 - [x] `.tess` save/load (`03` §7)
 
-**Exit:** ✅ **W2 complete.** A usable, if basic, pixel editor.
+**Exit:** ⚠️ **W2 all but complete.** A usable, if basic, pixel editor: draw with seven
+tools, stack and reorder layers, pick from bundled or imported palettes, undo a whole
+drag in one step, export PNG at 1×/2×/4×/8×, and save and reopen a `.tess`.
+
+Two steps of W2 (`06-workflows.md`) are **not** covered by the checklist above, and were
+therefore not built:
+
+- **`Ctrl+N` → New sprite dialog** (W2 step 1). The app boots a fixed 64×64 document and
+  offers no way to create another or change its size. No checklist item covers it; it is
+  small and belongs at the head of Phase 3.
+- **`multiply` on the shading layer** (W2 step 4) needs blend modes beyond normal, which
+  the roadmap itself schedules for **Phase 3**. W2 as written in `06-workflows.md` cannot
+  complete before that phase; the two documents disagree and Phase 3 is the correct one.
 
 ---
 

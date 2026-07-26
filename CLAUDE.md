@@ -4,16 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-**Phase 0 complete** (2026-07-26). The Tauri v2 + React + TS + Vite app is scaffolded,
-the tooling is wired (prettier, eslint, rustfmt, clippy, vitest, pre-commit hook), and
-the app opens a window in which you can draw with a pencil on a checkerboard-backed
-canvas and zoom in. That is the whole of Phase 0's exit criterion — nothing else works.
+**Phases 0 and 1 complete** (2026-07-26). All eight Phase 1 checkboxes in
+`docs/08-roadmap.md` are ticked. What works end to end:
+
+- **Undo/redo** — command pattern with dirty-rect deltas and coalescing. One drag is one
+  step; the dirty rect is diffed out of a single pointer-down snapshot of the cel.
+- **Tools** — pencil (pixel-perfect on by default), eraser, fill (contiguous + global),
+  line, rectangle, ellipse (midpoint), eyedropper. `Alt` eyedrops from any tool, `Escape`
+  cancels a gesture. Shape tools preview by drawing into the cel and restoring.
+- **Layers** — add / delete / reorder / rename / opacity / visibility / lock, all
+  undoable. Normal blend only.
+- **Rendering** — Canvas2D compositing with two cache levels: per-cel canvases, plus a
+  whole-composite signature so pan/zoom/cursor redraws cost only a blit.
+- **Palettes** — Game Boy, NES, CGA, C64, ZX Spectrum, grayscale ramps; import from
+  `.hex`, `.gpl`, `.pal` (JASC *and* RIFF), Paint.NET `.txt`.
+- **Export PNG** at 1×/2×/4×/8×, and **`.tess` save/load** with forward-compatible
+  preservation of unknown archive entries.
+
+**Two known gaps against workflow W2**, both recorded under the Phase 1 exit line in
+`docs/08-roadmap.md`: there is no `Ctrl+N` new-sprite dialog (the app boots a fixed 64×64
+document), and `multiply` needs blend modes the roadmap schedules for Phase 3.
 
 The commands in "Commands" below all run. `src/pipeline/` and `src-tauri/src/pipeline/`
 do **not** exist yet; they arrive in Phase 2, and `npm run test:golden` reports todos
 until they do.
 
-Next up is Phase 1 (editor core) in `docs/08-roadmap.md`.
+**Phase 1's Rust surface is small and worth knowing before extending it:**
+`src-tauri/src/staging.rs` is the only place pixels cross IPC — they ride the raw invoke
+body and everything afterwards refers to them by an integer handle. Q7 (custom protocol
+vs Channel vs temp file) is still open and is scheduled for a Phase 2 benchmark; that is
+why the transport lives behind one module.
+
+Next up is Phase 2 (conversion) in `docs/08-roadmap.md` — the highest-risk phase, where
+the dual pipeline implementation and the golden-parity guarantee both land.
 
 ## The docs are the source of truth
 
