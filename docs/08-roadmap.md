@@ -21,7 +21,7 @@ the app in a state where nothing works until the next phase lands.
 - [x] Repo layout per `07-tech-stack.md` §4; formatters, linters, pre-commit
 - [x] Design tokens (`05-ui-design.md` §6.2), app shell, mode switcher (tabs inert)
 - [x] Canvas viewport: pan, zoom, nearest-neighbour, checkerboard, grid overlay
-- [ ] `documentStore` with a single raster layer
+- [x] `documentStore` with a single raster layer
 - [ ] Pencil tool → visible pixels
 
 **Exit:** you can draw on a canvas and zoom in. Nothing else.

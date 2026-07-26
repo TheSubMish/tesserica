@@ -1,4 +1,5 @@
 import { CanvasView } from '../canvas/CanvasView';
+import { LayerPanel } from '../panels/LayerPanel';
 import { StatusBar } from '../panels/StatusBar';
 import { useUIStore } from '../state/uiStore';
 
@@ -34,6 +35,9 @@ export function App() {
 
       <div className="body">
         <CanvasView />
+        <aside className="panels">
+          <LayerPanel />
+        </aside>
       </div>
 
       <StatusBar />
