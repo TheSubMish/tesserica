@@ -1,3 +1,5 @@
+import { CanvasView } from '../canvas/CanvasView';
+import { StatusBar } from '../panels/StatusBar';
 import { useUIStore } from '../state/uiStore';
 
 export function App() {
@@ -31,12 +33,10 @@ export function App() {
       </header>
 
       <div className="body">
-        <div className="placeholder">
-          The canvas viewport is the next item in Phase 0.
-          <br />
-          See docs/08-roadmap.md.
-        </div>
+        <CanvasView />
       </div>
+
+      <StatusBar />
     </div>
   );
 }

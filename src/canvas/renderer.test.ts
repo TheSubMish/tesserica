@@ -1,0 +1,235 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { allocateBuffer, clearAllBuffers, setPixel } from '../model/pixelBuffers';
+import type { Sprite } from '../model/types';
+import { drawCheckerboard, drawGrid, drawSprite } from './renderer';
+
+/**
+ * jsdom has no 2D context and no `ImageData`, so the renderer is exercised
+ * against a recording stub. That is enough for what matters here: these tests
+ * are about *which calls* the renderer makes — nearest-neighbour scaling, a
+ * screen-space checkerboard, one grid line per document column — not about the
+ * pixels a real rasterizer would produce.
+ */
+
+interface Call {
+  fn: string;
+  args: unknown[];
+}
+
+function stubContext() {
+  const calls: Call[] = [];
+  const record =
+    (fn: string) =>
+    (...args: unknown[]) => {
+      calls.push({ fn, args });
+    };
+
+  const ctx = {
+    calls,
+    imageSmoothingEnabled: true,
+    globalAlpha: 1,
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    save: record('save'),
+    restore: record('restore'),
+    beginPath: record('beginPath'),
+    rect: record('rect'),
+    clip: record('clip'),
+    clearRect: record('clearRect'),
+    fillRect: record('fillRect'),
+    strokeRect: record('strokeRect'),
+    moveTo: record('moveTo'),
+    lineTo: record('lineTo'),
+    stroke: record('stroke'),
+    drawImage: record('drawImage'),
+    putImageData: record('putImageData'),
+  };
+  return ctx;
+}
+
+type StubContext = ReturnType<typeof stubContext>;
+
+/** Route every canvas the renderer creates internally to a stub context too. */
+function stubCanvasFactory() {
+  const contexts: StubContext[] = [];
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+    const ctx = stubContext();
+    contexts.push(ctx);
+    return ctx as unknown as CanvasRenderingContext2D;
+  });
+  return contexts;
+}
+
+class FakeImageData {
+  constructor(
+    readonly data: Uint8ClampedArray,
+    readonly width: number,
+    readonly height: number,
+  ) {}
+}
+
+const g = globalThis as { ImageData?: unknown };
+g.ImageData ??= FakeImageData;
+
+function makeSprite(width: number, height: number): Sprite {
+  allocateBuffer('cel', width, height);
+  return {
+    width,
+    height,
+    layers: [
+      {
+        id: 'l1',
+        kind: 'raster',
+        name: 'Layer 1',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: 'normal',
+      },
+    ],
+    frames: [{ id: 'f1', durationMs: 100 }],
+    cels: [{ id: 'cel', layerId: 'l1', frameId: 'f1', x: 0, y: 0, width, height }],
+  };
+}
+
+beforeEach(() => {
+  clearAllBuffers();
+});
+
+describe('drawSprite', () => {
+  it('disables image smoothing before blitting — nearest-neighbour is invariant 1', () => {
+    stubCanvasFactory();
+    const ctx = stubContext();
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, makeSprite(8, 8), 'f1', {
+      zoom: 16,
+      panX: 0,
+      panY: 0,
+    });
+    expect(ctx.imageSmoothingEnabled).toBe(false);
+  });
+
+  it('blits the composite at pan, scaled by an integer zoom', () => {
+    stubCanvasFactory();
+    const ctx = stubContext();
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, makeSprite(16, 12), 'f1', {
+      zoom: 8,
+      panX: 40,
+      panY: 25,
+    });
+
+    const blit = ctx.calls.filter((c) => c.fn === 'drawImage');
+    expect(blit).toHaveLength(1);
+    expect(blit[0].args.slice(1)).toEqual([40, 25, 128, 96]);
+  });
+
+  it('composites at document scale, so the cost does not grow with zoom', () => {
+    // 4096 source pixels get pushed whether the view is at 1x or 64x; only the
+    // final blit is zoom-sized.
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(64, 64);
+    const ctx = stubContext();
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+      zoom: 64,
+      panX: 0,
+      panY: 0,
+    });
+
+    const put = contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData');
+    expect(put).toHaveLength(1);
+    const image = put[0].args[0] as FakeImageData;
+    expect(image.width).toBe(64);
+    expect(image.height).toBe(64);
+  });
+
+  it('skips hidden layers', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(4, 4);
+    sprite.layers[0].visible = false;
+    const ctx = stubContext();
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+      zoom: 4,
+      panX: 0,
+      panY: 0,
+    });
+
+    expect(contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData')).toHaveLength(0);
+  });
+
+  it('passes the layer buffer through untouched — straight alpha, not premultiplied', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(2, 2);
+    const buf = allocateBuffer('cel', 2, 2);
+    setPixel(buf, 2, 2, 0, 0, [255, 0, 0, 128]);
+    const ctx = stubContext();
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+      zoom: 4,
+      panX: 0,
+      panY: 0,
+    });
+
+    const put = contexts.flatMap((c) => c.calls).find((c) => c.fn === 'putImageData');
+    const image = put!.args[0] as FakeImageData;
+    expect(Array.from(image.data.slice(0, 4))).toEqual([255, 0, 0, 128]);
+  });
+});
+
+describe('drawCheckerboard', () => {
+  it('uses fixed 8px screen-space squares (docs/05-ui-design.md §6.3)', () => {
+    const ctx = stubContext();
+    drawCheckerboard(ctx as unknown as CanvasRenderingContext2D, 0, 0, 32, 32);
+
+    // First fillRect is the background wash; the rest are the dark squares.
+    const squares = ctx.calls.filter((c) => c.fn === 'fillRect').slice(1);
+    expect(squares.length).toBeGreaterThan(0);
+    for (const s of squares) {
+      expect(s.args[2]).toBe(8);
+      expect(s.args[3]).toBe(8);
+    }
+  });
+
+  it('does not scale the squares with zoom', () => {
+    // A zoom-scaled checkerboard reads as artwork at high zoom, so the caller
+    // passes only the sprite's screen rect and the square size stays put.
+    const a = stubContext();
+    const b = stubContext();
+    drawCheckerboard(a as unknown as CanvasRenderingContext2D, 0, 0, 64, 64);
+    drawCheckerboard(b as unknown as CanvasRenderingContext2D, 0, 0, 64, 64);
+
+    const sizes = (c: StubContext) =>
+      new Set(
+        c.calls
+          .filter((x) => x.fn === 'fillRect')
+          .slice(1)
+          .map((x) => `${x.args[2]}`),
+      );
+    expect(sizes(a)).toEqual(new Set(['8']));
+    expect(sizes(b)).toEqual(new Set(['8']));
+  });
+});
+
+describe('drawGrid', () => {
+  it('draws one line per document column and row, plus the closing edge', () => {
+    const ctx = stubContext();
+    const sprite = makeSprite(4, 3);
+    drawGrid(ctx as unknown as CanvasRenderingContext2D, sprite, { zoom: 8, panX: 0, panY: 0 });
+
+    // 4 columns → 5 verticals, 3 rows → 4 horizontals.
+    expect(ctx.calls.filter((c) => c.fn === 'moveTo')).toHaveLength(9);
+  });
+
+  it('offsets strokes by half a pixel so 1px lines stay crisp', () => {
+    const ctx = stubContext();
+    drawGrid(ctx as unknown as CanvasRenderingContext2D, makeSprite(2, 2), {
+      zoom: 10,
+      panX: 3,
+      panY: 7,
+    });
+
+    const verticals = ctx.calls.filter((c) => c.fn === 'moveTo').slice(0, 3);
+    expect(verticals.map((c) => c.args[0])).toEqual([3.5, 13.5, 23.5]);
+  });
+});
