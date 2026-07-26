@@ -42,6 +42,21 @@ export function useShortcuts(): void {
         case 'e':
           tools.setTool('eraser');
           break;
+        case 'g':
+          tools.setTool('fill');
+          break;
+        case 'l':
+          tools.setTool('line');
+          break;
+        case 'u':
+          tools.setTool('rect');
+          break;
+        case 'o':
+          tools.setTool('ellipse');
+          break;
+        case 'i':
+          tools.setTool('eyedropper');
+          break;
         case 'x':
           tools.swapColors();
           break;

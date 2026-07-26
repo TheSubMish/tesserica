@@ -294,6 +294,26 @@ body {
   text-align: right;
 }
 
+.field.check {
+  cursor: pointer;
+}
+
+.field input[type='checkbox'] {
+  accent-color: var(--accent);
+  /* Docs §8: all targets ≥24×24. The label is part of the target, so the box
+     itself only has to carry its share. */
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.hint {
+  margin: 0;
+  padding: var(--space-2);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
 /* ---- Status bar ---- */
 
 .statusbar {

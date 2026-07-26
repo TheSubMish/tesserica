@@ -8,13 +8,20 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getBuffer } from '../model/pixelBuffers';
-import { beginStroke, finishStroke, type StrokeSnapshot } from '../history/strokeRecorder';
+import {
+  beginStroke,
+  finishStroke,
+  restoreStroke,
+  type StrokeSnapshot,
+} from '../history/strokeRecorder';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import { useToolStore } from '../state/toolStore';
 import { GRID_AUTO_ZOOM, useUIStore } from '../state/uiStore';
 import { getTool } from '../tools/registry';
+import type { ToolContext } from '../tools/Tool';
 import { centerPan, fitZoom, screenToDoc } from './coords';
+import { samplePixel } from './sample';
 import { drawBorder, drawCheckerboard, drawCursorCell, drawGrid, drawSprite } from './renderer';
 
 /** One wheel notch of vertical/horizontal scroll, in screen pixels. */
@@ -34,6 +41,10 @@ export function CanvasView() {
   /** Pointer-down copy of the active cel; becomes one undo step on release. */
   const stroke = useRef<StrokeSnapshot | null>(null);
   const strokeLabel = useRef('Edit');
+  /** Where the gesture started — shape tools drag out from here. */
+  const anchor = useRef({ x: 0, y: 0 });
+  /** Per-gesture tool scratch (the pencil's pixel-perfect trail). */
+  const strokeState = useRef<Record<string, unknown>>({});
 
   const sprite = useDocumentStore((s) => s.sprite);
   const activeFrameId = useDocumentStore((s) => s.activeFrameId);
@@ -114,19 +125,43 @@ export function CanvasView() {
 
   /** Apply the active tool to the active cel. */
   const paint = useCallback(
-    (x: number, y: number, prevX: number, prevY: number, down: boolean, button: number) => {
+    (
+      x: number,
+      y: number,
+      prevX: number,
+      prevY: number,
+      down: boolean,
+      button: number,
+      alt: boolean,
+    ) => {
       const doc = useDocumentStore.getState();
       const layer = doc.sprite.layers.find((l) => l.id === doc.activeLayerId);
-      if (!layer || layer.locked || !layer.visible) return;
+
+      const toolState = useToolStore.getState();
+      // `Alt` picks a colour from any painting tool (docs/05-ui-design.md
+      // §7.3). Releasing it returns to the tool the user was on, which falls
+      // out of resolving it per event rather than switching `activeTool`.
+      const tool = getTool(alt ? 'eyedropper' : toolState.activeTool);
+
+      // A read-only tool has nothing to write to and must still work on a
+      // locked or hidden layer.
+      if (!tool.readOnly && (!layer || layer.locked || !layer.visible)) return;
 
       const cel = doc.activeCel();
       if (!cel) return;
       const buffer = getBuffer(cel.id);
       if (!buffer) return;
 
-      const toolState = useToolStore.getState();
-      const tool = getTool(toolState.activeTool);
-      const ctx = {
+      if (down && !tool.readOnly) {
+        // One copy per gesture. The dirty rect is diffed out of it on release
+        // (docs/03-data-model.md §6).
+        stroke.current = beginStroke(cel.id, buffer, cel.width, cel.height);
+        strokeLabel.current = tool.label;
+        strokeState.current = {};
+      }
+      const snapshot = stroke.current;
+
+      const ctx: ToolContext = {
         buffer,
         width: cel.width,
         height: cel.height,
@@ -134,19 +169,31 @@ export function CanvasView() {
         secondary: toolState.secondary,
         brushSize: toolState.brushSize,
         button,
+        pixelPerfect: toolState.pixelPerfect,
+        shapeFill: toolState.shapeFill,
+        fillContiguous: toolState.fillContiguous,
+        anchor: anchor.current,
+        strokeState: strokeState.current,
+        restore: () => {
+          if (snapshot) restoreStroke(snapshot, buffer);
+        },
+        restorePixel: (px, py) => {
+          if (!snapshot) return;
+          if (px < 0 || py < 0 || px >= cel.width || py >= cel.height) return;
+          const i = (py * cel.width + px) * 4;
+          buffer.set(snapshot.pixels.subarray(i, i + 4), i);
+        },
+        sample: (sx, sy) => samplePixel(doc.sprite, doc.activeFrameId, sx, sy),
+        setColor: (c, slot) => {
+          if (slot === 'secondary') useToolStore.getState().setSecondary(c);
+          else useToolStore.getState().setPrimary(c);
+        },
       };
 
-      if (down) {
-        // One copy per gesture. The dirty rect is diffed out of it on release
-        // (docs/03-data-model.md §6).
-        stroke.current = beginStroke(cel.id, buffer, cel.width, cel.height);
-        strokeLabel.current = tool.label;
-        tool.onPointerDown(ctx, x, y);
-      } else {
-        tool.onPointerMove(ctx, x, y, prevX, prevY);
-      }
+      if (down) tool.onPointerDown(ctx, x, y);
+      else tool.onPointerMove(ctx, x, y, prevX, prevY);
 
-      doc.touch();
+      if (!tool.readOnly) doc.touch();
     },
     [],
   );
@@ -179,8 +226,9 @@ export function CanvasView() {
       const { x, y } = screenToDoc(useUIStore.getState(), sx, sy);
       drawing.current = true;
       last.current = { x, y };
+      anchor.current = { x, y };
       e.currentTarget.setPointerCapture(e.pointerId);
-      paint(x, y, x, y, true, e.button);
+      paint(x, y, x, y, true, e.button, e.altKey);
     },
     [paint],
   );
@@ -209,7 +257,7 @@ export function CanvasView() {
         // positions many pixels apart; the tool interpolates between them.
         const prev = last.current;
         if (prev.x !== x || prev.y !== y) {
-          paint(x, y, prev.x, prev.y, false, e.buttons === 2 ? 2 : 0);
+          paint(x, y, prev.x, prev.y, false, e.buttons === 2 ? 2 : 0, e.altKey);
           last.current = { x, y };
         }
       }
@@ -226,6 +274,28 @@ export function CanvasView() {
     },
     [commitStroke],
   );
+
+  /**
+   * Escape abandons the in-progress gesture, never the document
+   * (docs/05-ui-design.md §7.8). Because the snapshot *is* the pre-gesture
+   * state, cancelling is a straight restore and leaves no undo step.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !drawing.current) return;
+      const snapshot = stroke.current;
+      if (snapshot) {
+        const buffer = getBuffer(snapshot.celId);
+        if (buffer) restoreStroke(snapshot, buffer);
+        useDocumentStore.getState().touch();
+      }
+      stroke.current = null;
+      drawing.current = false;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   /**
    * `Ctrl`+wheel zooms toward the cursor, plain wheel scrolls vertically,

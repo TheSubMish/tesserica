@@ -131,7 +131,7 @@ muscle memory and there is no upside to being different.
 |---|---|---|
 | Pencil | `B` | Pixel-perfect mode on by default (removes L-corner doubling) |
 | Eraser | `E` | |
-| Fill | `G` | Contiguous + global modes, tolerance |
+| Fill | `G` | Contiguous + global modes; exact colour match — see note below |
 | Line | `L` | Bresenham, pixel-perfect |
 | Rectangle | `U` | Filled/outline |
 | Ellipse | `O` | Midpoint algorithm — **not** a scaled circle |
@@ -144,6 +144,13 @@ muscle memory and there is no upside to being different.
 **Pixel-perfect mode** matters more than it sounds. A freehand diagonal stroke naturally
 produces doubled corner pixels that look wrong in pixel art; pixel-perfect mode removes
 them in real time. Pixelorama leads with this and it is table stakes.
+
+> **Fill tolerance is deferred to Phase 2.** A tolerance slider is a colour *distance*,
+> and every colour distance in this project is computed in Oklab
+> (`04-image-pipeline.md` §4 — locked invariant). `oklab.ts` does not exist until Phase 2,
+> and hand-rolling an sRGB metric for the bucket would both contradict that invariant and
+> create a second, incompatible notion of "close colours". Phase 1 ships exact match,
+> which is what hand-drawn art wants anyway — there is no sensor noise to absorb.
 
 ---
 

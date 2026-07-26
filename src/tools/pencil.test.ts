@@ -1,33 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { getPixel } from '../model/pixelBuffers';
-import type { RGBA } from '../model/types';
-import { eraser, pencil } from './pencil';
-import type { ToolContext } from './Tool';
-
-const PRIMARY: RGBA = [255, 0, 0, 255];
-const SECONDARY: RGBA = [0, 0, 255, 255];
-
-function ctx(size = 8, brushSize = 1, button = 0): ToolContext {
-  return {
-    buffer: new Uint8ClampedArray(size * size * 4),
-    width: size,
-    height: size,
-    primary: PRIMARY,
-    secondary: SECONDARY,
-    brushSize,
-    button,
-  };
-}
+import { isRedundantCorner, pencil } from './pencil';
+import { eraser } from './eraser';
+import { harness, litPixels } from './testHarness';
 
 describe('pencil', () => {
   it('paints the primary colour on press', () => {
-    const c = ctx();
+    const c = harness();
     pencil.onPointerDown(c, 3, 4);
     expect(getPixel(c.buffer, c.width, c.height, 3, 4)).toEqual([255, 0, 0, 255]);
   });
 
   it('paints the secondary colour on the right button', () => {
-    const c = ctx(8, 1, 2);
+    const c = harness({ button: 2 });
     pencil.onPointerDown(c, 1, 1);
     expect(getPixel(c.buffer, c.width, c.height, 1, 1)).toEqual([0, 0, 255, 255]);
   });
@@ -35,7 +20,7 @@ describe('pencil', () => {
   it('connects a drag that jumps several pixels', () => {
     // Pointer events arrive far apart on a fast stroke; without interpolation
     // the stroke comes out as disconnected dots.
-    const c = ctx();
+    const c = harness();
     pencil.onPointerDown(c, 0, 0);
     pencil.onPointerMove(c, 5, 0, 0, 0);
     for (let x = 0; x <= 5; x++) {
@@ -44,14 +29,13 @@ describe('pencil', () => {
   });
 
   it('writes opaque alpha, not a premultiplied blend', () => {
-    const c = ctx();
-    c.primary = [255, 0, 0, 128];
+    const c = harness({ primary: [255, 0, 0, 128] });
     pencil.onPointerDown(c, 2, 2);
     expect(getPixel(c.buffer, c.width, c.height, 2, 2)).toEqual([255, 0, 0, 128]);
   });
 
   it('honours the brush size', () => {
-    const c = ctx(8, 3);
+    const c = harness({ brushSize: 3 });
     pencil.onPointerDown(c, 4, 4);
     // 3x3 centred as well as an odd size allows: offset 1 back from the cursor.
     for (let y = 3; y <= 5; y++) {
@@ -63,16 +47,95 @@ describe('pencil', () => {
   });
 });
 
+describe('isRedundantCorner', () => {
+  it('recognises the L that a Bresenham diagonal produces', () => {
+    // (0,0) → (1,0) → (1,1): the middle pixel is the doubled corner.
+    expect(isRedundantCorner({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 })).toBe(true);
+    expect(isRedundantCorner({ x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 })).toBe(true);
+  });
+
+  it('leaves straight runs alone', () => {
+    expect(isRedundantCorner({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 })).toBe(false);
+  });
+
+  it('leaves genuine right angles alone', () => {
+    // (0,0) → (1,0) → (1,2) is not a one-pixel corner; removing (1,0) would
+    // break the line.
+    expect(isRedundantCorner({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 2 })).toBe(false);
+  });
+});
+
+/**
+ * The doubling comes from *pointer sampling*, not from Bresenham: a hand
+ * moving diagonally reports (0,0) → (1,0) → (1,1), and drawing all three
+ * gives an L where the eye wants a diagonal step.
+ */
+const L_STAIRCASE: [number, number][] = [
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [2, 1],
+  [2, 2],
+];
+
+function dragThrough(c: ReturnType<typeof harness>, path: [number, number][]): void {
+  c.snapshot();
+  pencil.onPointerDown(c, path[0][0], path[0][1]);
+  for (let i = 1; i < path.length; i++) {
+    pencil.onPointerMove(c, path[i][0], path[i][1], path[i - 1][0], path[i - 1][1]);
+  }
+}
+
+describe('pixel-perfect mode', () => {
+  it('retracts the doubled corners of a freehand diagonal', () => {
+    const c = harness({ pixelPerfect: true });
+    dragThrough(c, L_STAIRCASE);
+    expect(litPixels(c.buffer, c.width, c.height)).toEqual(new Set(['0,0', '1,1', '2,2']));
+  });
+
+  it('keeps them when the mode is off', () => {
+    const c = harness({ pixelPerfect: false });
+    dragThrough(c, L_STAIRCASE);
+    expect(litPixels(c.buffer, c.width, c.height)).toEqual(
+      new Set(['0,0', '1,0', '1,1', '2,1', '2,2']),
+    );
+  });
+
+  it('restores the corner to what was underneath, not to transparent', () => {
+    const c = harness({ pixelPerfect: true });
+    // Something already drawn under the corner the pencil will retract.
+    c.buffer.set([9, 9, 9, 255], (0 * c.width + 1) * 4);
+    dragThrough(c, [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ]);
+    expect(getPixel(c.buffer, c.width, c.height, 1, 0)).toEqual([9, 9, 9, 255]);
+  });
+
+  it('is skipped for wide brushes, which have no single corner pixel', () => {
+    const c = harness({ pixelPerfect: true, brushSize: 3 });
+    dragThrough(c, [
+      [3, 3],
+      [4, 3],
+      [4, 4],
+    ]);
+    // 3×3 stamps at all three positions, none retracted: the union of
+    // (2..4,2..4), (3..5,2..4) and (3..5,3..5).
+    expect(litPixels(c.buffer, c.width, c.height).size).toBe(15);
+  });
+});
+
 describe('eraser', () => {
   it('clears to fully transparent rather than to the background colour', () => {
-    const c = ctx();
+    const c = harness();
     pencil.onPointerDown(c, 3, 3);
     eraser.onPointerDown(c, 3, 3);
     expect(getPixel(c.buffer, c.width, c.height, 3, 3)).toEqual([0, 0, 0, 0]);
   });
 
   it('clears along a drag', () => {
-    const c = ctx();
+    const c = harness();
     pencil.onPointerDown(c, 0, 2);
     pencil.onPointerMove(c, 4, 2, 0, 2);
     eraser.onPointerMove(c, 4, 2, 0, 2);

@@ -1,10 +1,8 @@
 import { useDocumentStore } from '../state/documentStore';
-import { useToolStore } from '../state/toolStore';
 
 export function LayerPanel() {
   const layers = useDocumentStore((s) => s.sprite.layers);
   const activeLayerId = useDocumentStore((s) => s.activeLayerId);
-  const brushSize = useToolStore((s) => s.brushSize);
 
   return (
     <>
@@ -62,23 +60,6 @@ export function LayerPanel() {
             </div>
           ))}
         </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <span>Brush</span>
-        </div>
-        <label className="field">
-          Size
-          <input
-            type="range"
-            min={1}
-            max={16}
-            value={brushSize}
-            onChange={(e) => useToolStore.getState().setBrushSize(Number(e.target.value))}
-          />
-          <span className="value">{brushSize}</span>
-        </label>
       </section>
     </>
   );

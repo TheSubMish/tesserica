@@ -3,9 +3,15 @@ import type { RGBA } from '../model/types';
 
 const rgba = (c: RGBA) => `rgba(${c[0]},${c[1]},${c[2]},${c[3] / 255})`;
 
+/** Order, glyphs and shortcuts follow docs/05-ui-design.md §4.1. */
 const TOOLS: { id: ToolId; glyph: string; label: string; key: string }[] = [
   { id: 'pencil', glyph: '✏', label: 'Pencil', key: 'B' },
   { id: 'eraser', glyph: '⌫', label: 'Eraser', key: 'E' },
+  { id: 'fill', glyph: '🪣', label: 'Fill', key: 'G' },
+  { id: 'line', glyph: '╱', label: 'Line', key: 'L' },
+  { id: 'rect', glyph: '▭', label: 'Rectangle', key: 'U' },
+  { id: 'ellipse', glyph: '◯', label: 'Ellipse', key: 'O' },
+  { id: 'eyedropper', glyph: '💧', label: 'Eyedropper', key: 'I' },
 ];
 
 export function ToolRail() {
