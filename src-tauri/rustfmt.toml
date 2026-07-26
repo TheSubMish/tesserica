@@ -1,0 +1,5 @@
+# Match the 100-column width used by prettier on the TS side, so the two
+# mirrored pipeline implementations (docs/02-architecture.md §3.1) stay
+# reviewable side by side.
+max_width = 100
+edition = "2021"

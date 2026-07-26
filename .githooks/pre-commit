@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# Format + lint + unit tests before every commit (docs/07-tech-stack.md §7).
+#
+# Installed by `npm run prepare` (which runs on `npm install`) setting
+# core.hooksPath to this directory. Bypass with `git commit --no-verify`, or
+# SKIP_RUST=1 to skip only the slow cargo half.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+has() { echo "$staged" | grep -qE "$1"; }
+
+if has '\.(ts|tsx|js|jsx|css|json|md)$'; then
+  echo "pre-commit: prettier"
+  npx prettier --check $(echo "$staged" | grep -E '\.(ts|tsx|js|jsx|css|json|md)$' | tr '\n' ' ') \
+    || { echo "  ↳ run: npm run format"; exit 1; }
+fi
+
+if has '\.(ts|tsx)$'; then
+  echo "pre-commit: eslint"
+  npm run --silent lint
+
+  echo "pre-commit: tsc"
+  npm run --silent typecheck
+
+  echo "pre-commit: vitest"
+  npm run --silent test
+fi
+
+if has '^src-tauri/.*\.rs$|^src-tauri/Cargo\.toml$'; then
+  if [ "${SKIP_RUST:-0}" = "1" ]; then
+    echo "pre-commit: skipping cargo (SKIP_RUST=1)"
+  else
+    echo "pre-commit: rustfmt"
+    cargo fmt --manifest-path src-tauri/Cargo.toml -- --check \
+      || { echo "  ↳ run: npm run format:rust"; exit 1; }
+
+    # Warnings are denied here and in CI. The pipeline is the kind of code where
+    # a clippy lint about an indexing pattern is usually a real bug.
+    echo "pre-commit: clippy"
+    cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+    echo "pre-commit: cargo test"
+    cargo test --manifest-path src-tauri/Cargo.toml
+  fi
+fi
+
+echo "pre-commit: ok"

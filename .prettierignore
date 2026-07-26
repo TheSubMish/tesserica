@@ -1,0 +1,22 @@
+dist/
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+package-lock.json
+
+# Rust is formatted by rustfmt, not prettier.
+src-tauri/
+
+# Golden-test corpus is byte-significant (docs/04-image-pipeline.md §11).
+tests/golden/sources/
+tests/golden/expected/
+
+# The knowledge base is hand-wrapped prose and is the project's source of truth.
+# Prettier's only complaint about it is normalizing *emphasis* to _emphasis_,
+# which is not worth churning every spec file and the blame history with.
+docs/
+CLAUDE.md
+
+# Agent and editor configuration — prose and settings, not project source.
+.claude/
+.vscode/
