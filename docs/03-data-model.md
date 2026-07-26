@@ -42,6 +42,13 @@ interface Sprite {
 }
 ```
 
+> **Implementation note (Phase 1).** The sketch above stores id lists with side tables.
+> `src/model/types.ts` and `src-tauri/src/model/document.rs` instead **inline** the objects
+> — `layers: Layer[]`, `frames: Frame[]`, `cels: Cel[]` — because there is exactly one
+> owner for each and the side tables bought nothing but a lookup. Both languages use the
+> inlined shape, so `sprite.json` needs no translation layer in either direction. Revisit
+> if Phase 4 makes cel lookup by `(layer, frame)` hot enough to want an index.
+
 ### 2.1 Layers
 
 A layer is a **discriminated union on `kind`** — this is what lets tilemap and conversion
@@ -289,7 +296,9 @@ Rationale for ZIP-of-files over a single binary blob:
 - **Debuggable.** Unzip it and look. Enormously valuable during development.
 - **Free compression.** PNG for raster cels, deflate for the rest.
 - **Forward-compatible.** Unknown files are preserved on round-trip, so an older build
-  opening a newer file does not destroy data it does not understand.
+  opening a newer file does not destroy data it does not understand. Implemented by
+  `save_project`'s `preserveFrom`: it re-reads the archive the document was opened from
+  and copies across every entry this build does not itself write, before writing its own.
 - **Cheap partial reads.** Thumbnail without parsing the document.
 
 **Versioning:** `manifest.json` carries `formatVersion` (integer). Readers refuse

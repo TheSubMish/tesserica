@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { useHistoryStore } from '../state/historyStore';
 import { useToolStore } from '../state/toolStore';
 import { useUIStore } from '../state/uiStore';
+import { openProject, saveCurrentProject } from './project';
 
 export function useShortcuts(): void {
   useEffect(() => {
@@ -25,6 +26,16 @@ export function useShortcuts(): void {
         }
         if ((key === 'z' && e.shiftKey) || key === 'y') {
           useHistoryStore.getState().redo();
+          e.preventDefault();
+          return;
+        }
+        if (key === 's') {
+          void saveCurrentProject({ saveAs: e.shiftKey }).catch(() => {});
+          e.preventDefault();
+          return;
+        }
+        if (key === 'o') {
+          void openProject().catch(() => {});
           e.preventDefault();
           return;
         }

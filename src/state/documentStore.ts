@@ -14,10 +14,32 @@
 
 import { create } from 'zustand';
 import type { Cel, CelId, Frame, Layer, LayerId, Sprite } from '../model/types';
-import { allocateBuffer, bumpCelRevision, getBuffer, releaseBuffer } from '../model/pixelBuffers';
+import {
+  allocateBuffer,
+  bumpCelRevision,
+  clearAllBuffers,
+  getBuffer,
+  releaseBuffer,
+  setBuffer,
+} from '../model/pixelBuffers';
 
 let nextId = 1;
 export const makeId = (prefix: string): string => `${prefix}${nextId++}`;
+
+/**
+ * Push the id counter past every id in `existing`.
+ *
+ * Ids in a loaded `.tess` were minted by another run of the generator, so a
+ * freshly opened document would otherwise start handing out ids that collide
+ * with the ones it just read — and a colliding cel id means two layers sharing
+ * a pixel buffer.
+ */
+export function reserveIds(existing: string[]): void {
+  for (const id of existing) {
+    const n = Number(/^[a-z]+(\d+)$/.exec(id)?.[1]);
+    if (Number.isFinite(n) && n >= nextId) nextId = n + 1;
+  }
+}
 
 interface DocumentState {
   sprite: Sprite;
@@ -25,6 +47,12 @@ interface DocumentState {
   activeFrameId: string;
   /** Bumped on every pixel mutation; the canvas redraws when it changes. */
   revision: number;
+  /** Where this document was opened from / last saved to, if anywhere. */
+  projectPath: string | null;
+
+  setProjectPath(path: string | null): void;
+  /** Replace the whole document, e.g. after opening a `.tess`. */
+  replaceDocument(sprite: Sprite, pixels: Map<CelId, Uint8ClampedArray>): void;
 
   /**
    * Signal a change. Passing the cel that changed lets the renderer re-upload
@@ -100,6 +128,33 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   activeLayerId: initial.activeLayerId,
   activeFrameId: initial.activeFrameId,
   revision: 0,
+  projectPath: null,
+
+  setProjectPath: (path) => set({ projectPath: path }),
+
+  replaceDocument: (sprite, pixels) => {
+    // The old document's buffers are unreachable the moment the sprite is
+    // swapped, so drop them rather than leaking them for the process lifetime.
+    clearAllBuffers();
+    reserveIds([
+      ...sprite.layers.map((l) => l.id),
+      ...sprite.frames.map((f) => f.id),
+      ...sprite.cels.map((c) => c.id),
+    ]);
+
+    for (const cel of sprite.cels) {
+      const buf = pixels.get(cel.id);
+      if (buf && buf.length === cel.width * cel.height * 4) setBuffer(cel.id, buf);
+      else allocateBuffer(cel.id, cel.width, cel.height);
+    }
+
+    set((s) => ({
+      sprite,
+      activeLayerId: sprite.layers[sprite.layers.length - 1]?.id ?? s.activeLayerId,
+      activeFrameId: sprite.frames[0]?.id ?? s.activeFrameId,
+      revision: s.revision + 1,
+    }));
+  },
 
   touch: (celId) => {
     if (celId) bumpCelRevision(celId);

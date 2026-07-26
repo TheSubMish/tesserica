@@ -39,7 +39,7 @@ the app in a state where nothing works until the next phase lands.
 - [x] Palette panel; built-in hardware palettes
 - [x] Palette import: `.hex`, `.gpl`, `.pal`, Paint.net `.txt` (`03` §3)
 - [x] Export PNG at integer scales
-- [ ] `.tess` save/load (`03` §7)
+- [x] `.tess` save/load (`03` §7)
 
 **Exit:** ✅ **W2 complete.** A usable, if basic, pixel editor.
 

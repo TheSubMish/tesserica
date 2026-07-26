@@ -4,3 +4,4 @@
 //! `crate::staging`, which uses the raw IPC body instead of JSON.
 
 pub mod export;
+pub mod project;

@@ -15,6 +15,12 @@ pub enum AppError {
     #[error("image: {0}")]
     Image(#[from] image::ImageError),
 
+    #[error("json: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("archive: {0}")]
+    Zip(#[from] zip::result::ZipError),
+
     #[error("{0}")]
     Invalid(String),
 

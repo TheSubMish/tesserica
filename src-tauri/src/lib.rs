@@ -9,6 +9,7 @@
 
 pub mod commands;
 pub mod error;
+pub mod model;
 pub mod staging;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -23,6 +24,8 @@ pub fn run() {
             staging::fetch_staged,
             staging::release_staged,
             commands::export::export_png,
+            commands::project::save_project,
+            commands::project::load_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tesserica");

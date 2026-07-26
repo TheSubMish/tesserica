@@ -1,0 +1,133 @@
+/**
+ * Save and open `.tess` documents (`docs/03-data-model.md` §7).
+ *
+ * Rust owns the archive — it encodes the cel PNGs, builds the thumbnail and
+ * writes the ZIP. This module's whole job is marshalling: pixels go over the
+ * raw IPC body as staging handles, and the command itself carries only the
+ * document metadata, exactly as `docs/02-architecture.md` §6.2 requires.
+ *
+ * `preserveFrom` is passed on every save of a previously-opened file. §7
+ * promises that unknown entries survive a round trip, which is what stops this
+ * build from silently deleting, say, a Phase 4 timeline it cannot read.
+ */
+
+import { open, save } from '@tauri-apps/plugin-dialog';
+import { flattenSprite } from '../canvas/flatten';
+import { invalidateRenderCache } from '../canvas/renderer';
+import { getBuffer } from '../model/pixelBuffers';
+import type { Sprite } from '../model/types';
+import {
+  fetchStaged,
+  hasBackend,
+  loadProject,
+  releaseStaged,
+  saveProject,
+  stageBytes,
+  type CelUpload,
+} from '../ipc/commands';
+import { useDocumentStore } from '../state/documentStore';
+import { useHistoryStore } from '../state/historyStore';
+
+export const TESS_FILTER = { name: 'Tesserica project', extensions: ['tess'] };
+
+export class NoBackendError extends Error {
+  constructor() {
+    super('This needs the desktop app — the Rust backend is not available here.');
+  }
+}
+
+function asBytes(pixels: Uint8ClampedArray): Uint8Array {
+  return new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
+}
+
+/**
+ * Write the current document. Returns the path written, or `null` when the
+ * user dismissed the dialog.
+ */
+export async function saveCurrentProject(options: { saveAs: boolean }): Promise<string | null> {
+  if (!hasBackend()) throw new NoBackendError();
+
+  const doc = useDocumentStore.getState();
+  const existing = doc.projectPath;
+
+  let path = options.saveAs ? null : existing;
+  if (!path) {
+    path = await save({
+      title: 'Save project',
+      defaultPath: existing ?? 'sprite.tess',
+      filters: [TESS_FILTER],
+    });
+    if (!path) return null;
+  }
+
+  const staged: number[] = [];
+  try {
+    const cels: CelUpload[] = [];
+    for (const cel of doc.sprite.cels) {
+      const buf = getBuffer(cel.id);
+      if (!buf) continue;
+      const stageId = await stageBytes(asBytes(buf));
+      staged.push(stageId);
+      cels.push({ celId: cel.id, stageId, width: cel.width, height: cel.height });
+    }
+
+    const flat = flattenSprite(doc.sprite, doc.activeFrameId);
+    const thumbStage = await stageBytes(asBytes(flat));
+    staged.push(thumbStage);
+
+    await saveProject({
+      path,
+      sprite: doc.sprite,
+      cels,
+      thumbnail: {
+        celId: 'thumbnail',
+        stageId: thumbStage,
+        width: doc.sprite.width,
+        height: doc.sprite.height,
+      },
+      // Only meaningful when re-saving something we opened.
+      preserveFrom: existing,
+    });
+
+    // The command consumed every handle it was given.
+    staged.length = 0;
+    useDocumentStore.getState().setProjectPath(path);
+    return path;
+  } finally {
+    // A failure must not leave megabytes parked in the Rust staging area.
+    for (const id of staged) await releaseStaged(id).catch(() => {});
+  }
+}
+
+/** Open a `.tess`, replacing the current document. Returns warnings, if any. */
+export async function openProject(): Promise<{ path: string; warnings: string[] } | null> {
+  if (!hasBackend()) throw new NoBackendError();
+
+  const picked = await open({
+    title: 'Open project',
+    multiple: false,
+    directory: false,
+    filters: [TESS_FILTER],
+  });
+  if (!picked || typeof picked !== 'string') return null;
+
+  const result = await loadProject(picked);
+
+  const pixels = new Map<string, Uint8ClampedArray>();
+  for (const cel of result.cels) {
+    const bytes = await fetchStaged(cel.stageId);
+    pixels.set(cel.celId, new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  }
+
+  // Rust mirrors the TS types exactly (docs/03 §8), so this is the same shape
+  // the store already holds — no translation layer.
+  useDocumentStore.getState().replaceDocument(result.sprite as unknown as Sprite, pixels);
+  useDocumentStore.getState().setProjectPath(result.path);
+
+  // The new document has no shared history with the old one, and every cached
+  // composite belongs to a document that no longer exists.
+  useHistoryStore.getState().clear();
+  invalidateRenderCache();
+
+  return { path: result.path, warnings: result.warnings };
+}

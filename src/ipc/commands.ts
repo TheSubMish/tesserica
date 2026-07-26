@@ -69,3 +69,63 @@ export async function exportPng(request: {
 }): Promise<ExportResult> {
   return invoke<ExportResult>('export_png', { request });
 }
+
+// ---------------------------------------------------------------------------
+// `.tess` (docs/03-data-model.md §7)
+// ---------------------------------------------------------------------------
+
+export interface CelUpload {
+  celId: string;
+  stageId: StageId;
+  width: number;
+  height: number;
+}
+
+export interface SaveResult {
+  path: string;
+  bytes: number;
+  /** Entries carried over from an archive written by a newer build. */
+  preserved: string[];
+}
+
+export interface LoadedCel {
+  celId: string;
+  stageId: StageId;
+  width: number;
+  height: number;
+}
+
+export interface LoadResult {
+  path: string;
+  formatVersion: number;
+  /** Shaped exactly like the TS `Sprite`; Rust mirrors it with serde. */
+  sprite: {
+    width: number;
+    height: number;
+    colorMode: string;
+    layers: unknown[];
+    frames: unknown[];
+    cels: unknown[];
+  };
+  cels: LoadedCel[];
+  warnings: string[];
+}
+
+export async function saveProject(request: {
+  path: string;
+  sprite: unknown;
+  cels: CelUpload[];
+  thumbnail?: CelUpload;
+  /**
+   * Path this document was opened from. Rust copies across every entry it does
+   * not itself write, so an older build cannot silently delete what a newer
+   * one stored (`docs/03-data-model.md` §7).
+   */
+  preserveFrom?: string | null;
+}): Promise<SaveResult> {
+  return invoke<SaveResult>('save_project', { request });
+}
+
+export async function loadProject(path: string): Promise<LoadResult> {
+  return invoke<LoadResult>('load_project', { path });
+}
