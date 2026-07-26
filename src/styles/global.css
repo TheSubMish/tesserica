@@ -272,6 +272,33 @@ body {
   white-space: nowrap;
 }
 
+.layer-rename {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg-app);
+  color: var(--text);
+  font: inherit;
+}
+
+.field select {
+  flex: 1;
+  height: var(--control-h-sm);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.field select:disabled {
+  color: var(--text-muted);
+}
+
 .field {
   display: flex;
   align-items: center;

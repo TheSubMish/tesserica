@@ -24,6 +24,14 @@ export function getBuffer(id: CelId): Uint8ClampedArray | undefined {
   return buffers.get(id);
 }
 
+/**
+ * Re-register a buffer under a cel id. Used when undoing a layer deletion:
+ * the command held the pixels while the layer was gone and hands them back.
+ */
+export function setBuffer(id: CelId, buf: Uint8ClampedArray): void {
+  buffers.set(id, buf);
+}
+
 export function releaseBuffer(id: CelId): void {
   buffers.delete(id);
 }

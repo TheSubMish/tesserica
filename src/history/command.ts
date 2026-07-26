@@ -12,7 +12,7 @@
  * not an object graph to mutate in place.
  */
 
-import type { LayerId, Sprite } from '../model/types';
+import type { Cel, Layer, LayerId, Sprite } from '../model/types';
 
 /**
  * The slice of `documentStore` that commands are allowed to touch. Keeping it
@@ -25,6 +25,13 @@ export interface DocumentApi {
   activeFrameId: string;
   /** Signal that pixel data changed so the canvas redraws. */
   touch(): void;
+
+  insertLayer(layer: Layer, cels: Cel[], index: number): void;
+  removeLayerMetadata(id: LayerId): void;
+  moveLayer(id: LayerId, toIndex: number): void;
+  updateLayer(id: LayerId, patch: Partial<Layer>): void;
+  setActiveLayer(id: LayerId): void;
+  celsForLayer(layerId: LayerId): Cel[];
 }
 
 export interface Command {

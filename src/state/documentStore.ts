@@ -3,14 +3,21 @@
  *
  * `revision` is bumped whenever pixel data changes so the renderer knows to
  * redraw without the pixels themselves ever entering React state.
+ *
+ * Everything here is a **primitive**: it mutates the document and records
+ * nothing. Undoable layer operations are composed from these in
+ * `history/layerCommands.ts`. Keeping the split means a command's `apply` and
+ * `invert` are built from the same vocabulary, and ids stay stable across
+ * undo→redo because the command supplies them rather than the store minting
+ * fresh ones on every replay.
  */
 
 import { create } from 'zustand';
 import type { Cel, CelId, Frame, Layer, LayerId, Sprite } from '../model/types';
-import { allocateBuffer, releaseBuffer } from '../model/pixelBuffers';
+import { allocateBuffer, getBuffer, releaseBuffer } from '../model/pixelBuffers';
 
 let nextId = 1;
-const makeId = (prefix: string): string => `${prefix}${nextId++}`;
+export const makeId = (prefix: string): string => `${prefix}${nextId++}`;
 
 interface DocumentState {
   sprite: Sprite;
@@ -20,12 +27,30 @@ interface DocumentState {
   revision: number;
 
   touch(): void;
+
+  // ---- primitives ----
+  /** Build a detached raster layer plus one cel per frame. */
+  createLayer(name?: string): { layer: Layer; cels: Cel[] };
+  /** Insert a layer at `index` in the bottom→top order. */
+  insertLayer(layer: Layer, cels: Cel[], index: number): void;
+  /**
+   * Drop a layer's metadata and cels. Buffers are **not** released — the
+   * caller owns them, which is what lets a delete command hand them back.
+   */
+  removeLayerMetadata(id: LayerId): void;
+  moveLayer(id: LayerId, toIndex: number): void;
+  updateLayer(id: LayerId, patch: Partial<Layer>): void;
+  setActiveLayer(id: LayerId): void;
+  layerIndex(id: LayerId): number;
+
+  // ---- convenience (not undoable; used by tests and bootstrap) ----
   addLayer(name?: string): void;
   removeLayer(id: LayerId): void;
-  setActiveLayer(id: LayerId): void;
   toggleLayerVisibility(id: LayerId): void;
+
   activeCel(): Cel | undefined;
   celFor(layerId: LayerId, frameId: string): Cel | undefined;
+  celsForLayer(layerId: LayerId): Cel[];
 }
 
 function createInitialSprite(
@@ -74,76 +99,110 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   touch: () => set((s) => ({ revision: s.revision + 1 })),
 
-  addLayer: (name) =>
-    set((s) => {
-      const layer: Layer = {
-        id: makeId('l'),
-        kind: 'raster',
-        name: name ?? `Layer ${s.sprite.layers.length + 1}`,
-        visible: true,
-        locked: false,
-        opacity: 1,
-        blendMode: 'normal',
-      };
-      // One cel per frame. Phase 0 has a single frame, but writing it as a map
-      // over frames means adding frames in Phase 4 needs no change here.
-      const cels: Cel[] = s.sprite.frames.map((f) => {
-        const cel: Cel = {
-          id: makeId('c'),
-          layerId: layer.id,
-          frameId: f.id,
-          x: 0,
-          y: 0,
-          width: s.sprite.width,
-          height: s.sprite.height,
-        };
-        allocateBuffer(cel.id, s.sprite.width, s.sprite.height);
-        return cel;
-      });
+  createLayer: (name) => {
+    const s = get();
+    const layer: Layer = {
+      id: makeId('l'),
+      kind: 'raster',
+      name: name ?? `Layer ${s.sprite.layers.length + 1}`,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+    };
+    // One cel per frame. Phase 1 has a single frame, but writing it as a map
+    // over frames means adding frames in Phase 4 needs no change here.
+    const cels: Cel[] = s.sprite.frames.map((f) => ({
+      id: makeId('c'),
+      layerId: layer.id,
+      frameId: f.id,
+      x: 0,
+      y: 0,
+      width: s.sprite.width,
+      height: s.sprite.height,
+    }));
+    return { layer, cels };
+  },
 
+  insertLayer: (layer, cels, index) =>
+    set((s) => {
+      for (const cel of cels) {
+        if (!getBuffer(cel.id)) allocateBuffer(cel.id, cel.width, cel.height);
+      }
+      const layers = [...s.sprite.layers];
+      layers.splice(Math.max(0, Math.min(index, layers.length)), 0, layer);
       return {
-        sprite: {
-          ...s.sprite,
-          layers: [...s.sprite.layers, layer],
-          cels: [...s.sprite.cels, ...cels],
-        },
-        activeLayerId: layer.id,
+        sprite: { ...s.sprite, layers, cels: [...s.sprite.cels, ...cels] },
         revision: s.revision + 1,
       };
     }),
 
-  removeLayer: (id) =>
+  removeLayerMetadata: (id) =>
     set((s) => {
-      if (s.sprite.layers.length <= 1) return s; // never leave zero layers
-
-      const doomed = s.sprite.cels.filter((c) => c.layerId === id);
-      doomed.forEach((c) => releaseBuffer(c.id));
-
       const layers = s.sprite.layers.filter((l) => l.id !== id);
+      if (layers.length === s.sprite.layers.length) return s;
       return {
         sprite: {
           ...s.sprite,
           layers,
           cels: s.sprite.cels.filter((c) => c.layerId !== id),
         },
-        activeLayerId: s.activeLayerId === id ? layers[layers.length - 1].id : s.activeLayerId,
+        activeLayerId:
+          s.activeLayerId === id
+            ? (layers[layers.length - 1]?.id ?? s.activeLayerId)
+            : s.activeLayerId,
         revision: s.revision + 1,
       };
     }),
 
-  setActiveLayer: (id) => set({ activeLayerId: id }),
+  moveLayer: (id, toIndex) =>
+    set((s) => {
+      const from = s.sprite.layers.findIndex((l) => l.id === id);
+      if (from < 0) return s;
+      const clamped = Math.max(0, Math.min(toIndex, s.sprite.layers.length - 1));
+      if (clamped === from) return s;
+      const layers = [...s.sprite.layers];
+      const [moved] = layers.splice(from, 1);
+      layers.splice(clamped, 0, moved);
+      return { sprite: { ...s.sprite, layers }, revision: s.revision + 1 };
+    }),
 
-  toggleLayerVisibility: (id) =>
+  updateLayer: (id, patch) =>
     set((s) => ({
       sprite: {
         ...s.sprite,
-        layers: s.sprite.layers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)),
+        layers: s.sprite.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
       },
       revision: s.revision + 1,
     })),
 
+  setActiveLayer: (id) => set({ activeLayerId: id }),
+
+  layerIndex: (id) => get().sprite.layers.findIndex((l) => l.id === id),
+
+  addLayer: (name) => {
+    const { layer, cels } = get().createLayer(name);
+    get().insertLayer(layer, cels, get().sprite.layers.length);
+    get().setActiveLayer(layer.id);
+  },
+
+  removeLayer: (id) => {
+    if (get().sprite.layers.length <= 1) return; // never leave zero layers
+    get()
+      .celsForLayer(id)
+      .forEach((c) => releaseBuffer(c.id));
+    get().removeLayerMetadata(id);
+  },
+
+  toggleLayerVisibility: (id) => {
+    const layer = get().sprite.layers.find((l) => l.id === id);
+    if (layer) get().updateLayer(id, { visible: !layer.visible });
+  },
+
   celFor: (layerId, frameId) =>
     get().sprite.cels.find((c) => c.layerId === layerId && c.frameId === frameId),
+
+  celsForLayer: (layerId) => get().sprite.cels.filter((c) => c.layerId === layerId),
 
   activeCel: () => {
     const s = get();

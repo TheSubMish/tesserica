@@ -34,7 +34,7 @@ the app in a state where nothing works until the next phase lands.
 
 - [x] Command/history system with dirty-rect deltas + coalescing (`03-data-model.md` §6)
 - [x] Tools: pencil (pixel-perfect), eraser, fill, line, rect, ellipse, eyedropper
-- [ ] Layers: add/delete/reorder/rename/opacity/visibility/lock; normal blend
+- [x] Layers: add/delete/reorder/rename/opacity/visibility/lock; normal blend
 - [ ] Layer panel; compositing renderer with dirty-layer caching
 - [ ] Palette panel; built-in hardware palettes
 - [ ] Palette import: `.hex`, `.gpl`, `.pal`, Paint.net `.txt` (`03` §3)
