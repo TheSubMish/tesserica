@@ -24,6 +24,7 @@ import {
   type AlphaPolicy,
   type PreparedPalette,
   type QuantizeResult,
+  NearestCache,
   nearestIndexOklab,
   resolveAlpha,
 } from './quantize.ts';
@@ -169,6 +170,7 @@ export function quantizeOrdered(
   policy: AlphaPolicy,
   n: number,
   strength: number,
+  cache?: NearestCache,
 ): QuantizeResult {
   const matrix = bayerMatrix(n);
   const spread = paletteSpread(palette);
@@ -188,11 +190,21 @@ export function quantizeOrdered(
         continue;
       }
 
-      const threshold = (matrix[(y % n) * n + (x % n)] + 0.5) * scale - 0.5;
-      const c = srgb8ToOklab(src.data[i], src.data[i + 1], src.data[i + 2]);
-      const shifted: Oklab = { l: c.l + threshold * strength * spread, a: c.a, b: c.b };
+      const lane = (y % n) * n + (x % n);
+      const r = src.data[i];
+      const g = src.data[i + 1];
+      const b = src.data[i + 2];
 
-      const idx = nearestIndexOklab(palette, shifted);
+      // Exact even with the cache: the perturbation is a deterministic function
+      // of the source colour and the Bayer cell, so one lane per cell keeps the
+      // memo faithful (§4.2).
+      const compute = (): number => {
+        const threshold = (matrix[lane] + 0.5) * scale - 0.5;
+        const c = srgb8ToOklab(r, g, b);
+        const shifted: Oklab = { l: c.l + threshold * strength * spread, a: c.a, b: c.b };
+        return nearestIndexOklab(palette, shifted);
+      };
+      const idx = cache ? cache.lookup(r, g, b, lane, compute) : compute();
       const entry = palette.colors[idx];
       indices[p] = idx;
       out[i] = entry[0];

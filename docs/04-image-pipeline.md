@@ -239,6 +239,42 @@ let key = ((r >> 3) as usize) << 10 | ((g >> 3) as usize) << 5 | ((b >> 3) as us
 Real images touch a small fraction of that space, so hit rates are very high and the
 cost collapses to roughly one distance computation per *distinct* color.
 
+#### The cache must be exact — store a tag
+
+A table keyed *only* on the 5-bit key is **lossy**: two colors 7 apart in red would share
+an answer. That is a quality regression bought with speed, and an invisible one.
+
+So each slot also stores the **full 24-bit color it was filled from**. A hit requires the
+tag to match; a mismatch recomputes and replaces, exactly as a direct-mapped hardware
+cache does. The key, the slot count and the locality are unchanged — but the cache becomes
+a pure **memoization** that cannot alter a single output pixel. That is asserted directly
+in both implementations, and confirmed by the golden corpus producing byte-identical
+output with the cache on and off.
+
+Ordered dithering resolves the same source color differently depending on its position in
+the Bayer cell, so it uses **one lane per cell position** (`lane * 32768 + key`). The memo
+stays exact because the perturbation is a pure function of `(color, lane)`.
+
+**Measured** (`nearest_cache_benchmark` in `quantize.rs`, release build, 512×512 output,
+54-color palette, a smooth gradient — the *worst* case for a direct-mapped cache because
+almost every pixel is a distinct color):
+
+| | |
+|---|---|
+| Without cache | 109.8 ms |
+| With cache | 56.4 ms |
+| Speedup | **1.95×** |
+
+Worth having, but note the honest caveat: **quantization runs after downscaling** (§2), so
+it sees the small target image, not the 12 MP source. The 648M-computation figure above
+describes quantizing at full resolution, which this pipeline never does. The stage that
+actually costs 12 MP of work is [3] adjustments.
+
+> ⚠️ **Error diffusion must not use the cache** — and in these implementations it
+> structurally *cannot*: the lookup takes 8-bit sRGB, while diffused values are arbitrary
+> Oklab floats with no 24-bit key to tag on. The carve-out is enforced by the types rather
+> than by a comment someone can forget.
+
 > ⚠️ **The cache is invalid when dithering with error diffusion**, because diffused error
 > pushes colors to arbitrary values — a cache built on quantized keys would round away
 > the very error we are trying to propagate. Use the cache for `none` and ordered

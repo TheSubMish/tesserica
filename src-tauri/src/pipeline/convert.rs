@@ -21,7 +21,9 @@ use super::cleanup;
 use super::crop;
 use super::dither;
 use super::downscale::downscale;
-use super::quantize::{self, AlphaPolicy, PreparedPalette, QuantizeResult, TRANSPARENT_INDEX};
+use super::quantize::{
+    self, AlphaPolicy, NearestCache, PreparedPalette, QuantizeResult, TRANSPARENT_INDEX,
+};
 use super::settings::{ConvertSettings, DitherMode, PaletteSpec};
 
 #[derive(Debug, Clone)]
@@ -69,7 +71,16 @@ pub fn quantize_with_dither(
 ) -> Result<QuantizeResult, String> {
     let strength = settings.dither_strength;
     match settings.dither {
-        DitherMode::None => quantize::quantize_none(image, palette, settings.color_space, policy),
+        DitherMode::None => quantize::quantize_none(
+            image,
+            palette,
+            settings.color_space,
+            policy,
+            Some(&mut NearestCache::new(1)),
+        ),
+        // The two error-diffusion modes deliberately get no cache (§4.2), and
+        // could not use one: their lookups are on arbitrary Oklab floats, not on
+        // a colour with a 24-bit key.
         DitherMode::FloydSteinberg => dither::quantize_error_diffusion(
             image,
             palette,
@@ -80,9 +91,30 @@ pub fn quantize_with_dither(
         DitherMode::Atkinson => {
             dither::quantize_error_diffusion(image, palette, policy, dither::ATKINSON, strength)
         }
-        DitherMode::Bayer2 => dither::quantize_ordered(image, palette, policy, 2, strength),
-        DitherMode::Bayer4 => dither::quantize_ordered(image, palette, policy, 4, strength),
-        DitherMode::Bayer8 => dither::quantize_ordered(image, palette, policy, 8, strength),
+        DitherMode::Bayer2 => dither::quantize_ordered(
+            image,
+            palette,
+            policy,
+            2,
+            strength,
+            Some(&mut NearestCache::new(4)),
+        ),
+        DitherMode::Bayer4 => dither::quantize_ordered(
+            image,
+            palette,
+            policy,
+            4,
+            strength,
+            Some(&mut NearestCache::new(16)),
+        ),
+        DitherMode::Bayer8 => dither::quantize_ordered(
+            image,
+            palette,
+            policy,
+            8,
+            strength,
+            Some(&mut NearestCache::new(64)),
+        ),
     }
 }
 

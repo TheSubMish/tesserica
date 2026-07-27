@@ -27,6 +27,7 @@ import {
   TRANSPARENT_INDEX,
   alphaPolicyFrom,
   preparePalette,
+  NearestCache,
   quantizeNone,
   renderIndices,
   type AlphaPolicy,
@@ -80,17 +81,20 @@ export function quantizeWithDither(
   const strength = settings.ditherStrength;
   switch (settings.dither) {
     case 'none':
-      return quantizeNone(image, palette, settings.colorSpace, policy);
+      return quantizeNone(image, palette, settings.colorSpace, policy, new NearestCache(1));
+    // The two error-diffusion modes deliberately get no cache (§4.2), and could
+    // not use one: their lookups are on arbitrary Oklab floats, not on a colour
+    // with a 24-bit key.
     case 'floyd-steinberg':
       return quantizeErrorDiffusion(image, palette, policy, FLOYD_STEINBERG, strength);
     case 'atkinson':
       return quantizeErrorDiffusion(image, palette, policy, ATKINSON, strength);
     case 'bayer2':
-      return quantizeOrdered(image, palette, policy, 2, strength);
+      return quantizeOrdered(image, palette, policy, 2, strength, new NearestCache(4));
     case 'bayer4':
-      return quantizeOrdered(image, palette, policy, 4, strength);
+      return quantizeOrdered(image, palette, policy, 4, strength, new NearestCache(16));
     case 'bayer8':
-      return quantizeOrdered(image, palette, policy, 8, strength);
+      return quantizeOrdered(image, palette, policy, 8, strength, new NearestCache(64));
   }
 }
 

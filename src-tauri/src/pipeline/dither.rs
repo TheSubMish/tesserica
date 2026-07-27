@@ -18,7 +18,8 @@
 use super::buffer::PixelBuffer;
 use super::oklab::{self, Oklab};
 use super::quantize::{
-    nearest_index_oklab, AlphaPolicy, PreparedPalette, QuantizeResult, TRANSPARENT_INDEX,
+    nearest_index_oklab, AlphaPolicy, NearestCache, PreparedPalette, QuantizeResult,
+    TRANSPARENT_INDEX,
 };
 
 /// One term of an error-diffusion kernel: an offset and its share of the error.
@@ -198,6 +199,7 @@ pub fn quantize_ordered(
     policy: AlphaPolicy,
     n: usize,
     strength: f64,
+    cache: Option<&mut NearestCache>,
 ) -> Result<QuantizeResult, String> {
     let matrix = bayer_matrix(n)?;
     let spread = palette_spread(palette);
@@ -205,6 +207,7 @@ pub fn quantize_ordered(
 
     let mut out = vec![0u8; src.data.len()];
     let mut indices = vec![TRANSPARENT_INDEX; src.pixel_count()];
+    let mut cache = cache;
 
     for y in 0..src.height as usize {
         for x in 0..src.width as usize {
@@ -216,15 +219,26 @@ pub fn quantize_ordered(
                 continue;
             }
 
-            let threshold = (matrix[(y % n) * n + (x % n)] as f64 + 0.5) * scale - 0.5;
-            let c = oklab::srgb8_to_oklab(src.data[i], src.data[i + 1], src.data[i + 2]);
-            let shifted = Oklab {
-                l: c.l + threshold * strength * spread,
-                a: c.a,
-                b: c.b,
-            };
+            let lane = (y % n) * n + (x % n);
+            let (r, g, b) = (src.data[i], src.data[i + 1], src.data[i + 2]);
 
-            let idx = nearest_index_oklab(palette, shifted);
+            // Exact even with the cache: the perturbation is a deterministic
+            // function of the source colour and the Bayer cell, so one lane per
+            // cell keeps the memo faithful (§4.2).
+            let compute = || {
+                let threshold = (matrix[lane] as f64 + 0.5) * scale - 0.5;
+                let c = oklab::srgb8_to_oklab(r, g, b);
+                let shifted = Oklab {
+                    l: c.l + threshold * strength * spread,
+                    a: c.a,
+                    b: c.b,
+                };
+                nearest_index_oklab(palette, shifted)
+            };
+            let idx = match cache.as_deref_mut() {
+                Some(c) => c.lookup(r, g, b, lane, compute),
+                None => compute(),
+            };
             let entry = palette.colors[idx as usize];
             indices[p] = idx;
             out[i] = entry[0];
@@ -397,7 +411,7 @@ mod tests {
         // The whole point: a colour with no palette entry near it must break up
         // into a pattern rather than collapsing to one entry.
         let src = solid(8, 8, [128, 128, 128, 255]);
-        let out = quantize_ordered(&src, &black_and_white(), opaque(), 4, 1.0).unwrap();
+        let out = quantize_ordered(&src, &black_and_white(), opaque(), 4, 1.0, None).unwrap();
         assert!(out.indices.contains(&0), "no black");
         assert!(out.indices.contains(&1), "no white");
     }
@@ -416,7 +430,7 @@ mod tests {
     fn a_colour_already_in_the_palette_is_never_dithered() {
         let src = solid(8, 8, [255, 255, 255, 255]);
         for out in [
-            quantize_ordered(&src, &black_and_white(), opaque(), 8, 1.0).unwrap(),
+            quantize_ordered(&src, &black_and_white(), opaque(), 8, 1.0, None).unwrap(),
             quantize_error_diffusion(&src, &black_and_white(), opaque(), FLOYD_STEINBERG, 1.0)
                 .unwrap(),
             quantize_error_diffusion(&src, &black_and_white(), opaque(), ATKINSON, 1.0).unwrap(),
@@ -439,10 +453,10 @@ mod tests {
             px.copy_from_slice(&[v, v, v, 255]);
         }
         let palette = black_and_white();
-        let plain = quantize_none(&src, &palette, ColorSpace::Oklab, opaque()).unwrap();
+        let plain = quantize_none(&src, &palette, ColorSpace::Oklab, opaque(), None).unwrap();
 
         for out in [
-            quantize_ordered(&src, &palette, opaque(), 4, 0.0).unwrap(),
+            quantize_ordered(&src, &palette, opaque(), 4, 0.0, None).unwrap(),
             quantize_error_diffusion(&src, &palette, opaque(), FLOYD_STEINBERG, 0.0).unwrap(),
             quantize_error_diffusion(&src, &palette, opaque(), ATKINSON, 0.0).unwrap(),
         ] {
@@ -454,7 +468,7 @@ mod tests {
     fn transparent_pixels_stay_transparent_under_every_mode() {
         let src = solid(4, 4, [128, 128, 128, 0]);
         for out in [
-            quantize_ordered(&src, &black_and_white(), opaque(), 2, 1.0).unwrap(),
+            quantize_ordered(&src, &black_and_white(), opaque(), 2, 1.0, None).unwrap(),
             quantize_error_diffusion(&src, &black_and_white(), opaque(), FLOYD_STEINBERG, 1.0)
                 .unwrap(),
             quantize_error_diffusion(&src, &black_and_white(), opaque(), ATKINSON, 1.0).unwrap(),

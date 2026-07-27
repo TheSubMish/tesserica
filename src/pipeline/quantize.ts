@@ -137,6 +137,7 @@ export function quantizeNone(
   palette: PreparedPalette,
   space: ColorSpace,
   policy: AlphaPolicy,
+  cache?: NearestCache,
 ): QuantizeResult {
   const out = new Uint8ClampedArray(src.data.length);
   const indices = new Uint16Array(src.width * src.height);
@@ -147,7 +148,12 @@ export function quantizeNone(
       indices[p] = TRANSPARENT_INDEX;
       continue;
     }
-    const idx = nearestIndex(palette, src.data[i], src.data[i + 1], src.data[i + 2], space);
+    const r = src.data[i];
+    const g = src.data[i + 1];
+    const b = src.data[i + 2];
+    const idx = cache
+      ? cache.lookup(r, g, b, 0, () => nearestIndex(palette, r, g, b, space))
+      : nearestIndex(palette, r, g, b, space);
     const c = palette.colors[idx];
     indices[p] = idx;
     out[i] = c[0];
@@ -178,4 +184,73 @@ export function renderIndices(
     out[i + 3] = alpha[p];
   }
   return bufferFrom(width, height, out);
+}
+
+/**
+ * Direct-mapped memo for nearest-colour lookups (`docs/04` §4.2).
+ *
+ * §4.2 sketches a table keyed on the top 5 bits per channel. Taken literally
+ * that is **lossy** — two colours 7 apart in red would share an answer — which
+ * is a quality regression bought with speed, and quietly changes output.
+ *
+ * So the key is the same (5 bits per channel, 32,768 slots, same locality) but
+ * each slot also stores the **full 24-bit colour it was filled from**. A hit
+ * requires the tag to match; a mismatch recomputes and replaces. The cache is
+ * then a pure memoization: it cannot change a single output pixel, which is
+ * asserted directly in the tests and, more usefully, by the fact that the entire
+ * golden corpus produces byte-identical output with and without it.
+ *
+ * `lanes` exists for ordered dithering, where the same source colour resolves
+ * differently depending on its position in the Bayer cell. One lane per cell
+ * position keeps the memo exact there too.
+ *
+ * > ⚠️ **Error diffusion must not use this**, and structurally cannot: the
+ * > lookup takes 8-bit sRGB, while diffused values are arbitrary Oklab floats
+ * > with no 24-bit key to tag on. That is §4.2's carve-out enforced by the
+ * > types rather than by a comment.
+ */
+export class NearestCache {
+  static readonly SLOTS_PER_LANE = 32768;
+
+  private readonly tags: Int32Array;
+  private readonly values: Uint16Array;
+
+  constructor(readonly lanes: number = 1) {
+    if (!Number.isInteger(lanes) || lanes < 1) {
+      throw new Error(`lanes must be a positive integer, got ${lanes}`);
+    }
+    const size = lanes * NearestCache.SLOTS_PER_LANE;
+    // -1 is "empty"; a real tag is a 24-bit colour, always >= 0.
+    this.tags = new Int32Array(size).fill(-1);
+    this.values = new Uint16Array(size);
+  }
+
+  /** Top 5 bits per channel — the key from §4.2, shared with `coarseKey`. */
+  static slot(r: number, g: number, b: number): number {
+    return ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+  }
+
+  static tag(r: number, g: number, b: number): number {
+    return (r << 16) | (g << 8) | b;
+  }
+
+  /**
+   * Memoize `compute` against the source colour and lane.
+   *
+   * The caller supplies the computation rather than the cache deriving it,
+   * because the two callers do different things: undithered quantization asks
+   * for the nearest entry to the colour, ordered dithering asks for the nearest
+   * entry to the colour *perturbed by its Bayer cell*. Both are pure functions
+   * of `(r, g, b, lane)`, which is exactly what makes memoizing them exact.
+   */
+  lookup(r: number, g: number, b: number, lane: number, compute: () => number): number {
+    const at = lane * NearestCache.SLOTS_PER_LANE + NearestCache.slot(r, g, b);
+    const tag = NearestCache.tag(r, g, b);
+    if (this.tags[at] === tag) return this.values[at];
+
+    const idx = compute();
+    this.tags[at] = tag;
+    this.values[at] = idx;
+    return idx;
+  }
 }
