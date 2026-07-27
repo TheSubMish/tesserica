@@ -14,6 +14,7 @@
  */
 
 export * from './adjust.ts';
+export * from './autopalette.ts';
 export * from './buffer.ts';
 export * from './cleanup.ts';
 export * from './convert.ts';

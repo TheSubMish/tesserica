@@ -116,9 +116,14 @@ The suite has been checked against a deliberately injected 1e-9 offset in
 | Differing RGBA bytes | **0**       |
 
 The matrix is 7 sources × 8 bundled palettes × 3 pixel sizes × 3 downscale modes
-× 6 dither modes, plus 29 edge cases covering adjustments, crop, fit-to-subject,
-despeckle, outline, sRGB distance, `preserveAlpha` and fractional dither
-strength.
+× 6 dither modes, plus 61 edge cases covering adjustments, crop, fit-to-subject,
+despeckle, outline, sRGB distance, `preserveAlpha`, fractional dither strength,
+and the **auto palette** at four colour counts on every source.
+
+The auto-palette cases are the highest-risk in the suite: Wu's greedy split and
+eight k-means iterations have to agree exactly across two languages, and a
+divergence there would change the palette itself rather than one pixel's
+assignment within it. They pass with zero differing indices.
 
 Checked against a deliberately changed rounding mode in the TS box downscale
 (`round` → `floor`): 70 cases fail, each naming the differing pixel and both

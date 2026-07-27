@@ -13,6 +13,7 @@
 //! is fixed and identical here.
 
 pub mod adjust;
+pub mod autopalette;
 pub mod buffer;
 pub mod cleanup;
 pub mod convert;

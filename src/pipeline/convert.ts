@@ -18,6 +18,7 @@
  */
 
 import { adjustParamsFrom, applyAdjustments } from './adjust.ts';
+import { autoPalette } from './autopalette.ts';
 import type { PixelBuffer } from './buffer.ts';
 import { despeckle, outline } from './cleanup.ts';
 import { crop, fitToSubject } from './crop.ts';
@@ -53,15 +54,23 @@ export interface ConvertResult {
  */
 export const FIT_TO_SUBJECT_PADDING = 0;
 
-export function resolvePalette(spec: PaletteSpec, _source: PixelBuffer): PreparedPalette {
+/**
+ * Resolve the settings' palette against the image being converted.
+ *
+ * `auto` is derived from the **downscaled** image, not the source: those are the
+ * colours that will actually be quantized, and choosing against the source would
+ * spend palette entries on detail the downscale is about to average away.
+ */
+export function resolvePalette(
+  spec: PaletteSpec,
+  image: PixelBuffer,
+  alphaThreshold: number,
+): PreparedPalette {
   switch (spec.kind) {
     case 'fixed':
       return preparePalette(spec.colors);
     case 'auto':
-      // §4.3 — Wu followed by k-means in Oklab. Lands with the auto-palette
-      // step; until then this is an explicit failure rather than a silent
-      // fallback to some other palette, which would diverge preview from export.
-      throw new Error('auto palette is not implemented yet (docs/04 §4.3)');
+      return preparePalette(autoPalette(image, spec.maxColors, alphaThreshold));
   }
 }
 
@@ -113,7 +122,7 @@ export function convert(source: PixelBuffer, settings: ConvertSettings): Convert
   image = downscale(image, settings.targetWidth, settings.targetHeight, settings.downscaleMode);
 
   // [5] quantize + dither
-  const palette = resolvePalette(settings.palette, image);
+  const palette = resolvePalette(settings.palette, image, settings.alphaThreshold);
   const policy = alphaPolicyFrom(settings);
   const quantized = quantizeWithDither(image, palette, policy, settings);
 

@@ -154,5 +154,29 @@ export function edgeCases(): MatrixCase[] {
   push(alpha, 'floyd-steinberg-over-alpha', { dither: 'floyd-steinberg' });
   push(alpha, 'atkinson-over-alpha', { dither: 'atkinson', preserveAlpha: true });
 
+  // Auto palette (§4.3). The highest-risk case in the whole suite: Wu's greedy
+  // split and eight k-means iterations have to agree *exactly* across two
+  // languages, and a divergence here changes the palette itself rather than a
+  // pixel's assignment to it. Covered across every source, several colour
+  // counts, and with dithering on top.
+  for (const source of SOURCES) {
+    for (const maxColors of [4, 8, 16, 32]) {
+      push(source, `auto-${maxColors}`, { palette: { kind: 'auto', maxColors } });
+    }
+  }
+  push(portrait, 'auto-16-floyd-steinberg', {
+    palette: { kind: 'auto', maxColors: 16 },
+    dither: 'floyd-steinberg',
+  });
+  push(gradient, 'auto-8-bayer4', {
+    palette: { kind: 'auto', maxColors: 8 },
+    dither: 'bayer4',
+  });
+  push(alpha, 'auto-8-over-alpha', { palette: { kind: 'auto', maxColors: 8 } });
+  push(pixelArt, 'auto-4-nearest', {
+    palette: { kind: 'auto', maxColors: 4 },
+    downscaleMode: 'nearest',
+  });
+
   return cases;
 }

@@ -69,7 +69,7 @@ therefore not built:
 - [x] Preview Web Worker with latest-wins cancellation (`02` §8)
 - [x] Rust full-res export path; `SourceId` handle model (`02` §6.2)
 - [x] Convert mode UI: split/side-by-side, four primary controls (`05` §3)
-- [ ] Auto-palette (Wu + k-means in Oklab) (`04` §4.3)
+- [x] Auto-palette (Wu + k-means in Oklab) (`04` §4.3)
 - [ ] **`[ Edit → ]`** — conversion layer creation, mode switch, live re-editing
 
 **Exit:** ✅ **W6 complete. W1 complete except background removal.** This is where the

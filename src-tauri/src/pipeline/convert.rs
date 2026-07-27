@@ -16,6 +16,7 @@
 //! off the palette and forces a second mapping, compounding error.
 
 use super::adjust::{self, AdjustParams};
+use super::autopalette::auto_palette;
 use super::buffer::PixelBuffer;
 use super::cleanup;
 use super::crop;
@@ -42,18 +43,20 @@ pub struct ConvertResult {
 /// for it appears, it belongs in `ConvertSettings`.
 pub const FIT_TO_SUBJECT_PADDING: i64 = 0;
 
+/// Resolve the settings' palette against the image being converted.
+///
+/// `Auto` is derived from the **downscaled** image, not the source: those are
+/// the colours that will actually be quantized, and choosing against the source
+/// would spend palette entries on detail the downscale is about to average away.
 pub fn resolve_palette(
     spec: &PaletteSpec,
-    _source: &PixelBuffer,
+    image: &PixelBuffer,
+    alpha_threshold: u8,
 ) -> Result<PreparedPalette, String> {
     match spec {
         PaletteSpec::Fixed { colors } => quantize::prepare_palette(colors.clone()),
-        // §4.3 — Wu followed by k-means in Oklab. Lands with the auto-palette
-        // step; until then this is an explicit failure rather than a silent
-        // fallback to some other palette, which would diverge preview from
-        // export.
-        PaletteSpec::Auto { .. } => {
-            Err("auto palette is not implemented yet (docs/04 §4.3)".to_string())
+        PaletteSpec::Auto { max_colors } => {
+            quantize::prepare_palette(auto_palette(image, *max_colors, alpha_threshold)?)
         }
     }
 }
@@ -140,7 +143,7 @@ pub fn convert(source: &PixelBuffer, settings: &ConvertSettings) -> Result<Conve
     )?;
 
     // [5] quantize + dither
-    let palette = resolve_palette(&settings.palette, &image)?;
+    let palette = resolve_palette(&settings.palette, &image, settings.alpha_threshold)?;
     let policy = AlphaPolicy::from_settings(settings);
     let quantized = quantize_with_dither(&image, &palette, policy, settings)?;
 
@@ -255,10 +258,20 @@ mod tests {
     }
 
     #[test]
-    fn auto_palette_fails_loudly_rather_than_silently_substituting_one() {
-        let src = solid(4, 4, [1, 2, 3, 255]);
-        let settings = ConvertSettings::new(2, 2, PaletteSpec::Auto { max_colors: 8 });
-        assert!(convert(&src, &settings).is_err());
+    fn an_auto_palette_produces_indices_inside_the_palette_it_chose() {
+        let mut src = PixelBuffer::new(32, 32).unwrap();
+        for (p, px) in src.data.chunks_exact_mut(4).enumerate() {
+            px.copy_from_slice(&[(p * 5) as u8, (p * 11) as u8, (p * 17) as u8, 255]);
+        }
+        let settings = ConvertSettings::new(8, 8, PaletteSpec::Auto { max_colors: 6 });
+        let out = convert(&src, &settings).unwrap();
+
+        assert!(out.palette.colors.len() <= 6);
+        for &i in &out.indices {
+            if i != TRANSPARENT_INDEX {
+                assert!((i as usize) < out.palette.colors.len());
+            }
+        }
     }
 
     #[test]

@@ -314,7 +314,40 @@ the best general-purpose approach. Wu gives a good deterministic starting partit
 k-means refines it. Deterministic seeding matters: the same input and settings must
 always produce the same palette, or preview and export diverge.
 
-Median cut is the simpler fallback if Wu proves fiddly, at some quality cost.
+Median cut is the simpler fallback if Wu proves fiddly, at some quality cost. **It was not
+needed** — Wu is implemented in both languages and the golden suite reports zero differing
+indices across 32 auto-palette cases.
+
+#### Determinism is the whole difficulty — how it is achieved
+
+A palette divergence is the worst class of preview/export mismatch: it changes the
+*colours*, not one pixel's assignment among them. Six things make the two implementations
+agree exactly, and none of them is optional:
+
+1. **The palette is chosen from the downscaled image**, not the source — those are the
+   colours that will actually be quantized, and choosing against the source would spend
+   entries on detail the downscale is about to average away.
+2. **Wu's moments are integers** (counts and channel sums, all far below 2^53) held in
+   `f64`. No accumulated rounding to diverge on.
+3. **Every greedy choice breaks ties explicitly.** Strict `>` when selecting the box with
+   the most variance, the cut position, and the axis — so the lowest index, lowest
+   position and earliest axis (r, then g, then b) win a tie identically on both sides.
+4. **k-means iterates over *distinct colours*, sorted by their 24-bit key**, weighted by
+   frequency — not over pixels. That makes the result independent of both image size and
+   traversal order, which a JS `Map` and a Rust `HashMap` would otherwise not share.
+5. **Fixed iteration count, no random restarts**, and an empty cluster keeps its previous
+   centroid rather than being re-seeded — re-seeding is the one step with an arbitrary
+   choice in it.
+6. **The final palette is deduplicated and sorted by colour.** k-means can collapse two
+   centroids onto the same 8-bit colour; and since palette *order* is visible in the index
+   map, ordering by colour rather than by Wu's split sequence keeps the golden suite
+   sensitive to the colours chosen rather than to an implementation detail.
+
+Two behaviours worth stating because they are choices, not accidents: an image with fewer
+distinct colours than `maxColors` returns exactly those colours (inventing extra entries by
+splitting a flat image is worse than a short palette), and a fully transparent image
+returns a single black entry, because the pipeline still needs a palette to be defined on.
+Pixels below `alphaThreshold` never vote.
 
 ### 4.4 Alpha
 

@@ -126,14 +126,16 @@ describe('PreviewCore', () => {
     const missing = core.handle({ type: 'convert', jobId: 2, proxyId: 99, settings: settings() });
     expect(missing?.response.type).toBe('error');
 
-    const auto = core.handle({
+    // A crop that misses the image entirely: the pipeline refuses rather than
+    // returning a 0x0 buffer, and the worker has to survive that.
+    const badCrop = core.handle({
       type: 'convert',
       jobId: 3,
       proxyId: 1,
-      settings: settings({ palette: { kind: 'auto', maxColors: 8 } }),
+      settings: settings({ crop: { x: 999, y: 999, w: 10, h: 10 } }),
     });
-    expect(auto?.response.type).toBe('error');
-    expect((auto?.response as { message: string }).message).toContain('auto palette');
+    expect(badCrop?.response.type).toBe('error');
+    expect((badCrop?.response as { message: string }).message).toContain('crop');
   });
 
   it('releases a proxy', () => {
@@ -261,7 +263,7 @@ describe('PreviewScheduler — latest wins', () => {
 
   it('surfaces a worker error against its job and keeps going', () => {
     const { worker, scheduler, onError } = setup();
-    scheduler.request(settings({ palette: { kind: 'auto', maxColors: 4 } }));
+    scheduler.request(settings({ crop: { x: 999, y: 999, w: 10, h: 10 } }));
     scheduler.handleMessage(worker.respondToOldest());
 
     expect(onError).toHaveBeenCalledTimes(1);

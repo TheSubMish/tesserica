@@ -433,12 +433,6 @@ describe('convert', () => {
     );
   });
 
-  it('fails loudly on an auto palette rather than substituting one', () => {
-    expect(() =>
-      convert(solid(4, 4, [1, 2, 3, 255]), defaultSettings(2, 2, { kind: 'auto', maxColors: 8 })),
-    ).toThrow();
-  });
-
   it('runs despeckle after quantization', () => {
     const src = solid(5, 5, [255, 255, 255, 255]);
     src.data.set([0, 0, 0, 255], (2 * 5 + 2) * 4);
