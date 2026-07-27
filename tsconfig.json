@@ -2,7 +2,10 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    // ES2022.Error is `new Error(msg, { cause })`, which the `preserve-caught-error`
+    // lint rule requires when rethrowing. Supported by Node 22 and by WebKit
+    // since Safari 15, so it is safe on the Linux WebView target (D5).
+    "lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
 
@@ -20,6 +23,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "scripts", "shared"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

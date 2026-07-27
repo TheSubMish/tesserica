@@ -1,0 +1,46 @@
+{
+  "sources": [
+    {
+      "name": "photo-portrait",
+      "width": 96,
+      "height": 128,
+      "exercises": "smooth tonal falloff plus fine grain, portrait aspect"
+    },
+    {
+      "name": "photo-landscape",
+      "width": 128,
+      "height": 96,
+      "exercises": "sky ramp, a hard horizon, textured ground, landscape aspect"
+    },
+    {
+      "name": "flat-illustration",
+      "width": 96,
+      "height": 96,
+      "exercises": "large flat fills with hard edges"
+    },
+    {
+      "name": "pixel-art",
+      "width": 128,
+      "height": 128,
+      "exercises": "an existing 16x16 sprite upscaled 8x — nearest vs box downscale"
+    },
+    {
+      "name": "alpha",
+      "width": 96,
+      "height": 96,
+      "exercises": "a soft alpha edge over transparent green — alpha-weighted downscale"
+    },
+    {
+      "name": "high-contrast",
+      "width": 96,
+      "height": 96,
+      "exercises": "pure black/white at high spatial frequency"
+    },
+    {
+      "name": "gradient",
+      "width": 128,
+      "height": 64,
+      "exercises": "a smooth two-axis ramp — banding and dither reference"
+    }
+  ]
+}

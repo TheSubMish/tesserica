@@ -506,7 +506,12 @@ Parallelization notes:
 (`02-architecture.md` §3.3):
 
 - Sources: photo (portrait), photo (landscape), flat illustration, existing pixel art,
-  image with alpha, high-contrast graphic, gradient
+  image with alpha, high-contrast graphic, gradient — **synthesized deterministically**
+  by `tests/golden/corpus.ts` rather than being real photographs, and committed as raw
+  RGBA (`.rgba`) so both implementations start from *identical bytes* and a failure can
+  never be a PNG-decoder difference. A `.png` review copy is committed alongside each,
+  and the runner asserts it decodes back to the `.rgba` byte for byte. See
+  `tests/golden/README.md` for the reasoning.
 - Settings matrix: each palette × each dither mode × 3 pixel sizes
 - Both implementations run each combination; compare with mean ΔE in Oklab
 - **Non-dithered modes: exact match required** (both are deterministic)

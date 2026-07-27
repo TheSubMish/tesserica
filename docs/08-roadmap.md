@@ -62,7 +62,7 @@ therefore not built:
 **Goal:** W6 (casual avatar) and the core of W1 work.
 
 - [x] `oklab.ts` / `oklab.rs` from shared constants (`04` §4.1)
-- [ ] **Golden-image test harness** — build this alongside the first stage, not after
+- [x] **Golden-image test harness** — build this alongside the first stage, not after
 - [ ] Pipeline stages, both implementations: adjustments → downscale → quantize → cleanup
 - [ ] Dithering: none, Floyd–Steinberg (serpentine), Atkinson, Bayer 2/4/8 (`04` §5)
 - [ ] Nearest-color cache with the error-diffusion carve-out (`04` §4.2)
