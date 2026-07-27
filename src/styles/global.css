@@ -284,15 +284,50 @@ body {
   font: inherit;
 }
 
-.field select {
-  flex: 1;
-  height: var(--control-h-sm);
+/* ---- Native form controls ----------------------------------------------
+   WebKit on Linux draws <select> as a *native GTK widget*, which paints its own
+   background and ignores ours. On a light system theme that left every dropdown
+   with a pale native background under our near-white --text: invisible values
+   in the Conversion, Layer and Palette panels.
+
+   `appearance: none` is what actually hands rendering back to us. It also
+   removes the arrow, so we draw one — a select with no affordance reads as a
+   text box.
+
+   Applied to the element, not to a class: this is a theming defect, and any
+   future select would inherit it otherwise. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0 20px 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: 3px;
-  background: var(--bg-elevated);
+  background-color: var(--bg-elevated);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239a9aa5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 10px 6px;
   color: var(--text);
   font: inherit;
   font-size: 12px;
+}
+
+/* The popup list is still drawn natively on some desktops; these are the only
+   properties that reliably reach it. */
+select option {
+  background-color: var(--bg-elevated);
+  color: var(--text);
+}
+
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.field select {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-sm);
 }
 
 .field select:disabled {
@@ -310,7 +345,26 @@ body {
 
 .field input[type='range'] {
   flex: 1;
+  /* A range input has an intrinsic width of ~129px and flex items do not shrink
+     below their intrinsic size by default, so in the 220px sidebar the value
+     readout beside it was pushed off the edge. */
+  min-width: 0;
   accent-color: var(--accent);
+}
+
+/* Value readouts must not be the thing that gets clipped — they are the whole
+   point of the control beside them. */
+.field output {
+  flex: none;
+  min-width: 3ch;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.panel {
+  min-width: 0;
 }
 
 .field .value {
