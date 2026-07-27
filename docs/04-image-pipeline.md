@@ -149,8 +149,11 @@ output.
 sRGB → linear sRGB → LMS → Oklab
 ```
 
+**Precision: `f64` on both sides (D12).** The Rust implementation uses `f64`, matching
+JavaScript's only float type. This is normative, not an optimization detail — see below.
+
 ```rust
-pub fn srgb_to_oklab(r: f32, g: f32, b: f32) -> [f32; 3] {
+pub fn srgb_to_oklab(r: f64, g: f64, b: f64) -> [f64; 3] {
     let (r, g, b) = (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b));
 
     let l = 0.4122214708*r + 0.5363325363*g + 0.0514459929*b;
@@ -164,10 +167,35 @@ pub fn srgb_to_oklab(r: f32, g: f32, b: f32) -> [f32; 3] {
       0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_ ]
 }
 
-fn srgb_to_linear(c: f32) -> f32 {
+fn srgb_to_linear(c: f64) -> f64 {
     if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 ```
+
+The constants above are **not** duplicated by hand in the two implementations. They live
+once in `shared/oklab.constants.json`, and `src/pipeline/oklab.test.ts` and
+`src-tauri/src/pipeline/oklab.rs` each assert their own literals against that file — so
+editing one side without the other fails a test in the language that was *not* edited
+(D10).
+
+#### Why `f64` and not `f32` (D12)
+
+Measured over 4,096 RGB samples (16³ grid, step 17) plus all 256 greys:
+
+| Comparison | Max absolute divergence |
+|---|---|
+| Rust `f32` vs Rust `f64` | 3.625e-7 |
+| Rust `f64` vs JS `f64` | 6.661e-16 |
+
+`f32`'s 3.6e-7 is perceptually invisible on its own, but nearest-colour matching is an
+`argmin`: when two palette entries are within that of equidistant, a 3.6e-7 wobble changes
+the *chosen index*, and the golden suite's whole purpose is to catch exactly that. The
+`f64` residual is nine orders of magnitude smaller than the tie-break epsilon in §4.2 and
+cannot reach an index.
+
+Note what this does **not** buy: bit-identical output. `cbrt` and `powf` are not required
+to be correctly rounded, and Rust's libm differs from V8's, so only ~70–81% of samples
+agree bit-for-bit. Parity is therefore defined on palette indices (§11), never on floats.
 
 ### 4.2 Fixed palette (the common case)
 
@@ -194,6 +222,28 @@ cost collapses to roughly one distance computation per *distinct* color.
 
 For large palettes (>64), a k-d tree in Oklab is worth it. For ≤64 entries, linear scan
 with the cache wins on simplicity.
+
+#### Tie-break — normative (D12)
+
+The linear scan must break ties **deterministically toward the lowest palette index**:
+
+```rust
+// distances are SQUARED Oklab distance
+if d < best_d - 1e-9 {
+    best_d = d;
+    best_i = i;
+}
+```
+
+Not `d < best_d`. Exact ties are real — a mid-grey sitting exactly between two entries of
+a bundled grayscale ramp produces one — and near-ties within the cross-language float
+residual would otherwise resolve differently in TS and Rust and show up as a diff in the
+golden suite.
+
+The epsilon is safe by a wide margin in both directions: at squared Oklab distance, 1e-9
+corresponds to ~3.2e-5 in Oklab units against a just-noticeable difference of roughly
+0.002, so it is ~60× too small to alter a choice a human could perceive; and it is ~10⁶×
+larger than the 6.7e-16 residual it exists to absorb.
 
 ### 4.3 Auto palette (`palette: 'auto'`)
 
@@ -237,7 +287,7 @@ The 1976 standard. Pushes residual quantization error onto not-yet-processed nei
 ```rust
 for y in 0..h {
     for x in 0..w {
-        let old = buf[y][x];                    // Oklab, f32
+        let old = buf[y][x];                    // Oklab, f64 (D12)
         let new = nearest_palette_color(old);
         out[y][x] = new;
         let err = old - new;                    // per-channel
@@ -253,7 +303,7 @@ for y in 0..h {
 Notes:
 - **Serpentine scanning** (alternating row direction) noticeably reduces the diagonal
   streaking plain left-to-right scanning produces.
-- Error accumulates in an `f32` working buffer in **Oklab**, not sRGB.
+- Error accumulates in an `f64` working buffer in **Oklab**, not sRGB (D12).
 - `ditherStrength` scales the diffused error. 1.0 is classic; lower values give a
   cleaner, less noisy result that often suits pixel art better.
 - **Inherently sequential** — each pixel depends on its predecessors. This is the one
@@ -462,6 +512,27 @@ Parallelization notes:
 - **Non-dithered modes: exact match required** (both are deterministic)
 - **Dithered modes: structural comparison** — histogram of palette-index usage within
   tolerance, since exact match is impossible across resolutions
+
+### 11.1 What "exact match" means — normative (D12)
+
+**Identical palette indices, not identical floats.**
+
+Bit-identical floats across the two implementations are *unachievable*, and demanding them
+would fail correct code. `cbrt` and `powf` are not specified to be correctly rounded;
+Rust's libm and V8's are different implementations. Measured over 4,352 samples, Rust
+`f64` and JS `f64` Oklab agree to within 6.661e-16 but are bit-identical only ~70–81% of
+the time.
+
+So the comparison is:
+
+| Mode | Assertion |
+|---|---|
+| `none`, `bayer2/4/8` | The two index maps are **equal, element for element**. Zero differing pixels. |
+| `floyd-steinberg`, `atkinson` | Palette-usage histograms within tolerance; per-pixel equality is *not* required. |
+
+Both are made possible by the `f64` choice in §4.1 and the tie-break in §4.2: with those,
+a 6.7e-16 residual cannot reach an index, so "zero differing pixels" is a guarantee the
+implementations can actually keep rather than an aspiration.
 
 Unit tests: Oklab round-trip accuracy, palette parsers against real Lospec files,
 Bayer matrix generation, connected-component despeckle on hand-built cases.

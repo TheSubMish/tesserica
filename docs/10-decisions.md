@@ -192,6 +192,58 @@ supporting it. Users who own Aseprite overwhelmingly want to bring work *in*.
 
 ---
 
+## D12 · Oklab is **`f64` on both sides**; parity is measured in **palette indices**
+
+**Locked 2026-07-27** (my call — a measurement, not a preference). Follows from D10.
+
+D10 says both implementations are hand-rolled from identical constants so that parity is
+structural. Before writing any pipeline code we measured what "structural" can actually
+buy us. Over 4,096 RGB samples (a 16³ grid, step 17) plus all 256 greys, using Ottosson's
+published matrices:
+
+| Comparison | Max absolute divergence in any Oklab channel |
+|---|---|
+| Rust `f32` vs Rust `f64` | **3.625e-7** |
+| Rust `f64` vs JS `f64` | **6.661e-16** |
+
+Bit-identical rate for Rust `f64` vs JS `f64` was 70–81% depending on the channel —
+**never 100%**. `cbrt` and `powf` are not IEEE-754-specified to be correctly rounded, and
+Rust's libm and V8's are different implementations, so exact float equality across the two
+languages is unachievable no matter how identical the constants are.
+
+Three consequences, all now normative in `04-image-pipeline.md`:
+
+1. **The Rust pipeline uses `f64`, not `f32`** (`04` §4.1, §5.1). A 3.6e-7 divergence is
+   small perceptually but is large enough to flip a nearest-colour `argmin` when two
+   palette entries are within 3.6e-7 of equidistant — which then changes an *output pixel*,
+   not a rounding digit. The 6.7e-16 `f64` residual cannot reach that far given the
+   tie-break below. Memory cost is irrelevant: the working buffer is a proxy at preview
+   scale and a scanline window at export scale.
+
+2. **"Exact match" in the golden suite means identical palette indices**, not identical
+   floats (`04` §11). Comparing floats bitwise across libms would fail on correct code.
+   Indices are what the user sees, and they are integers.
+
+3. **Nearest-colour uses a deterministic tie-break** (`04` §4.2): a candidate wins only if
+   `d < best - 1e-9`, so near-ties resolve to the *lowest palette index* in both languages.
+   Distances are squared Oklab, so 1e-9 there is ~3.2e-5 in Oklab units against a JND of
+   roughly 0.002 — the epsilon is ~60× too small to change a choice a human could see, and
+   ~10⁹× larger than the cross-language residual it exists to absorb. Exact ties are not
+   hypothetical: a mid-grey landing exactly between two entries of a bundled grayscale ramp
+   hits one.
+
+**Consequence for the constants:** they live once, in `shared/oklab.constants.json`, and
+each language's unit tests assert their own literals against that file. Editing one
+implementation without the other fails a test in the language that was not edited.
+
+Rejected: `f32` in Rust with a wider tie-break epsilon (an epsilon big enough to absorb
+3.6e-7 in squared distance is within an order of magnitude of a JND — it would start
+making visible choices); requiring bit-identical floats (unachievable, see above);
+shipping our own `cbrt` (correctly-rounded cube root is real work for no user-visible gain
+once parity is defined on indices).
+
+---
+
 ## Still open — deferred, not decided
 
 These genuinely need measurement rather than a preference, and each is scheduled:
@@ -221,3 +273,4 @@ These genuinely need measurement rather than a preference, and each is scheduled
 | D9 | **RGBA only** in v1 |
 | D10 | **Hand-roll Oklab** in both languages |
 | D11 | Aseprite **import only** |
+| D12 | Oklab is **`f64` both sides**; parity measured in **palette indices** |
