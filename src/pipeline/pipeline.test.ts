@@ -439,15 +439,6 @@ describe('convert', () => {
     ).toThrow();
   });
 
-  it('fails loudly on an unimplemented dither mode', () => {
-    expect(() =>
-      convert(solid(4, 4, [1, 2, 3, 255]), {
-        ...defaultSettings(2, 2, BLACK_AND_WHITE),
-        dither: 'atkinson',
-      }),
-    ).toThrow();
-  });
-
   it('runs despeckle after quantization', () => {
     const src = solid(5, 5, [255, 255, 255, 255]);
     src.data.set([0, 0, 0, 255], (2 * 5 + 2) * 4);

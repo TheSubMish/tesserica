@@ -18,6 +18,7 @@ export * from './buffer.ts';
 export * from './cleanup.ts';
 export * from './convert.ts';
 export * from './crop.ts';
+export * from './dither.ts';
 export * from './downscale.ts';
 export * from './oklab.ts';
 export * from './quantize.ts';

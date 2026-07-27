@@ -38,7 +38,14 @@ export const MATRIX_DOWNSCALE_MODES: readonly DownscaleMode[] = ['box', 'nearest
  * situation the corpus exists to prevent — so add the mode and the entry
  * together.
  */
-export const MATRIX_DITHER_MODES: readonly DitherMode[] = ['none'];
+export const MATRIX_DITHER_MODES: readonly DitherMode[] = [
+  'none',
+  'floyd-steinberg',
+  'atkinson',
+  'bayer2',
+  'bayer4',
+  'bayer8',
+];
 
 export interface MatrixCase {
   readonly id: string;
@@ -47,10 +54,10 @@ export interface MatrixCase {
 }
 
 /**
- * The full cross-product would be 7 sources × 8 palettes × 3 sizes × 3 downscale
- * modes × N dither modes = 504 cases per dither mode, each shelling out no
- * further than one already-running process — so it is affordable, and breadth is
- * exactly what catches a divergence that only one palette provokes.
+ * The full cross-product: 7 sources × 8 palettes × 3 sizes × 3 downscale modes ×
+ * 6 dither modes. Every case runs inside one already-started process, so breadth
+ * is cheap — and breadth is exactly what catches a divergence that only one
+ * palette, or only one dither mode, provokes.
  */
 export function matrixCases(): MatrixCase[] {
   const cases: MatrixCase[] = [];
@@ -136,6 +143,16 @@ export function edgeCases(): MatrixCase[] {
 
   push(portrait, 'srgb-distance', { colorSpace: 'srgb' });
   push(gradient, 'srgb-distance', { colorSpace: 'srgb' });
+
+  // Dither strength is a multiplier on the diffused error and on the Bayer
+  // threshold; a value that is neither 0 nor 1 is where a scaling mistake in one
+  // implementation would show.
+  for (const dither of ['floyd-steinberg', 'atkinson', 'bayer4'] as const) {
+    push(gradient, `${dither}-strength-half`, { dither, ditherStrength: 0.5 });
+    push(portrait, `${dither}-strength-zero`, { dither, ditherStrength: 0 });
+  }
+  push(alpha, 'floyd-steinberg-over-alpha', { dither: 'floyd-steinberg' });
+  push(alpha, 'atkinson-over-alpha', { dither: 'atkinson', preserveAlpha: true });
 
   return cases;
 }

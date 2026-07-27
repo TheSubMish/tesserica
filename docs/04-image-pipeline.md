@@ -304,6 +304,12 @@ into edges. **This is the single most common bug in naive converters.**
 Three families, all shipped, because they are aesthetic choices rather than quality
 tiers.
 
+**All dithering works in Oklab**, on an `f64` working buffer, unconditionally. §5.1 below
+is not qualified by `colorSpace` — so `colorSpace: 'srgb'` reaches only the *undithered*
+nearest-colour lookup. Running error diffusion in a space where equal distances do not
+look equally different is precisely what adopting Oklab was meant to stop, and letting an
+escape hatch turn it off would make the escape hatch the trap.
+
 ### 5.1 Error diffusion — Floyd–Steinberg
 
 The 1976 standard. Pushes residual quantization error onto not-yet-processed neighbours:
@@ -352,6 +358,11 @@ Classic Mac. Distributes only 6/8 of the error, deliberately discarding the rest
 Higher contrast, cleaner highlights and shadows, more "crunchy". Often the better look
 for pixel art than Floyd–Steinberg.
 
+**Atkinson scans in raster order, not serpentine.** Serpentine is a Floyd–Steinberg
+correction for its diagonal streaking; Atkinson's classic-Mac character is part of why
+anyone chooses it, and alternating the scan direction changes it. Serpentine is therefore
+a property of the *kernel*, not a global setting.
+
 ### 5.3 Ordered / Bayer
 
 A fixed threshold matrix — structured, repeating, unmistakably retro. Bayer 4×4:
@@ -370,10 +381,30 @@ result    = nearest_palette_color(adjusted)
 ```
 
 Fully **parallelizable** (no inter-pixel dependency) and **resolution-independent in
-character**, which makes it the safest mode for preview/export parity.
+character**, which makes it the safest mode for preview/export parity. Measured: see §11.1
+— Bayer's proxy-vs-full-resolution divergence is an order of magnitude below
+Floyd–Steinberg's.
 
-`spread` should scale with the palette's average color spacing — a fixed value looks
-wrong on both a 4-color and a 64-color palette.
+The matrix is **generated** by the standard recurrence rather than tabulated, so 2, 4 and
+8 cannot disagree with each other:
+
+```
+M(1)  = [0]
+M(2n) = [ 4M(n)    4M(n)+2 ]
+        [ 4M(n)+3  4M(n)+1 ]
+```
+
+**The threshold shifts `L` only**, not all three Oklab channels. The formula above comes
+from RGB implementations, where adding the same amount to R, G and B is a move along the
+grey axis — a *lightness* shift. `L` alone is the faithful translation. Adding the same
+scalar to `a` and `b` would drag every pixel in one fixed hue direction, which is a
+different effect and not what "ordered dither" means.
+
+`spread` scales with the palette's average color spacing — a fixed value looks wrong on
+both a 4-color and a 64-color palette. Concretely: **the mean, over palette entries, of
+the Oklab distance from each entry to its nearest other entry**; zero for a one-color
+palette. (`sqrt` is IEEE-754 correctly rounded, unlike `cbrt` and `powf`, so this number
+is bit-identical in both languages.)
 
 ### 5.4 References
 
@@ -579,14 +610,35 @@ the time.
 
 So the comparison is:
 
-| Mode | Assertion |
-|---|---|
-| `none`, `bayer2/4/8` | The two index maps are **equal, element for element**. Zero differing pixels. |
-| `floyd-steinberg`, `atkinson` | Palette-usage histograms within tolerance; per-pixel equality is *not* required. |
+There are really **two** comparisons, and conflating them is what makes the dithering rule
+look weaker than it is:
 
-Both are made possible by the `f64` choice in §4.1 and the tie-break in §4.2: with those,
-a 6.7e-16 residual cannot reach an index, so "zero differing pixels" is a guarantee the
-implementations can actually keep rather than an aspiration.
+**(a) Same input, same resolution — every mode must match exactly.** Both implementations
+are handed identical bytes at identical size, so even error diffusion is fully
+deterministic. `none`, `bayer2/4/8`, `floyd-steinberg` and `atkinson` all assert **equal
+index maps, element for element, zero differing pixels**, plus equal rendered RGBA. This
+is made possible by the `f64` choice in §4.1 and the tie-break in §4.2: a 6.7e-16 residual
+cannot reach an index, so this is a guarantee the implementations can keep rather than an
+aspiration.
+
+**(b) Different resolution — the shipping situation, compared structurally.** Preview runs
+the TS pipeline on a ~1024px proxy; export runs the Rust pipeline on the full-resolution
+original (`02-architecture.md` §3.3). Error diffusion is legitimately resolution-dependent,
+so these cannot be identical. The honest question is whether a user who approved the
+preview recognises the export, so the assertion is on the **distribution of palette
+indices**: total variation distance between the two palette-usage histograms,
+`0.5 * Σ |p_i − q_i|` on normalized frequencies, with a transparency bucket.
+
+Measured over 84 cases (every source × four palette sizes × Floyd–Steinberg, Atkinson,
+Bayer 4), preview at half the source resolution against export at full:
+
+| | Total variation |
+|---|---|
+| Worst case (`gradient`, NES 54-color, Floyd–Steinberg) | **0.109** |
+| Bound asserted | 0.2 |
+
+Bayer's mean divergence is an order of magnitude below Floyd–Steinberg's, which is §5.3's
+resolution-independence claim turned into a test rather than an assertion.
 
 Unit tests: Oklab round-trip accuracy, palette parsers against real Lospec files,
 Bayer matrix generation, connected-component despeckle on hand-built cases.

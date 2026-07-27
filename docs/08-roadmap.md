@@ -64,7 +64,7 @@ therefore not built:
 - [x] `oklab.ts` / `oklab.rs` from shared constants (`04` §4.1)
 - [x] **Golden-image test harness** — build this alongside the first stage, not after
 - [x] Pipeline stages, both implementations: adjustments → downscale → quantize → cleanup
-- [ ] Dithering: none, Floyd–Steinberg (serpentine), Atkinson, Bayer 2/4/8 (`04` §5)
+- [x] Dithering: none, Floyd–Steinberg (serpentine), Atkinson, Bayer 2/4/8 (`04` §5)
 - [ ] Nearest-color cache with the error-diffusion carve-out (`04` §4.2)
 - [ ] Preview Web Worker with latest-wins cancellation (`02` §8)
 - [ ] Rust full-res export path; `SourceId` handle model (`02` §6.2)

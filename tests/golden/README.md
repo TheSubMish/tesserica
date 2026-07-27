@@ -67,13 +67,17 @@ the cost.
 
 ## Comparison rules
 
-- **Non-dithered modes must match exactly** — meaning **identical palette
-  indices**, not identical floats (D12). Bit-identical floats across the two
-  languages are unachievable; see below.
-- **Dithered modes are compared structurally.** Error diffusion is legitimately
-  resolution-dependent, so Floyd–Steinberg and Atkinson output from a 1024px
-  proxy will not match full-resolution output. Compare palette-usage
-  distributions, not bytes.
+There are two comparisons, and they answer different questions.
+
+**`convert.parity.test.ts` — same bytes, same size, every mode matches exactly.**
+"Exactly" means **identical palette indices** (D12), not identical floats, which
+are unachievable across libms. Error diffusion is included: at equal resolution
+it is fully deterministic, so there is no reason to accept less.
+
+**`dither.structural.test.ts` — different resolutions, compared structurally.**
+This is the shipping situation: preview runs TS on a proxy, export runs Rust on
+the original. Error diffusion is genuinely resolution-dependent there, so the
+assertion is on the _distribution_ of palette indices rather than on pixels.
 
 ## Measurements
 
@@ -99,3 +103,41 @@ of magnitude.
 
 The suite has been checked against a deliberately injected 1e-9 offset in
 `golden.rs`: it fails, and names the source and pixel index.
+
+### Full-pipeline parity — 2026-07-27
+
+`convert.parity.test.ts`, writing `actual/convert-parity.json`:
+
+|                      |             |
+| -------------------- | ----------- |
+| Cases                | **3,051**   |
+| Pixels compared      | **911,520** |
+| Differing indices    | **0**       |
+| Differing RGBA bytes | **0**       |
+
+The matrix is 7 sources × 8 bundled palettes × 3 pixel sizes × 3 downscale modes
+× 6 dither modes, plus 29 edge cases covering adjustments, crop, fit-to-subject,
+despeckle, outline, sRGB distance, `preserveAlpha` and fractional dither
+strength.
+
+Checked against a deliberately changed rounding mode in the TS box downscale
+(`round` → `floor`): 70 cases fail, each naming the differing pixel and both
+implementations' index.
+
+### Preview/export divergence under dithering — 2026-07-27
+
+`dither.structural.test.ts`, writing `actual/dither-structural.json`. TS converts
+a half-resolution proxy, Rust converts the full source, both to the same output
+size; the metric is total variation distance between palette-usage histograms.
+
+|                                                        |           |
+| ------------------------------------------------------ | --------- |
+| Worst case (`gradient`, NES 54-color, Floyd–Steinberg) | **0.109** |
+| Bound asserted                                         | 0.2       |
+| Cases                                                  | 84        |
+
+Ordered dithering diverges an order of magnitude less than error diffusion,
+which is `docs/04` §5.3's resolution-independence claim measured rather than
+assumed. **This number is the honest size of the preview/export risk** for
+dithered conversions, and it is the one to re-check if the proxy resolution ever
+changes.

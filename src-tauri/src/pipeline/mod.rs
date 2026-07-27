@@ -17,6 +17,7 @@ pub mod buffer;
 pub mod cleanup;
 pub mod convert;
 pub mod crop;
+pub mod dither;
 pub mod downscale;
 pub mod oklab;
 pub mod quantize;

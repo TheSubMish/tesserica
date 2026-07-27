@@ -19,6 +19,7 @@ use super::adjust::{self, AdjustParams};
 use super::buffer::PixelBuffer;
 use super::cleanup;
 use super::crop;
+use super::dither;
 use super::downscale::downscale;
 use super::quantize::{self, AlphaPolicy, PreparedPalette, QuantizeResult, TRANSPARENT_INDEX};
 use super::settings::{ConvertSettings, DitherMode, PaletteSpec};
@@ -55,6 +56,36 @@ pub fn resolve_palette(
     }
 }
 
+/// Stage [5]'s dispatcher.
+///
+/// `color_space` reaches only the undithered path: §5.1 says the error-diffusion
+/// working buffer is in Oklab, unconditionally, and ordered dithering shares
+/// that buffer's units so that `spread` means one thing.
+pub fn quantize_with_dither(
+    image: &PixelBuffer,
+    palette: &PreparedPalette,
+    policy: AlphaPolicy,
+    settings: &ConvertSettings,
+) -> Result<QuantizeResult, String> {
+    let strength = settings.dither_strength;
+    match settings.dither {
+        DitherMode::None => quantize::quantize_none(image, palette, settings.color_space, policy),
+        DitherMode::FloydSteinberg => dither::quantize_error_diffusion(
+            image,
+            palette,
+            policy,
+            dither::FLOYD_STEINBERG,
+            strength,
+        ),
+        DitherMode::Atkinson => {
+            dither::quantize_error_diffusion(image, palette, policy, dither::ATKINSON, strength)
+        }
+        DitherMode::Bayer2 => dither::quantize_ordered(image, palette, policy, 2, strength),
+        DitherMode::Bayer4 => dither::quantize_ordered(image, palette, policy, 4, strength),
+        DitherMode::Bayer8 => dither::quantize_ordered(image, palette, policy, 8, strength),
+    }
+}
+
 pub fn convert(source: &PixelBuffer, settings: &ConvertSettings) -> Result<ConvertResult, String> {
     // [2] framing
     let mut image = match settings.crop {
@@ -79,19 +110,7 @@ pub fn convert(source: &PixelBuffer, settings: &ConvertSettings) -> Result<Conve
     // [5] quantize + dither
     let palette = resolve_palette(&settings.palette, &image)?;
     let policy = AlphaPolicy::from_settings(settings);
-    let quantized: QuantizeResult = match settings.dither {
-        DitherMode::None => {
-            quantize::quantize_none(&image, &palette, settings.color_space, policy)?
-        }
-        // The dither modes land with the dithering module (§5); until then an
-        // unimplemented mode fails loudly rather than silently producing
-        // undithered output the user did not ask for.
-        other => {
-            return Err(format!(
-                "dither mode {other:?} is not implemented yet (docs/04 §5)"
-            ))
-        }
-    };
+    let quantized = quantize_with_dither(&image, &palette, policy, settings)?;
 
     // [6] cleanup
     let mut indices = quantized.indices;
@@ -211,11 +230,24 @@ mod tests {
     }
 
     #[test]
-    fn an_unimplemented_dither_mode_fails_loudly() {
-        let src = solid(4, 4, [1, 2, 3, 255]);
-        let mut settings = ConvertSettings::new(2, 2, two_colors());
-        settings.dither = DitherMode::Atkinson;
-        assert!(convert(&src, &settings).is_err());
+    fn every_dither_mode_runs_and_stays_inside_the_palette() {
+        let src = solid(16, 16, [128, 128, 128, 255]);
+        for mode in [
+            DitherMode::None,
+            DitherMode::FloydSteinberg,
+            DitherMode::Atkinson,
+            DitherMode::Bayer2,
+            DitherMode::Bayer4,
+            DitherMode::Bayer8,
+        ] {
+            let mut settings = ConvertSettings::new(8, 8, two_colors());
+            settings.dither = mode;
+            let out = convert(&src, &settings).unwrap();
+            assert!(
+                out.indices.iter().all(|&i| (i as usize) < 2),
+                "{mode:?} produced an index outside the palette"
+            );
+        }
     }
 
     #[test]

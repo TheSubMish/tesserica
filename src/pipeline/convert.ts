@@ -21,6 +21,7 @@ import { adjustParamsFrom, applyAdjustments } from './adjust.ts';
 import type { PixelBuffer } from './buffer.ts';
 import { despeckle, outline } from './cleanup.ts';
 import { crop, fitToSubject } from './crop.ts';
+import { ATKINSON, FLOYD_STEINBERG, quantizeErrorDiffusion, quantizeOrdered } from './dither.ts';
 import { downscale } from './downscale.ts';
 import {
   TRANSPARENT_INDEX,
@@ -28,7 +29,9 @@ import {
   preparePalette,
   quantizeNone,
   renderIndices,
+  type AlphaPolicy,
   type PreparedPalette,
+  type QuantizeResult,
 } from './quantize.ts';
 import type { ConvertSettings, PaletteSpec } from './settings.ts';
 
@@ -61,6 +64,36 @@ export function resolvePalette(spec: PaletteSpec, _source: PixelBuffer): Prepare
   }
 }
 
+/**
+ * Stage [5]'s dispatcher.
+ *
+ * `colorSpace` reaches only the undithered path: §5.1 says the error-diffusion
+ * working buffer is in Oklab, unconditionally, and ordered dithering shares that
+ * buffer's units so that `spread` means one thing.
+ */
+export function quantizeWithDither(
+  image: PixelBuffer,
+  palette: PreparedPalette,
+  policy: AlphaPolicy,
+  settings: ConvertSettings,
+): QuantizeResult {
+  const strength = settings.ditherStrength;
+  switch (settings.dither) {
+    case 'none':
+      return quantizeNone(image, palette, settings.colorSpace, policy);
+    case 'floyd-steinberg':
+      return quantizeErrorDiffusion(image, palette, policy, FLOYD_STEINBERG, strength);
+    case 'atkinson':
+      return quantizeErrorDiffusion(image, palette, policy, ATKINSON, strength);
+    case 'bayer2':
+      return quantizeOrdered(image, palette, policy, 2, strength);
+    case 'bayer4':
+      return quantizeOrdered(image, palette, policy, 4, strength);
+    case 'bayer8':
+      return quantizeOrdered(image, palette, policy, 8, strength);
+  }
+}
+
 export function convert(source: PixelBuffer, settings: ConvertSettings): ConvertResult {
   // [2] framing
   let image = source;
@@ -78,17 +111,7 @@ export function convert(source: PixelBuffer, settings: ConvertSettings): Convert
   // [5] quantize + dither
   const palette = resolvePalette(settings.palette, image);
   const policy = alphaPolicyFrom(settings);
-  let quantized;
-  switch (settings.dither) {
-    case 'none':
-      quantized = quantizeNone(image, palette, settings.colorSpace, policy);
-      break;
-    default:
-      // The dither modes land with the dithering module (§5); until then an
-      // unimplemented mode fails loudly rather than silently producing
-      // undithered output the user did not ask for.
-      throw new Error(`dither mode ${settings.dither} is not implemented yet (docs/04 §5)`);
-  }
+  const quantized = quantizeWithDither(image, palette, policy, settings);
 
   // [6] cleanup
   let indices = quantized.indices;
