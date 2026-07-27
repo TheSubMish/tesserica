@@ -4,12 +4,13 @@
 //! at full resolution matters: export, ONNX inference, file encode/decode. The
 //! frontend owns interactive rendering and the approximate live preview.
 //!
-//! The image *pipeline* (`src-tauri/src/pipeline/`, mirroring `src/pipeline/`)
-//! lands in Phase 2 (`docs/08-roadmap.md`).
+//! The image *pipeline* (`src-tauri/src/pipeline/`) mirrors `src/pipeline/`
+//! module for module; `docs/04-image-pipeline.md` is normative for both.
 
 pub mod commands;
 pub mod error;
 pub mod model;
+pub mod pipeline;
 pub mod staging;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
