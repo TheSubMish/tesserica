@@ -90,7 +90,7 @@ export function ConvertCanvas() {
           }}
         />
       )}
-      {empty && <p className="convert-empty">Drop an image here, or use File ▸ Open image…</p>}
+      {empty && <p className="convert-empty">Drop an image anywhere, or use ≡ ▸ Open image…</p>}
     </div>
   );
 }

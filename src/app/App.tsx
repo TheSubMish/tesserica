@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CanvasView } from '../canvas/CanvasView';
 import { ConversionPanel } from '../panels/ConversionPanel';
 import { LayerPanel } from '../panels/LayerPanel';
@@ -7,6 +7,7 @@ import { StatusBar } from '../panels/StatusBar';
 import { ToolOptions } from '../panels/ToolOptions';
 import { ToolRail } from '../panels/ToolRail';
 import { ConvertMode } from '../convert/ConvertMode';
+import { listenForImageDrop, SUPPORTED_IMAGE_EXTENSIONS } from '../convert/dropTarget';
 import { handoffToEdit } from '../convert/editHandoff';
 import { loadSourceImage } from '../convert/loadSource';
 import { useUIStore } from '../state/uiStore';
@@ -19,6 +20,7 @@ export function App() {
   const mode = useUIStore((s) => s.mode);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [dropping, setDropping] = useState(false);
   useShortcuts();
 
   const guard = async (label: string, run: () => Promise<string | null>) => {
@@ -30,8 +32,48 @@ export function App() {
     }
   };
 
+  /**
+   * Whole-window drop target (`docs/05-ui-design.md` §3).
+   *
+   * Registered once for the app rather than on the Convert canvas: §3 asks for
+   * the entire window, and a user dropping a photo while looking at the editor
+   * means the same thing as dropping it on the converter.
+   */
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    void listenForImageDrop({
+      onDragOver: () => setDropping(true),
+      onDragLeave: () => setDropping(false),
+      onDrop: (path) => {
+        void guard('Opened', async () => {
+          useUIStore.getState().setMode('convert');
+          await loadSourceImage(path);
+          return path;
+        });
+      },
+      onUnsupported: (paths) =>
+        setNotice({
+          text:
+            `Cannot open ${paths.length === 1 ? paths[0].split('/').pop() : `${paths.length} files`}` +
+            ` — Tesserica reads ${SUPPORTED_IMAGE_EXTENSIONS.join(', ')}`,
+          error: true,
+        }),
+    }).then((fn) => {
+      // The listener resolves asynchronously, so a fast unmount can beat it.
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   return (
-    <div className="app">
+    <div className={dropping ? 'app dropping' : 'app'}>
       <header className="titlebar">
         <FileMenu
           items={[
@@ -131,6 +173,12 @@ export function App() {
           onClick={() => setNotice(null)}
         >
           {notice.text}
+        </div>
+      )}
+
+      {dropping && (
+        <div className="drop-overlay" role="status">
+          <p>Drop an image to convert</p>
         </div>
       )}
 
