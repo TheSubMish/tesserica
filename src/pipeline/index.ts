@@ -13,4 +13,12 @@
  * is fixed and identical here.
  */
 
+export * from './adjust.ts';
+export * from './buffer.ts';
+export * from './cleanup.ts';
+export * from './convert.ts';
+export * from './crop.ts';
+export * from './downscale.ts';
 export * from './oklab.ts';
+export * from './quantize.ts';
+export * from './settings.ts';

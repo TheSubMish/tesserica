@@ -38,7 +38,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tesserica_lib::pipeline::oklab;
+use tesserica_lib::pipeline::buffer::PixelBuffer;
+use tesserica_lib::pipeline::settings::ConvertSettings;
+use tesserica_lib::pipeline::{convert, oklab};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +59,12 @@ struct Job {
     png: Option<PathBuf>,
     width: u32,
     height: u32,
+    /// Present for `convert` jobs. Deserializing it here is itself part of the
+    /// test: if the two `ConvertSettings` ever stop agreeing on the wire format,
+    /// the harness fails at the boundary rather than producing a mysterious
+    /// pixel difference later.
+    #[serde(default)]
+    settings: Option<ConvertSettings>,
 }
 
 #[derive(Debug, Serialize)]
@@ -149,6 +157,15 @@ fn run_job(job: &Job, out_dir: &Path) -> Result<(), String> {
             let payload = oklab_payload(&pixels);
             write_payload(out_dir, &job.id, &payload)
         }
+        "convert" => {
+            let settings = job
+                .settings
+                .as_ref()
+                .ok_or_else(|| "convert job has no settings".to_string())?;
+            let source = PixelBuffer::from_data(job.width, job.height, pixels)?;
+            let result = convert::convert(&source, settings)?;
+            write_payload(out_dir, &job.id, &convert_payload(&result))
+        }
         other => Err(format!("unknown job kind {other}")),
     }
 }
@@ -207,6 +224,31 @@ fn oklab_payload(pixels: &[u8]) -> Vec<u8> {
         out.extend_from_slice(&c.a.to_le_bytes());
         out.extend_from_slice(&c.b.to_le_bytes());
     }
+    out
+}
+
+/// A converted image, as a self-describing blob:
+///
+/// ```text
+///   u32 LE  width
+///   u32 LE  height
+///   u16 LE  × width*height   palette indices (0xffff = transparent)
+///   u8      × width*height*4 the rendered RGBA
+/// ```
+///
+/// Both halves are sent because they fail differently: the indices are what
+/// "exact match" is *defined* on (D12, §11.1), while the RGBA catches a
+/// disagreement in the alpha policy or the palette rendering that identical
+/// indices would hide.
+fn convert_payload(result: &convert::ConvertResult) -> Vec<u8> {
+    let img = &result.image;
+    let mut out = Vec::with_capacity(8 + result.indices.len() * 2 + img.data.len());
+    out.extend_from_slice(&img.width.to_le_bytes());
+    out.extend_from_slice(&img.height.to_le_bytes());
+    for idx in &result.indices {
+        out.extend_from_slice(&idx.to_le_bytes());
+    }
+    out.extend_from_slice(&img.data);
     out
 }
 

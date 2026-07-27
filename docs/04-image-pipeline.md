@@ -71,11 +71,12 @@ interface ConvertSettings {
   colorSpace: 'oklab' | 'srgb';   // default oklab
 
   // [6] cleanup
-  despeckle: number;       // 0..3, minimum island size to remove
-  outline?: { color: RGBA; thickness: number };
+  despeckle: number;       // 0..3, largest island size to remove (inclusive)
+  outline?: { color: RGBA; thickness: number; corners: boolean };
 
   // alpha
   alphaThreshold: number;  // 0..255, below this → fully transparent
+  preserveAlpha: boolean;  // keep source alpha above the threshold (§4.4)
 }
 
 type DitherMode = 'none' | 'floyd-steinberg' | 'atkinson' | 'bayer2' | 'bayer4' | 'bayer8';
@@ -95,9 +96,32 @@ Both AI references lead with grid snapping as their quality claim
 
 | Mode | Method | Best for |
 |---|---|---|
-| `box` | Average all source pixels in each output cell | **Default.** Photos, smooth art. |
+| `box` | Alpha-weighted average of the cell, **in linear light** | **Default.** Photos, smooth art. |
 | `nearest` | Sample the center pixel of each cell | Sources that are *already* pixel art |
 | `dominant` | Most frequent color in the cell (after a coarse pre-quantize) | Flat-color illustration, logos |
+
+**Cell boundaries are integer arithmetic**, not an accumulated float step:
+`start = floor(i * src / dst)`, `end = max(floor((i+1) * src / dst), start+1)`, clamped to
+the source. Both implementations therefore partition the source identically by
+construction rather than by luck. `nearest` samples `floor(((2i+1) * src) / (2*dst))`.
+
+**`box` averages in linear light.** Averaging gamma-encoded sRGB darkens texture and
+mid-tones — half black and half white averages to 128 in sRGB but to **188** in linear
+light, and 128 is visibly wrong. The cell is summed in linear, divided, and re-encoded
+once. This is what "average the pixels in the cell" has to mean to be photometrically
+correct, and it is asserted in both implementations' unit tests.
+
+**`dominant`, concretely** (the reference converters leave this vague, so we pin it):
+
+- only pixels with `alpha != 0` vote;
+- votes are bucketed on the top 5 bits per channel — the *same* key as the nearest-color
+  cache in §4.2, so "coarse pre-quantize" means one thing in this codebase;
+- the winning bucket has the most votes, ties going to the **lowest key**, so the result
+  never depends on hash iteration order;
+- the output color is the **first pixel in scanline order** belonging to that bucket — a
+  real color from the source, not an average, which would reintroduce exactly the invented
+  colors this mode exists to avoid;
+- alpha is the plain mean over the whole cell, as in `box`, so edges keep their softness.
 
 **Box averaging is the default** because it preserves detail that nearest throws away.
 But note the interaction: box averaging *creates new colors* not present in the source,
@@ -262,7 +286,12 @@ Alpha is **not** quantized against the palette. Handled separately:
 
 - `alpha < alphaThreshold` → fully transparent, pixel not quantized at all
 - `alpha >= alphaThreshold` → fully opaque (default; pixel art is usually 1-bit alpha)
-- Optional "preserve alpha" mode keeps the original value for soft edges
+- `preserveAlpha: true` keeps the original value for soft edges
+
+A pixel that is dropped by the threshold gets `TRANSPARENT_INDEX` (`0xffff`) in the index
+map — the value that also caps a palette at 65,535 entries. **A palette entry's own alpha
+is ignored**: the palette is a list of *colors*, and alpha is resolved entirely by the
+rules above (D9).
 
 Straight alpha throughout (`02-architecture.md` §9). Never average a transparent pixel's
 RGB into a box downscale — weight by alpha, or transparent black bleeds dark fringes
@@ -364,8 +393,23 @@ Pixel Art Village exposes a "cleanup" control without defining it
 After quantization you get isolated single pixels — a lone bright dot in a dark region,
 which reads as noise rather than detail.
 
-Connected-component analysis on the index map; any region with area `< despeckle` is
-replaced by the most common color among its neighbours. Levels 0–3 (0 = off).
+Connected-component analysis on the index map; any region with area **at or below**
+`despeckle` is replaced by the most common color among its neighbours. Levels 0–3
+(0 = off).
+
+Three details, pinned so both implementations agree:
+
+- **The threshold is inclusive.** `despeckle: 1` removes single pixels. An exclusive
+  `area < despeckle` would make level 1 a no-op, which cannot be what a 0–3 control means.
+- **4-connectivity.** 8-connectivity would chain diagonal single-pixel details, which in
+  pixel art are usually deliberate.
+- **Transparent regions participate**, because `TRANSPARENT_INDEX` is just another label
+  in the map. Tiny holes get filled too — the same defect wearing a different color.
+
+It is a **single pass**, and every replacement is decided from the *original* map, so the
+result cannot depend on the order components happen to be visited. Neighbour ties go to
+the lowest palette index; since the transparent sentinel is `0xffff`, a real color always
+wins a tie against transparency.
 
 ### 6.2 Outline
 
@@ -373,7 +417,12 @@ Add a border around non-transparent regions. Extremely common for game sprites �
 what makes a character read against a busy background.
 
 Detect alpha boundary pixels, expand by `thickness`, fill with `color`. The `corners`
-flag chooses 4- vs 8-connectivity (8 gives rounder corners).
+flag chooses 4- vs 8-connectivity (8 gives rounder corners). Implemented as `thickness`
+successive one-pixel dilations into transparent space; it runs **after** despeckle.
+
+**The outline color snaps to the nearest palette entry.** The output is by definition
+constrained to the palette, and quietly introducing a color that is not in it would be a
+worse surprise than the snap.
 
 ### 6.3 Not doing
 

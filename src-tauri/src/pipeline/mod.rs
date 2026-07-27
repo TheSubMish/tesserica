@@ -12,4 +12,12 @@
 //! `docs/04-image-pipeline.md` is normative for both. The stage order in its §2
 //! is fixed and identical here.
 
+pub mod adjust;
+pub mod buffer;
+pub mod cleanup;
+pub mod convert;
+pub mod crop;
+pub mod downscale;
 pub mod oklab;
+pub mod quantize;
+pub mod settings;

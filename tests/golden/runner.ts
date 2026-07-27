@@ -15,6 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import type { ConvertSettings } from '../../src/pipeline/settings.ts';
 import { SOURCES, type GoldenSource } from './corpus.ts';
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -23,11 +24,13 @@ export const ACTUAL_DIR = join(REPO_ROOT, 'tests', 'golden', 'actual');
 
 export interface Job {
   readonly id: string;
-  readonly kind: 'sourceIntegrity' | 'oklab';
+  readonly kind: 'sourceIntegrity' | 'oklab' | 'convert';
   readonly rgba: string;
   readonly png?: string;
   readonly width: number;
   readonly height: number;
+  /** Required for `convert`. Serialized as-is — the wire format is the test. */
+  readonly settings?: ConvertSettings;
 }
 
 export interface JobReport {
@@ -135,4 +138,39 @@ export function readOklabPayload(id: string): Float64Array {
   return new Float64Array(
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
   );
+}
+
+export interface RustConvertResult {
+  readonly width: number;
+  readonly height: number;
+  readonly indices: Uint16Array;
+  readonly rgba: Uint8ClampedArray;
+}
+
+/**
+ * A Rust `convert` job payload: `u32` width, `u32` height, the `u16` index map,
+ * then the rendered RGBA. Self-describing, so a size disagreement is caught here
+ * rather than as a confusing pixel diff.
+ */
+export function readConvertPayload(id: string): RustConvertResult {
+  const bytes = readFileSync(join(ACTUAL_DIR, `${id}.bin`));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(0, true);
+  const height = view.getUint32(4, true);
+  const n = width * height;
+
+  const expected = 8 + n * 2 + n * 4;
+  if (bytes.byteLength !== expected) {
+    throw new Error(
+      `${id}.bin is ${bytes.byteLength} bytes, expected ${expected} for ${width}x${height}`,
+    );
+  }
+
+  const indices = new Uint16Array(n);
+  for (let i = 0; i < n; i++) indices[i] = view.getUint16(8 + i * 2, true);
+
+  const rgbaStart = bytes.byteOffset + 8 + n * 2;
+  const rgba = new Uint8ClampedArray(bytes.buffer.slice(rgbaStart, rgbaStart + n * 4));
+
+  return { width, height, indices, rgba };
 }
