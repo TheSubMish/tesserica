@@ -34,6 +34,15 @@ impl AppError {
     }
 }
 
+/// The pipeline (`crate::pipeline`) reports failures as plain `String`s: it is
+/// deliberately free of Tauri and of this crate's error type so that it mirrors
+/// the TypeScript half exactly. This is the one adapter between the two.
+impl From<String> for AppError {
+    fn from(message: String) -> Self {
+        Self::Invalid(message)
+    }
+}
+
 impl Serialize for AppError {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())

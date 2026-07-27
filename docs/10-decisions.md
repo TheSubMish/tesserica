@@ -244,13 +244,62 @@ once parity is defined on indices).
 
 ---
 
+## D13 · Editor layers cross IPC on the **raw invoke body**
+
+**Locked 2026-07-27.** Resolves `09-open-questions.md` Q7, by measurement.
+
+Q7 listed three candidates — custom Tauri URI protocol, Tauri v2 Channels, temp file
+handoff — for getting hand-drawn editor layers into Rust on export. Two are eliminated
+before any stopwatch, on **capability** rather than speed:
+
+- **Channels are the wrong direction.** A Tauri v2 `Channel` is created in JavaScript and
+  handed *to* Rust, which sends through it. There is no frontend→Rust channel. Q7 asks
+  about the inbound direction, so this candidate does not exist.
+- **Temp file is strictly dominated.** A WebView cannot write a file itself; it must hand
+  the bytes to native code first. That is *whichever IPC transport it is built on, plus a
+  disk write and a disk read*. It can never beat the transport underneath it.
+
+That leaves the raw invoke body (what `staging.rs` has used since Phase 1) against a
+custom URI protocol. Both were measured **inside the real app**, against the real WebView,
+because the WebView↔native bridge is the entire cost under test — a `cargo bench` would
+have measured the wrong half. Payload is Q7's own figure: 10 layers × 512×512 RGBA =
+10,485,760 bytes. Optimized build, five repeats:
+
+| Transport | Median | Throughput |
+|---|---|---|
+| **Raw invoke body** | **26 ms** | **403 MB/s** |
+| Custom URI protocol | 27 ms | 388 MB/s |
+| JSON command argument | 2,533 ms | 4 MB/s |
+
+**Decision: keep the raw invoke body.** It and the custom protocol are indistinguishable —
+1 ms apart with overlapping ranges — so there is no speed argument for a second transport,
+and the raw body wins on everything else: no extra URI scheme, no CORS surface, no
+separate handler, and the same command surface and error type as everything else.
+
+**The JSON row is the real result.** `02-architecture.md` §6.2's prohibition on passing
+pixels through JSON command arguments was an architectural assertion; it is now a measured
+**97× penalty**, and 4 MB/s would put a 48 MB source image at twelve seconds each way.
+
+Reproduce with:
+
+```bash
+npm run build
+RUSTFLAGS="-C debug-assertions=yes" cargo build --release --manifest-path src-tauri/Cargo.toml
+TESSERICA_BENCH=q7 ./src-tauri/target/release/tesserica
+```
+
+The harness is `src-tauri/src/bench.rs` and `src/bench/q7.ts`, both compiled only under
+`debug_assertions` — a release bundle contains no benchmark commands and no `bench://`
+protocol.
+
+---
+
 ## Still open — deferred, not decided
 
 These genuinely need measurement rather than a preference, and each is scheduled:
 
 | # | Question | Decide at |
 |---|---|---|
-| Q7 | How hand-drawn editor layers cross IPC on export (custom protocol vs Channel vs temp file) | **Phase 2** — benchmark all three with 10 layers × 512×512 |
 | Q8 | Canvas2D vs WebGL2 renderer | **Phase 4** — measure animation playback first |
 | Q9 | ONNX Runtime size vs installer budget | **Phase 5** — leaning "download on first use" |
 | Q10 | Which segmentation model ships (`u2netp` 4.7 MB vs `isnet-general-use` 170 MB) | **Phase 5** — benchmark at 64×64 output first; the small one may be indistinguishable |
@@ -274,3 +323,4 @@ These genuinely need measurement rather than a preference, and each is scheduled
 | D10 | **Hand-roll Oklab** in both languages |
 | D11 | Aseprite **import only** |
 | D12 | Oklab is **`f64` both sides**; parity measured in **palette indices** |
+| D13 | Editor layers cross IPC on the **raw invoke body** |

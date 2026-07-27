@@ -67,7 +67,7 @@ therefore not built:
 - [x] Dithering: none, Floyd–Steinberg (serpentine), Atkinson, Bayer 2/4/8 (`04` §5)
 - [x] Nearest-color cache with the error-diffusion carve-out (`04` §4.2)
 - [x] Preview Web Worker with latest-wins cancellation (`02` §8)
-- [ ] Rust full-res export path; `SourceId` handle model (`02` §6.2)
+- [x] Rust full-res export path; `SourceId` handle model (`02` §6.2)
 - [ ] Convert mode UI: split/side-by-side, four primary controls (`05` §3)
 - [ ] Auto-palette (Wu + k-means in Oklab) (`04` §4.3)
 - [ ] **`[ Edit → ]`** — conversion layer creation, mode switch, live re-editing

@@ -8,13 +8,15 @@
  * sends as `application/octet-stream` with no serialization at all, and
  * commands afterwards refer to them by a small integer handle.
  *
- * Q7 (`docs/09-open-questions.md`) — custom protocol vs Channel vs temp file
- * for hand-drawn editor layers — is still open and is scheduled for a Phase 2
- * benchmark. Everything transport-shaped is confined to `stageBytes` /
- * `fetchStaged` so changing the answer touches this file and nothing else.
+ * Q7 is **settled** (D13): measured in the real app, the raw invoke body moves
+ * 10 MB at 403 MB/s and a custom URI protocol at 388 MB/s — indistinguishable —
+ * while a JSON command argument manages 4 MB/s, 97x slower. The raw body stays,
+ * because a second transport would buy nothing.
  */
 
 import { invoke } from '@tauri-apps/api/core';
+
+import type { ConvertSettings } from '../pipeline/settings.ts';
 
 export type StageId = number;
 
@@ -128,4 +130,87 @@ export async function saveProject(request: {
 
 export async function loadProject(path: string): Promise<LoadResult> {
   return invoke<LoadResult>('load_project', { path });
+}
+
+// ---------------------------------------------------------------------------
+// Source handle model (`docs/02-architecture.md` §6.2)
+//
+// Source images are opened by Rust and **stay in Rust**. The frontend holds a
+// `SourceId` and a small proxy for preview; the full-resolution pixels never
+// enter the WebView, and export sends settings rather than pixels.
+// ---------------------------------------------------------------------------
+
+export type SourceId = number;
+
+export interface SourceInfo {
+  sourceId: SourceId;
+  width: number;
+  height: number;
+  path: string;
+}
+
+/** Decode an image in Rust and keep it there. Returns metadata only. */
+export async function openSource(path: string): Promise<SourceInfo> {
+  return invoke<SourceInfo>('open_source', { path });
+}
+
+export async function releaseSource(sourceId: SourceId): Promise<void> {
+  await invoke('release_source', { sourceId });
+}
+
+export interface SourceProxy {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray;
+}
+
+/**
+ * Fetch the preview proxy as raw bytes.
+ *
+ * The payload is a `u32` width, a `u32` height and then RGBA — the same
+ * self-describing convention the golden harness uses, so a size disagreement is
+ * caught here rather than as a confusing image later.
+ */
+export async function fetchSourceProxy(sourceId: SourceId, maxEdge: number): Promise<SourceProxy> {
+  const buffer = await invoke<ArrayBuffer>('source_proxy', { sourceId, maxEdge });
+  return decodeSourceProxy(buffer);
+}
+
+/** Exported for tests: the wire format is worth asserting without a backend. */
+export function decodeSourceProxy(buffer: ArrayBuffer): SourceProxy {
+  const view = new DataView(buffer);
+  const width = view.getUint32(0, true);
+  const height = view.getUint32(4, true);
+  const expected = 8 + width * height * 4;
+  if (buffer.byteLength !== expected) {
+    throw new Error(
+      `proxy payload is ${buffer.byteLength} bytes, expected ${expected} for ${width}x${height}`,
+    );
+  }
+  return { width, height, data: new Uint8ClampedArray(buffer, 8) };
+}
+
+export interface ExportConversionResult {
+  path: string;
+  width: number;
+  height: number;
+  scaledWidth: number;
+  scaledHeight: number;
+  bytes: number;
+  colorsUsed: number;
+}
+
+/**
+ * Convert at full source resolution and write a PNG.
+ *
+ * **No pixels cross in either direction.** Rust already holds the source, and
+ * the result goes straight to disk — `docs/02` §6.2 rule 4 in one call.
+ */
+export async function exportConversion(request: {
+  sourceId: SourceId;
+  settings: ConvertSettings;
+  scale: ExportScale;
+  path: string;
+}): Promise<ExportConversionResult> {
+  return invoke<ExportConversionResult>('export_conversion', { request });
 }

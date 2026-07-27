@@ -239,10 +239,14 @@ Rules:
    (metadata + layer *edits*), and Rust re-runs the pipeline from the source it already
    holds.
 
-> **Open item:** for *editor* layers the user has hand-drawn, Rust does not hold the
-> pixels — the frontend does. Those buffers do have to cross the boundary on export.
-> Options: a custom Tauri URI protocol, a Channel, or writing to a temp file. Needs a
-> benchmark before we commit. Tracked in `09-open-questions.md`.
+> **Settled (D13).** For *editor* layers the user has hand-drawn, Rust does not hold the
+> pixels — the frontend does, and those buffers have to cross on export. Measured in the
+> real app with 10 MB of layers: the **raw invoke body** moves them at 403 MB/s and a
+> custom URI protocol at 388 MB/s (indistinguishable), while a JSON command argument
+> manages 4 MB/s — **97× slower**. Channels were eliminated on capability (they carry data
+> Rust→frontend only) and temp files on structure (a WebView cannot write a file without
+> first paying an IPC transfer anyway). Rule 1 above is therefore not a caution; it is a
+> 97× measurement.
 
 ---
 

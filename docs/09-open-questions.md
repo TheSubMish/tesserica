@@ -22,27 +22,15 @@
 | Q6 Oklab: hand-roll or crate | **Hand-roll both** | D10 |
 | Q11 Generative AI | **Never** | D8 |
 | Q12 Aseprite export | **Import only** | D11 |
+| Q7 Editor layers over IPC | **Raw invoke body** | D13 |
 | — Color mode | **RGBA only in v1** | D9 |
 
 ---
 
 ## Still open — needs measurement, not preference
 
-These four are deliberately deferred. Each is scheduled against a phase where the
+These three are deliberately deferred. Each is scheduled against a phase where the
 information needed to decide will actually exist. **Do not resolve them by intuition.**
-
-### Q7 · How do hand-drawn editor layers cross IPC on export?
-
-**Decide in Phase 2.**
-
-Source images stay in Rust (`02-architecture.md` §6.2), but layers the user drew by hand
-live in the frontend and must reach Rust on export.
-
-Options: custom Tauri URI protocol · Tauri v2 Channels · temp file handoff.
-
-**Method:** benchmark all three with a realistic payload — 10 layers × 512×512 ≈ 10 MB.
-This is exactly the kind of question where the obvious answer is often wrong, and it sits
-directly on the architecture's main risk (IPC serialization cost).
 
 ### Q8 · Canvas2D or WebGL2 renderer?
 

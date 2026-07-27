@@ -14,11 +14,14 @@
 //! area, and every subsequent command refers to them by a small integer.
 //! Bulk data coming back uses `ipc::Response`, which is likewise raw.
 //!
-//! > **Q7 is not decided here.** `docs/09-open-questions.md` schedules the
-//! > custom-protocol / Channel / temp-file benchmark for Phase 2 with a
-//! > realistic ~10 MB payload. Raw-body staging is the smallest thing that
-//! > satisfies the rule for Phase 1; it is deliberately behind this one
-//! > module so swapping the transport touches nothing else.
+//! > **Q7 is settled: this transport stays (D13).** Measured in the real app
+//! > with Q7's own 10 MB payload, the raw invoke body runs at 403 MB/s and a
+//! > custom URI protocol at 388 MB/s — indistinguishable — while a JSON command
+//! > argument manages 4 MB/s, 97x slower. Channels were eliminated on
+//! > capability (they carry data Rust->frontend only) and temp files on
+//! > structure (a WebView must pay an IPC transfer before it can write one).
+//! > The raw body wins on everything that is not speed: no extra URI scheme, no
+//! > CORS surface, one command surface, one error type. Harness in `bench.rs`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
