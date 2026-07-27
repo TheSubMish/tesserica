@@ -4,39 +4,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-**Phases 0 and 1 complete** (2026-07-26). All eight Phase 1 checkboxes in
-`docs/08-roadmap.md` are ticked. What works end to end:
+**Phases 0, 1 and 2 complete** (2026-07-27). Every checkbox through Phase 2 in
+`docs/08-roadmap.md` is ticked. What works end to end:
 
-- **Undo/redo** — command pattern with dirty-rect deltas and coalescing. One drag is one
-  step; the dirty rect is diffed out of a single pointer-down snapshot of the cel.
-- **Tools** — pencil (pixel-perfect on by default), eraser, fill (contiguous + global),
-  line, rectangle, ellipse (midpoint), eyedropper. `Alt` eyedrops from any tool, `Escape`
-  cancels a gesture. Shape tools preview by drawing into the cel and restoring.
-- **Layers** — add / delete / reorder / rename / opacity / visibility / lock, all
-  undoable. Normal blend only.
-- **Rendering** — Canvas2D compositing with two cache levels: per-cel canvases, plus a
-  whole-composite signature so pan/zoom/cursor redraws cost only a blit.
-- **Palettes** — Game Boy, NES, CGA, C64, ZX Spectrum, grayscale ramps; import from
-  `.hex`, `.gpl`, `.pal` (JASC *and* RIFF), Paint.NET `.txt`.
-- **Export PNG** at 1×/2×/4×/8×, and **`.tess` save/load** with forward-compatible
-  preservation of unknown archive entries.
+- **Editor** — seven tools, undo/redo with dirty-rect deltas, layers, palettes (bundled +
+  imported), PNG export at integer scales, `.tess` save/load. See the Phase 1 notes in the
+  roadmap for the two W2 steps that are deliberately Phase 3.
+- **Converter** — drop a photo in, adjust four controls (pixel size, palette, dither,
+  strength) with a live preview, export a PNG. Full pipeline in both languages: crop /
+  fit-to-subject → adjustments in Oklab → downscale (box / nearest / dominant) → quantize
+  + dither (none, Floyd–Steinberg, Atkinson, Bayer 2/4/8) → cleanup (despeckle, outline).
+  Auto-palette via Wu + k-means in Oklab.
+- **The seam** — `[ Edit → ]` creates a *conversion layer* that keeps the source handle and
+  the settings, so its palette can be changed later and it re-renders from the original
+  image. That is the product thesis, and it is real.
 
-**Two known gaps against workflow W2**, both recorded under the Phase 1 exit line in
-`docs/08-roadmap.md`: there is no `Ctrl+N` new-sprite dialog (the app boots a fixed 64×64
-document), and `multiply` needs blend modes the roadmap schedules for Phase 3.
+**The parity guarantee holds.** `npm run test:golden` runs **3,083 cases over 917,040
+pixels** and asserts **zero differing palette indices and zero differing RGBA bytes**
+between the TypeScript preview pipeline and the Rust export pipeline — dithered modes
+included, because at equal resolution error diffusion is deterministic. The genuinely
+resolution-dependent comparison (proxy preview vs full-res export) is structural and
+measured at **0.109 total variation** worst case. Both numbers, and how to reproduce them,
+are in `tests/golden/README.md`.
 
-The commands in "Commands" below all run. `src/pipeline/` and `src-tauri/src/pipeline/`
-do **not** exist yet; they arrive in Phase 2, and `npm run test:golden` reports todos
-until they do.
+**Two decisions landed in Phase 2 and are locked:**
 
-**Phase 1's Rust surface is small and worth knowing before extending it:**
-`src-tauri/src/staging.rs` is the only place pixels cross IPC — they ride the raw invoke
-body and everything afterwards refers to them by an integer handle. Q7 (custom protocol
-vs Channel vs temp file) is still open and is scheduled for a Phase 2 benchmark; that is
-why the transport lives behind one module.
+- **D12** — Oklab is `f64` on both sides, and "exact match" means identical *palette
+  indices*, not identical floats. Rust `f64` and JS `f64` agree to 6.7e-16 but are
+  bit-identical only ~78% of the time, because `cbrt`/`powf` come from different libms.
+  `f32` would drift 3.6e-7, enough to flip a nearest-colour `argmin`. Nearest-colour uses a
+  `d < best - 1e-9` tie-break so near-ties keep the lowest index in both languages.
+- **D13** — editor layers cross IPC on the **raw invoke body**, resolving Q7 by
+  measurement inside the real app: raw body 403 MB/s, custom protocol 388 MB/s
+  (indistinguishable), JSON command argument 4 MB/s — **97× slower**. Channels were
+  eliminated on capability (Rust→frontend only), temp files on structure. Reproduce with
+  `TESSERICA_BENCH=q7`; harness in `src-tauri/src/bench.rs` and `src/bench/q7.ts`.
 
-Next up is Phase 2 (conversion) in `docs/08-roadmap.md` — the highest-risk phase, where
-the dual pipeline implementation and the golden-parity guarantee both land.
+**Two known gaps, both recorded under the Phase 2 exit line:** a conversion layer's
+`sourceId` is process-local, so a reopened `.tess` restores the layer and its settings but
+not the live handle; and re-rendering a conversion layer edits the cel directly rather than
+going through the command system, so it is not yet undoable.
+
+Next up is **Phase 3 (v1 release)** — blend modes, selection tools, layer groups,
+shortcuts, accessibility, Linux installers. The `Ctrl+N` new-sprite dialog belongs at its
+head.
 
 ## The docs are the source of truth
 
