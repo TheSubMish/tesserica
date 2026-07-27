@@ -592,3 +592,145 @@ body {
   border-color: var(--danger);
   color: var(--danger);
 }
+
+/* --- Convert mode (docs/05-ui-design.md §3) ------------------------------- */
+
+.convert-mode {
+  display: grid;
+  grid-template-columns: 1fr var(--panel-width, 320px);
+  flex: 1;
+  min-height: 0;
+}
+
+.convert-stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-sunken, #17181c);
+}
+
+.convert-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.convert-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Nearest-neighbour everywhere on a pixel-art path — a smoothed preview
+     would promise something the export cannot deliver. */
+  image-rendering: pixelated;
+}
+
+.convert-split-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent, #6ea8fe);
+  cursor: ew-resize;
+}
+
+.convert-split-handle:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+}
+
+.convert-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  color: var(--text-muted, #8b8f98);
+  pointer-events: none;
+}
+
+.convert-viewswitch {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  justify-content: center;
+}
+
+.convert-viewswitch button[aria-pressed='true'] {
+  background: var(--accent, #6ea8fe);
+  color: var(--surface, #101116);
+}
+
+.convert-panel .field {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.4rem;
+}
+
+.convert-panel .field output {
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}
+
+.field-note {
+  margin: 0.2rem 0 0;
+  color: var(--text-muted, #8b8f98);
+}
+
+.swatch-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  list-style: none;
+  margin: 0.4rem 0;
+  padding: 0;
+}
+
+.swatch-strip li {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgb(0 0 0 / 40%);
+}
+
+.collapsible-header {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0.3rem 0;
+  cursor: pointer;
+}
+
+.convert-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.convert-actions .primary {
+  flex: 1;
+  background: var(--accent, #6ea8fe);
+  color: var(--surface, #101116);
+  font-weight: 600;
+}
+
+.convert-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  background: var(--danger, #7a2b2b);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

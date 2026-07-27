@@ -100,10 +100,12 @@ function activeBuffer() {
 }
 
 describe('drawing on the canvas', () => {
-  it('renders the shell with both mode tabs, Convert inert', () => {
+  it('renders two mode tabs — two, not three (D6, D7) — with Edit selected', () => {
     const tabs = container.querySelectorAll('[role="tab"]');
     expect(tabs).toHaveLength(2);
-    expect((tabs[0] as HTMLButtonElement).disabled).toBe(true);
+    expect(tabs[0].textContent).toBe('Convert');
+    // Convert became live in Phase 2; it was inert through Phase 1.
+    expect((tabs[0] as HTMLButtonElement).disabled).toBe(false);
     expect(tabs[1].getAttribute('aria-selected')).toBe('true');
   });
 

@@ -5,10 +5,12 @@ import { PalettePanel } from '../panels/PalettePanel';
 import { StatusBar } from '../panels/StatusBar';
 import { ToolOptions } from '../panels/ToolOptions';
 import { ToolRail } from '../panels/ToolRail';
+import { ConvertMode } from '../convert/ConvertMode';
+import { loadSourceImage } from '../convert/loadSource';
 import { useUIStore } from '../state/uiStore';
 import { ExportDialog } from './ExportDialog';
 import { FileMenu } from './FileMenu';
-import { openProject, saveCurrentProject } from './project';
+import { openProject, pickImage, saveCurrentProject } from './project';
 import { useShortcuts } from './shortcuts';
 
 export function App() {
@@ -54,19 +56,28 @@ export function App() {
               shortcut: 'Ctrl+Shift+S',
               onSelect: () => void guard('Saved', () => saveCurrentProject({ saveAs: true })),
             },
+            {
+              label: 'Open image…',
+              onSelect: () =>
+                void guard('Opened', async () => {
+                  const path = await pickImage();
+                  if (!path) return null;
+                  useUIStore.getState().setMode('convert');
+                  await loadSourceImage(path);
+                  return path;
+                }),
+            },
             { label: 'Export PNG…', onSelect: () => setExporting(true) },
           ]}
         />
         <span className="wordmark">Tesserica</span>
-        {/* Two modes, not three — D6/D7. Convert lands in Phase 2, so both
-            tabs are inert for now (docs/08-roadmap.md Phase 0). */}
+        {/* Two modes, not three — D6/D7. */}
         <div className="modes" role="tablist" aria-label="Mode">
           <button
             className="mode-tab"
             role="tab"
             aria-selected={mode === 'convert'}
-            disabled
-            title="Convert mode arrives in Phase 2"
+            onClick={() => useUIStore.getState().setMode('convert')}
           >
             Convert
           </button>
@@ -82,13 +93,25 @@ export function App() {
       </header>
 
       <div className="body">
-        <ToolRail />
-        <CanvasView />
-        <aside className="panels">
-          <ToolOptions />
-          <LayerPanel />
-          <PalettePanel />
-        </aside>
+        {mode === 'convert' ? (
+          <ConvertMode
+            onExport={() => setExporting(true)}
+            onEdit={() =>
+              setNotice({ text: 'Edit → arrives with the conversion layer', error: false })
+            }
+            onNotice={(text, error) => setNotice({ text, error })}
+          />
+        ) : (
+          <>
+            <ToolRail />
+            <CanvasView />
+            <aside className="panels">
+              <ToolOptions />
+              <LayerPanel />
+              <PalettePanel />
+            </aside>
+          </>
+        )}
       </div>
 
       <StatusBar />

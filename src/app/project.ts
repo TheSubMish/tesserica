@@ -131,3 +131,17 @@ export async function openProject(): Promise<{ path: string; warnings: string[] 
 
   return { path: result.path, warnings: result.warnings };
 }
+
+/**
+ * Pick a source image for Convert mode.
+ *
+ * Returns the *path*, not the bytes: Rust opens the file and keeps the pixels
+ * (`docs/02-architecture.md` §6.2), so the frontend never reads it at all.
+ */
+export async function pickImage(): Promise<string | null> {
+  const picked = await open({
+    multiple: false,
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }],
+  });
+  return typeof picked === 'string' ? picked : null;
+}
