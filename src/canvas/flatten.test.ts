@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { allocateBuffer, clearAllBuffers, setPixel } from '../model/pixelBuffers';
-import type { Cel, Frame, Layer, Sprite } from '../model/types';
+import type { Cel, Frame, Layer, LayerBase, Sprite } from '../model/types';
 import { flattenSprite } from './flatten';
 
 const W = 4;
 const H = 4;
 
-function layer(id: string, over: Partial<Layer> = {}): Layer {
+function layer(id: string, over: Partial<LayerBase> = {}): Layer {
   return {
     id,
     kind: 'raster',

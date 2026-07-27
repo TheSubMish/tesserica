@@ -13,7 +13,16 @@
  */
 
 import { create } from 'zustand';
-import type { Cel, CelId, Frame, Layer, LayerId, Sprite } from '../model/types';
+import type {
+  Cel,
+  CelId,
+  ConversionSource,
+  Frame,
+  Layer,
+  LayerBase,
+  LayerId,
+  Sprite,
+} from '../model/types';
 import {
   allocateBuffer,
   bumpCelRevision,
@@ -71,7 +80,24 @@ interface DocumentState {
    */
   removeLayerMetadata(id: LayerId): void;
   moveLayer(id: LayerId, toIndex: number): void;
-  updateLayer(id: LayerId, patch: Partial<Layer>): void;
+  /**
+   * Patch a layer's metadata.
+   *
+   * `Partial<LayerBase>` rather than `Partial<Layer>`: `Layer` is a
+   * discriminated union, and spreading a partial of a union would let a caller
+   * change `kind` without supplying the fields that variant requires. Kind is
+   * decided at creation.
+   */
+  updateLayer(id: LayerId, patch: Partial<LayerBase>): void;
+
+  /**
+   * Replace a conversion layer's source and settings.
+   *
+   * Separate from `updateLayer` because it is the one patch that is *not*
+   * metadata: it is the layer's re-render recipe, and it only exists on the
+   * `conversion` variant.
+   */
+  updateLayerSource(id: LayerId, source: ConversionSource): void;
   setActiveLayer(id: LayerId): void;
   layerIndex(id: LayerId): number;
 
@@ -233,7 +259,18 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set((s) => ({
       sprite: {
         ...s.sprite,
-        layers: s.sprite.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+        layers: s.sprite.layers.map((l) => (l.id === id ? ({ ...l, ...patch } as Layer) : l)),
+      },
+      revision: s.revision + 1,
+    })),
+
+  updateLayerSource: (id, source) =>
+    set((s) => ({
+      sprite: {
+        ...s.sprite,
+        layers: s.sprite.layers.map((l) =>
+          l.id === id && l.kind === 'conversion' ? { ...l, source } : l,
+        ),
       },
       revision: s.revision + 1,
     })),

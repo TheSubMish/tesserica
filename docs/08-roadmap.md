@@ -70,13 +70,28 @@ therefore not built:
 - [x] Rust full-res export path; `SourceId` handle model (`02` §6.2)
 - [x] Convert mode UI: split/side-by-side, four primary controls (`05` §3)
 - [x] Auto-palette (Wu + k-means in Oklab) (`04` §4.3)
-- [ ] **`[ Edit → ]`** — conversion layer creation, mode switch, live re-editing
+- [x] **`[ Edit → ]`** — conversion layer creation, mode switch, live re-editing
 
 **Exit:** ✅ **W6 complete. W1 complete except background removal.** This is where the
 product thesis becomes real and demonstrable.
 
-> **Highest-risk phase.** The dual implementation and the parity guarantee both land
-> here. Budget accordingly.
+Drop a photo in, watch it convert live, adjust four controls, export a PNG at an integer
+scale — or press `[ Edit → ]` and keep working on it as a layer whose palette you can
+change later. The parity guarantee holds: **3,083 golden cases over 917,040 pixels, zero
+differing palette indices and zero differing RGBA bytes** between the TypeScript preview
+pipeline and the Rust export pipeline.
+
+Two caveats worth carrying into Phase 3, neither of which blocks the exit:
+
+- **A conversion layer's `sourceId` is process-local.** Reopening a `.tess` restores the
+  layer and its settings, but not the live handle, so the layer cannot re-render until its
+  source is re-attached. `10-decisions.md` D3 already reserves `sources/` inside the
+  archive for exactly this; wiring it up is Phase 3 work.
+- **Re-rendering a conversion layer is not yet an undo step.** It edits the cel directly
+  rather than going through the command system (`03-data-model.md` §6).
+
+> **Highest-risk phase, and it landed.** The dual implementation and the parity guarantee
+> both arrived here.
 
 ---
 

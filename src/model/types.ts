@@ -11,6 +11,8 @@
  * Phase 7 so nothing accidentally depends on it.
  */
 
+import type { ConvertSettings } from '../pipeline/settings.ts';
+
 export type LayerId = string;
 export type FrameId = string;
 export type CelId = string;
@@ -29,8 +31,28 @@ export interface LayerBase {
   blendMode: BlendMode;
 }
 
-/** Phase 0 has raster layers only. Group/tilemap/conversion arrive later. */
-export type Layer = LayerBase & { kind: 'raster' };
+/**
+ * What makes convert→edit continuous (`docs/03-data-model.md` §2.1).
+ *
+ * The layer keeps a handle to the full-resolution image Rust still holds, plus
+ * the settings that produced its pixels — so changing the palette weeks later
+ * re-renders it, rather than requiring the user to start again from the photo.
+ */
+export interface ConversionSource {
+  /** Handle to the full-res image held in Rust (`docs/02` §6.2). */
+  sourceId: number;
+  settings: ConvertSettings;
+}
+
+/**
+ * `docs/03-data-model.md` §2.1.
+ *
+ * Group and tilemap arrive with their phases; `conversion` is here because it
+ * is the product thesis — a conversion is a live, re-editable layer inside a
+ * real editor rather than a PNG dump.
+ */
+export type Layer =
+  (LayerBase & { kind: 'raster' }) | (LayerBase & { kind: 'conversion'; source: ConversionSource });
 
 export interface Frame {
   id: FrameId;

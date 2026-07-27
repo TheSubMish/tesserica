@@ -10,6 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::pipeline::settings::ConvertSettings;
+
 pub type LayerId = String;
 pub type FrameId = String;
 pub type CelId = String;
@@ -49,8 +51,27 @@ pub struct LayerBase {
     pub blend_mode: BlendMode,
 }
 
-/// The discriminated union from `docs/03-data-model.md` §2.1. Only `raster`
-/// exists in v1; group / tilemap / conversion arrive with their phases.
+/// What makes convert→edit continuous (`docs/03-data-model.md` §2.1).
+///
+/// The layer keeps a handle to the full-resolution image Rust still holds, plus
+/// the settings that produced its pixels — so changing the palette weeks later
+/// re-renders it, rather than requiring the user to start again from the photo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversionSource {
+    /// Handle to the full-res image held in Rust (`docs/02` §6.2).
+    ///
+    /// A handle is process-local, so a reopened `.tess` will not have a live
+    /// one. The settings survive regardless, which is what makes the layer
+    /// re-editable once its source is re-attached.
+    pub source_id: u64,
+    pub settings: ConvertSettings,
+}
+
+/// The discriminated union from `docs/03-data-model.md` §2.1.
+///
+/// Group and tilemap arrive with their phases; `conversion` is here because it
+/// is the product thesis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Layer {
@@ -58,12 +79,18 @@ pub enum Layer {
         #[serde(flatten)]
         base: LayerBase,
     },
+    Conversion {
+        #[serde(flatten)]
+        base: LayerBase,
+        source: ConversionSource,
+    },
 }
 
 impl Layer {
     pub fn base(&self) -> &LayerBase {
         match self {
             Layer::Raster { base } => base,
+            Layer::Conversion { base, .. } => base,
         }
     }
 }
@@ -165,5 +192,73 @@ mod tests {
         let json = serde_json::to_value(&cel).unwrap();
         assert!(json.get("layerId").is_some());
         assert!(json.get("layer_id").is_none());
+    }
+
+    /// The conversion layer has to survive a `.tess` round trip with its
+    /// settings intact — that is what "re-editable weeks later" means in
+    /// practice (`docs/03-data-model.md` §2.1).
+    #[test]
+    fn a_conversion_layer_round_trips_with_its_settings() {
+        use crate::pipeline::settings::{ConvertSettings, DitherMode, PaletteSpec};
+
+        let mut settings = ConvertSettings::new(
+            64,
+            48,
+            PaletteSpec::Fixed {
+                colors: vec![[0, 0, 0, 255], [255, 255, 255, 255]],
+            },
+        );
+        settings.dither = DitherMode::Atkinson;
+        settings.brightness = 0.25;
+
+        let layer = Layer::Conversion {
+            base: LayerBase {
+                id: "l1".into(),
+                name: "photo.jpg".into(),
+                visible: true,
+                locked: false,
+                opacity: 1.0,
+                blend_mode: BlendMode::Normal,
+            },
+            source: ConversionSource {
+                source_id: 42,
+                settings,
+            },
+        };
+
+        let json = serde_json::to_value(&layer).expect("serializes");
+        assert_eq!(json["kind"], "conversion");
+        // `base` is flattened, so the layer is one object with a `kind`
+        // discriminant — the same shape the TypeScript union has.
+        assert_eq!(json["name"], "photo.jpg");
+        assert_eq!(json["source"]["sourceId"], 42);
+        assert_eq!(json["source"]["settings"]["dither"], "atkinson");
+
+        let back: Layer = serde_json::from_value(json).expect("deserializes");
+        match back {
+            Layer::Conversion { base, source } => {
+                assert_eq!(base.id, "l1");
+                assert_eq!(source.source_id, 42);
+                assert_eq!(source.settings.dither, DitherMode::Atkinson);
+                assert_eq!(source.settings.brightness, 0.25);
+                assert_eq!(source.settings.target_width, 64);
+            }
+            other => panic!("expected a conversion layer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_raster_layer_is_unaffected_by_the_new_variant() {
+        let json = serde_json::json!({
+            "kind": "raster",
+            "id": "l1",
+            "name": "bg",
+            "visible": true,
+            "locked": false,
+            "opacity": 1.0,
+            "blendMode": "normal"
+        });
+        let layer: Layer = serde_json::from_value(json).expect("deserializes");
+        assert!(matches!(layer, Layer::Raster { .. }));
     }
 }

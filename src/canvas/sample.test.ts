@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { allocateBuffer, setPixel } from '../model/pixelBuffers';
-import type { Cel, Frame, Layer, Sprite } from '../model/types';
+import type { Cel, Frame, Layer, LayerBase, Sprite } from '../model/types';
 import { compositeOver, samplePixel } from './sample';
 import { picker } from '../tools/picker';
 import { harness } from '../tools/testHarness';
 
-function layer(id: string, over: Partial<Layer> = {}): Layer {
+function layer(id: string, over: Partial<LayerBase> = {}): Layer {
   return {
     id,
     kind: 'raster',

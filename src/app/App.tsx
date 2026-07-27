@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { CanvasView } from '../canvas/CanvasView';
+import { ConversionPanel } from '../panels/ConversionPanel';
 import { LayerPanel } from '../panels/LayerPanel';
 import { PalettePanel } from '../panels/PalettePanel';
 import { StatusBar } from '../panels/StatusBar';
 import { ToolOptions } from '../panels/ToolOptions';
 import { ToolRail } from '../panels/ToolRail';
 import { ConvertMode } from '../convert/ConvertMode';
+import { handoffToEdit } from '../convert/editHandoff';
 import { loadSourceImage } from '../convert/loadSource';
 import { useUIStore } from '../state/uiStore';
 import { ExportDialog } from './ExportDialog';
@@ -96,9 +98,14 @@ export function App() {
         {mode === 'convert' ? (
           <ConvertMode
             onExport={() => setExporting(true)}
-            onEdit={() =>
-              setNotice({ text: 'Edit → arrives with the conversion layer', error: false })
-            }
+            onEdit={() => {
+              try {
+                const { width, height } = handoffToEdit();
+                setNotice({ text: `Editing a ${width}×${height} conversion layer`, error: false });
+              } catch (e) {
+                setNotice({ text: e instanceof Error ? e.message : String(e), error: true });
+              }
+            }}
             onNotice={(text, error) => setNotice({ text, error })}
           />
         ) : (
@@ -107,6 +114,7 @@ export function App() {
             <CanvasView />
             <aside className="panels">
               <ToolOptions />
+              <ConversionPanel />
               <LayerPanel />
               <PalettePanel />
             </aside>
