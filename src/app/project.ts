@@ -141,7 +141,20 @@ export async function openProject(): Promise<{ path: string; warnings: string[] 
 export async function pickImage(): Promise<string | null> {
   const picked = await open({
     multiple: false,
-    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }],
+    filters: [
+      // Uppercase variants are listed explicitly: GTK's file-chooser globs are
+      // case-sensitive, so `*.png` alone hides `PHOTO.PNG`.
+      {
+        name: 'Images',
+        extensions: ['png', 'jpg', 'jpeg', 'PNG', 'JPG', 'JPEG'],
+      },
+      // Always offer an unfiltered view. Which filter a Linux file chooser
+      // applies by default depends on the desktop portal in use, and a filter
+      // that silently hides every file in a directory is indistinguishable from
+      // an empty directory. This gives the user a way out that does not depend
+      // on which portal is installed.
+      { name: 'All files', extensions: ['*'] },
+    ],
   });
   return typeof picked === 'string' ? picked : null;
 }
