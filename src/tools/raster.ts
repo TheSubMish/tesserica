@@ -7,8 +7,14 @@
  */
 
 import { setPixel } from '../model/pixelBuffers';
+import { rectContains, type Rect } from '../model/rect';
 import type { RGBA } from '../model/types';
 
+/**
+ * `clip`, when given, confines painting to a selection (`docs/08-roadmap.md`
+ * Phase 3). `undefined`/`null` means "no selection" — paint anywhere, which
+ * keeps every pre-existing call site (and its tests) unaffected.
+ */
 export function stampBrush(
   buf: Uint8ClampedArray,
   width: number,
@@ -17,8 +23,10 @@ export function stampBrush(
   cy: number,
   size: number,
   color: RGBA,
+  clip?: Rect | null,
 ): void {
   if (size <= 1) {
+    if (clip && !rectContains(clip, cx, cy)) return;
     setPixel(buf, width, height, cx, cy, color);
     return;
   }
@@ -26,7 +34,10 @@ export function stampBrush(
   const offset = Math.floor((size - 1) / 2);
   for (let dy = 0; dy < size; dy++) {
     for (let dx = 0; dx < size; dx++) {
-      setPixel(buf, width, height, cx - offset + dx, cy - offset + dy, color);
+      const x = cx - offset + dx;
+      const y = cy - offset + dy;
+      if (clip && !rectContains(clip, x, y)) continue;
+      setPixel(buf, width, height, x, y, color);
     }
   }
 }
@@ -77,8 +88,9 @@ export function drawLine(
   y1: number,
   size: number,
   color: RGBA,
+  clip?: Rect | null,
 ): void {
   for (const p of linePoints(x0, y0, x1, y1)) {
-    stampBrush(buf, width, height, p.x, p.y, size, color);
+    stampBrush(buf, width, height, p.x, p.y, size, color, clip);
   }
 }

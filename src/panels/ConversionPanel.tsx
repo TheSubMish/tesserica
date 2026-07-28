@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { SliderField } from '../app/SliderField';
 import { reconvertLayer } from '../convert/editHandoff.ts';
 import { previewRuntime } from '../convert/previewRuntime.ts';
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
@@ -89,18 +90,15 @@ export function ConversionPanel() {
         </select>
       </label>
 
-      <label className="field">
-        <span>Brightness</span>
-        <input
-          type="range"
-          min={-1}
-          max={1}
-          step={0.05}
-          value={settings.brightness}
-          onChange={(e) => apply({ brightness: Number(e.target.value) })}
-        />
-        <output>{settings.brightness.toFixed(2)}</output>
-      </label>
+      <SliderField
+        label="Brightness"
+        min={-1}
+        max={1}
+        step={0.05}
+        value={settings.brightness}
+        format={(v) => v.toFixed(2)}
+        onChange={(brightness) => apply({ brightness })}
+      />
 
       {error && (
         <p className="field-note" role="alert">

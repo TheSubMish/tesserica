@@ -8,6 +8,7 @@
  */
 
 import { setPixel } from '../model/pixelBuffers';
+import { rectContains, type Rect } from '../model/rect';
 import type { RGBA } from '../model/types';
 import type { Point } from './raster';
 
@@ -36,23 +37,28 @@ export function drawRect(
   y1: number,
   color: RGBA,
   filled: boolean,
+  clip?: Rect | null,
 ): void {
   const { left, top, right, bottom } = normalizeDrag(x0, y0, x1, y1);
+  const put = (x: number, y: number) => {
+    if (clip && !rectContains(clip, x, y)) return;
+    setPixel(buf, width, height, x, y, color);
+  };
 
   if (filled) {
     for (let y = top; y <= bottom; y++) {
-      for (let x = left; x <= right; x++) setPixel(buf, width, height, x, y, color);
+      for (let x = left; x <= right; x++) put(x, y);
     }
     return;
   }
 
   for (let x = left; x <= right; x++) {
-    setPixel(buf, width, height, x, top, color);
-    setPixel(buf, width, height, x, bottom, color);
+    put(x, top);
+    put(x, bottom);
   }
   for (let y = top; y <= bottom; y++) {
-    setPixel(buf, width, height, left, y, color);
-    setPixel(buf, width, height, right, y, color);
+    put(left, y);
+    put(right, y);
   }
 }
 
@@ -147,11 +153,16 @@ export function drawEllipse(
   y1: number,
   color: RGBA,
   filled: boolean,
+  clip?: Rect | null,
 ): void {
   const points = ellipsePoints(x0, y0, x1, y1);
+  const put = (x: number, y: number) => {
+    if (clip && !rectContains(clip, x, y)) return;
+    setPixel(buf, width, height, x, y, color);
+  };
 
   if (!filled) {
-    for (const p of points) setPixel(buf, width, height, p.x, p.y, color);
+    for (const p of points) put(p.x, p.y);
     return;
   }
 
@@ -168,6 +179,6 @@ export function drawEllipse(
     }
   }
   for (const [y, row] of rows) {
-    for (let x = row.min; x <= row.max; x++) setPixel(buf, width, height, x, y, color);
+    for (let x = row.min; x <= row.max; x++) put(x, y);
   }
 }

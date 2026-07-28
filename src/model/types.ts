@@ -19,7 +19,31 @@ export type CelId = string;
 
 export type RGBA = readonly [r: number, g: number, b: number, a: number];
 
-export type BlendMode = 'normal';
+/**
+ * `docs/03-data-model.md` §2.1 — the full W3C Compositing/Blending set.
+ *
+ * Composited in `canvas/blend.ts` (the maths) and folded into alpha
+ * compositing in `canvas/sample.ts::compositeOver` (the "straight alpha, never
+ * premultiplied" invariant applies to blended colours exactly as it does to
+ * plain source-over ones).
+ */
+export type BlendMode =
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'color-dodge'
+  | 'color-burn'
+  | 'hard-light'
+  | 'soft-light'
+  | 'difference'
+  | 'exclusion'
+  | 'hue'
+  | 'saturation'
+  | 'color'
+  | 'luminosity';
 
 export interface LayerBase {
   id: LayerId;

@@ -51,6 +51,12 @@ describe('drawRect', () => {
     drawRect(buf, 4, 4, 2, 2, 2, 2, RED, false);
     expect(litPixels(buf, 4, 4)).toEqual(new Set(['2,2']));
   });
+
+  it('clips to a selection (`docs/08-roadmap.md` Phase 3)', () => {
+    const buf = new Uint8ClampedArray(6 * 5 * 4);
+    drawRect(buf, 6, 5, 1, 1, 4, 3, RED, true, { x: 2, y: 0, width: 2, height: 5 });
+    expect(litPixels(buf, 6, 5)).toEqual(new Set(['2,1', '3,1', '2,2', '3,2', '2,3', '3,3']));
+  });
 });
 
 describe('ellipsePoints', () => {

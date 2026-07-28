@@ -11,6 +11,13 @@ interface UIState {
   showGrid: boolean;
   /** Document-space cursor position, or null when off-canvas. */
   cursor: { x: number; y: number } | null;
+  /**
+   * Bumped whenever the viewport should re-fit the sprite, e.g. `Ctrl+N`
+   * (`docs/06-workflows.md` W2 step 2). `CanvasView` watches this rather than
+   * sprite size directly, because a new document can share the previous one's
+   * dimensions and still needs its pan reset.
+   */
+  fitRequest: number;
 
   setMode(m: Mode): void;
   setZoom(z: number): void;
@@ -19,6 +26,7 @@ interface UIState {
   setPan(x: number, y: number): void;
   toggleGrid(): void;
   setCursor(c: { x: number; y: number } | null): void;
+  requestFit(): void;
 }
 
 export const MIN_ZOOM = 1;
@@ -34,6 +42,7 @@ export const useUIStore = create<UIState>((set) => ({
   panY: 0,
   showGrid: true,
   cursor: null,
+  fitRequest: 0,
 
   setMode: (m) => set({ mode: m }),
   setZoom: (z) => set({ zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z)) }),
@@ -58,4 +67,5 @@ export const useUIStore = create<UIState>((set) => ({
   setPan: (x, y) => set({ panX: x, panY: y }),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   setCursor: (c) => set({ cursor: c }),
+  requestFit: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
 }));

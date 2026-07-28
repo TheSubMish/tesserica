@@ -70,6 +70,28 @@ describe('fillGlobal', () => {
     expect(getPixel(buf, W, H, 7, 7)).toEqual([0, 255, 0, 255]);
     expect(getPixel(buf, W, H, 4, 3)).toEqual([255, 0, 0, 255]);
   });
+
+  it('only recolours matching pixels inside a selection (`docs/08-roadmap.md` Phase 3)', () => {
+    const buf = blank();
+    fillGlobal(buf, W, H, 0, 0, GREEN, { x: 0, y: 0, width: 4, height: 8 });
+    expect(getPixel(buf, W, H, 3, 0)).toEqual([0, 255, 0, 255]);
+    expect(getPixel(buf, W, H, 4, 0)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('fillContiguous — selection clipping', () => {
+  it('cannot flood out through the selection boundary', () => {
+    const buf = blank();
+    fillContiguous(buf, W, H, 0, 0, GREEN, { x: 0, y: 0, width: 4, height: 8 });
+    expect(getPixel(buf, W, H, 3, 7)).toEqual([0, 255, 0, 255]);
+    expect(getPixel(buf, W, H, 4, 7)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('ignores a seed outside the selection', () => {
+    const buf = blank();
+    fillContiguous(buf, W, H, 5, 0, GREEN, { x: 0, y: 0, width: 4, height: 8 });
+    expect(buf.every((v) => v === 0)).toBe(true);
+  });
 });
 
 describe('bucket tool', () => {

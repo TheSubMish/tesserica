@@ -48,6 +48,7 @@ export function flattenSprite(sprite: Sprite, frameId: string): Uint8ClampedArra
           [buf[s], buf[s + 1], buf[s + 2], buf[s + 3]],
           layer.opacity,
           [out[d], out[d + 1], out[d + 2], out[d + 3]],
+          layer.blendMode,
         );
         out[d] = r;
         out[d + 1] = g;

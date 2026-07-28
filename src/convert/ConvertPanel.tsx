@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { SliderField } from '../app/SliderField';
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
 import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
 import {
@@ -50,17 +51,13 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
       <section className="panel">
         <h2>Convert</h2>
 
-        <label className="field">
-          <span>Pixel size</span>
-          <input
-            type="range"
-            min={MIN_PIXEL_SIZE}
-            max={MAX_PIXEL_SIZE}
-            value={state.pixelSize}
-            onChange={(e) => state.setPixelSize(Number(e.target.value))}
-          />
-          <output>{state.pixelSize}</output>
-        </label>
+        <SliderField
+          label="Pixel size"
+          min={MIN_PIXEL_SIZE}
+          max={MAX_PIXEL_SIZE}
+          value={state.pixelSize}
+          onChange={(v) => state.setPixelSize(v)}
+        />
 
         <p className="field-note">
           Output{' '}
@@ -106,49 +103,54 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
           </select>
         </label>
 
-        <label className="field">
-          <span>Strength</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={state.ditherStrength}
-            disabled={state.dither === 'none'}
-            onChange={(e) => state.setDitherStrength(Number(e.target.value))}
-          />
-          <output>{state.ditherStrength.toFixed(2)}</output>
-        </label>
+        <SliderField
+          label="Strength"
+          min={0}
+          max={1}
+          step={0.05}
+          value={state.ditherStrength}
+          disabled={state.dither === 'none'}
+          format={(v) => v.toFixed(2)}
+          onChange={(v) => state.setDitherStrength(v)}
+        />
       </section>
 
       <Collapsible title="Adjustments">
-        <Slider
+        <SliderField
           label="Brightness"
+          min={-1}
+          max={1}
+          step={0.05}
           value={state.brightness}
+          format={(v) => v.toFixed(2)}
           onChange={(brightness) => state.setAdvanced({ brightness })}
         />
-        <Slider
+        <SliderField
           label="Contrast"
+          min={-1}
+          max={1}
+          step={0.05}
           value={state.contrast}
+          format={(v) => v.toFixed(2)}
           onChange={(contrast) => state.setAdvanced({ contrast })}
         />
-        <Slider
+        <SliderField
           label="Saturation"
+          min={-1}
+          max={1}
+          step={0.05}
           value={state.saturation}
+          format={(v) => v.toFixed(2)}
           onChange={(saturation) => state.setAdvanced({ saturation })}
         />
-        <label className="field">
-          <span>Hue</span>
-          <input
-            type="range"
-            min={-180}
-            max={180}
-            step={1}
-            value={state.hueShift}
-            onChange={(e) => state.setAdvanced({ hueShift: Number(e.target.value) })}
-          />
-          <output>{state.hueShift}°</output>
-        </label>
+        <SliderField
+          label="Hue"
+          min={-180}
+          max={180}
+          value={state.hueShift}
+          format={(v) => `${v}°`}
+          onChange={(hueShift) => state.setAdvanced({ hueShift })}
+        />
       </Collapsible>
 
       <Collapsible title="Cleanup">
@@ -165,30 +167,20 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>Despeckle</span>
-          <input
-            type="range"
-            min={0}
-            max={3}
-            step={1}
-            value={state.despeckle}
-            onChange={(e) => state.setAdvanced({ despeckle: Number(e.target.value) })}
-          />
-          <output>{state.despeckle}</output>
-        </label>
-        <label className="field">
-          <span>Alpha cut</span>
-          <input
-            type="range"
-            min={0}
-            max={255}
-            step={1}
-            value={state.alphaThreshold}
-            onChange={(e) => state.setAdvanced({ alphaThreshold: Number(e.target.value) })}
-          />
-          <output>{state.alphaThreshold}</output>
-        </label>
+        <SliderField
+          label="Despeckle"
+          min={0}
+          max={3}
+          value={state.despeckle}
+          onChange={(despeckle) => state.setAdvanced({ despeckle })}
+        />
+        <SliderField
+          label="Alpha cut"
+          min={0}
+          max={255}
+          value={state.alphaThreshold}
+          onChange={(alphaThreshold) => state.setAdvanced({ alphaThreshold })}
+        />
       </Collapsible>
 
       <section className="panel convert-actions">
@@ -202,31 +194,6 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
         </button>
       </section>
     </aside>
-  );
-}
-
-function Slider({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input
-        type="range"
-        min={-1}
-        max={1}
-        step={0.05}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-      <output>{value.toFixed(2)}</output>
-    </label>
   );
 }
 

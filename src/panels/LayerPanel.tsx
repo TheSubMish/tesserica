@@ -10,16 +10,39 @@
  */
 
 import { useRef, useState } from 'react';
+import { SliderField } from '../app/SliderField';
 import {
   addLayer,
   deleteLayer,
   moveLayer,
   renameLayer,
+  setLayerBlendMode,
   setLayerLocked,
   setLayerOpacity,
   setLayerVisible,
 } from '../history/layerCommands';
+import type { BlendMode } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
+
+/** `docs/03-data-model.md` §2.1 — the full W3C set, in the order Photoshop-family tools use. */
+const BLEND_MODES: { value: BlendMode; label: string }[] = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'darken', label: 'Darken' },
+  { value: 'multiply', label: 'Multiply' },
+  { value: 'color-burn', label: 'Color Burn' },
+  { value: 'lighten', label: 'Lighten' },
+  { value: 'screen', label: 'Screen' },
+  { value: 'color-dodge', label: 'Color Dodge' },
+  { value: 'overlay', label: 'Overlay' },
+  { value: 'soft-light', label: 'Soft Light' },
+  { value: 'hard-light', label: 'Hard Light' },
+  { value: 'difference', label: 'Difference' },
+  { value: 'exclusion', label: 'Exclusion' },
+  { value: 'hue', label: 'Hue' },
+  { value: 'saturation', label: 'Saturation' },
+  { value: 'color', label: 'Color' },
+  { value: 'luminosity', label: 'Luminosity' },
+];
 
 export function LayerPanel() {
   const layers = useDocumentStore((s) => s.sprite.layers);
@@ -154,27 +177,28 @@ export function LayerPanel() {
         <>
           <label className="field">
             Blend
-            {/* Normal only in v1; the rest land in Phase 3 (docs/08-roadmap.md). */}
-            <select value={active.blendMode} disabled title="More blend modes arrive in Phase 3">
-              <option value="normal">Normal</option>
+            <select
+              aria-label="Blend mode"
+              value={active.blendMode}
+              onChange={(e) => setLayerBlendMode(active.id, e.target.value as BlendMode)}
+            >
+              {BLEND_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
             </select>
           </label>
 
-          <label className="field">
-            Opacity
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(active.opacity * 100)}
-              onPointerDown={() => opacitySession.current++}
-              onKeyDown={() => opacitySession.current++}
-              onChange={(e) =>
-                setLayerOpacity(active.id, Number(e.target.value) / 100, opacitySession.current)
-              }
-            />
-            <span className="value">{Math.round(active.opacity * 100)}%</span>
-          </label>
+          <SliderField
+            label="Opacity"
+            min={0}
+            max={100}
+            value={Math.round(active.opacity * 100)}
+            format={(v) => `${v}%`}
+            onDragStart={() => opacitySession.current++}
+            onChange={(v) => setLayerOpacity(active.id, v / 100, opacitySession.current)}
+          />
         </>
       )}
     </section>

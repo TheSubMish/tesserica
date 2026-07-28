@@ -9,7 +9,9 @@ import { useToolStore } from '../state/toolStore';
 import { useUIStore } from '../state/uiStore';
 import { openProject, saveCurrentProject } from './project';
 
-export function useShortcuts(): void {
+export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
+  const { onNewSprite } = options;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -36,6 +38,11 @@ export function useShortcuts(): void {
         }
         if (key === 'o') {
           void openProject().catch(() => {});
+          e.preventDefault();
+          return;
+        }
+        if (key === 'n') {
+          onNewSprite?.();
           e.preventDefault();
           return;
         }
@@ -68,6 +75,12 @@ export function useShortcuts(): void {
         case 'i':
           tools.setTool('eyedropper');
           break;
+        case 'm':
+          tools.setTool('select');
+          break;
+        case 'v':
+          tools.setTool('move');
+          break;
         case 'x':
           tools.swapColors();
           break;
@@ -98,5 +111,5 @@ export function useShortcuts(): void {
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [onNewSprite]);
 }

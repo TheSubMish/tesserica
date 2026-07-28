@@ -12,6 +12,7 @@
 
 import { useRef, useState } from 'react';
 import { sameRgb, toCss, toHex } from '../lib/color';
+import { COLOR_BLIND_MODES, simulateColorBlindness, type ColorBlindMode } from '../lib/colorBlind';
 import { parsePaletteFile } from '../lib/formats/palette';
 import { usePaletteStore } from '../state/paletteStore';
 import { useToolStore } from '../state/toolStore';
@@ -26,6 +27,9 @@ export function PalettePanel() {
 
   const fileInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  // Session-only: a simulation preview, not a document setting, so it does
+  // not belong in a persisted store (`docs/05-ui-design.md` §8).
+  const [colorBlind, setColorBlind] = useState<ColorBlindMode>('none');
 
   const palette = palettes.find((p) => p.id === activePaletteId) ?? palettes[0];
 
@@ -88,22 +92,44 @@ export function PalettePanel() {
       </label>
 
       <div className="swatch-grid" role="group" aria-label={`${palette.name} colors`}>
-        {palette.colors.map((c, i) => (
-          <button
-            key={`${toHex(c)}-${i}`}
-            className="palette-swatch"
-            style={{ background: toCss(c) }}
-            aria-label={toHex(c)}
-            aria-pressed={sameRgb(c, primary)}
-            title={`${toHex(c)} — right-click for secondary`}
-            onClick={() => useToolStore.getState().setPrimary(c)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              useToolStore.getState().setSecondary(c);
-            }}
-          />
-        ))}
+        {palette.colors.map((c, i) => {
+          // The swatch always *picks* the true colour — simulation previews
+          // what the palette looks like, it does not change what gets painted.
+          const shown = simulateColorBlindness(c, colorBlind);
+          return (
+            <button
+              key={`${toHex(c)}-${i}`}
+              className="palette-swatch"
+              style={{ background: toCss(shown) }}
+              aria-label={
+                colorBlind === 'none' ? toHex(c) : `${toHex(c)}, simulated as ${toHex(shown)}`
+              }
+              aria-pressed={sameRgb(c, primary)}
+              title={`${toHex(c)} — right-click for secondary`}
+              onClick={() => useToolStore.getState().setPrimary(c)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                useToolStore.getState().setSecondary(c);
+              }}
+            />
+          );
+        })}
       </div>
+
+      <label className="field">
+        <span>Simulate</span>
+        <select
+          aria-label="Simulate colour blindness"
+          value={colorBlind}
+          onChange={(e) => setColorBlind(e.target.value as ColorBlindMode)}
+        >
+          {COLOR_BLIND_MODES.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <p className="hint">
         {palette.name} · {palette.colors.length} colors

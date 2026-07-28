@@ -16,13 +16,21 @@ import {
 } from '../history/strokeRecorder';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
+import { useSelectionStore } from '../state/selectionStore';
 import { useToolStore } from '../state/toolStore';
 import { GRID_AUTO_ZOOM, useUIStore } from '../state/uiStore';
 import { getTool } from '../tools/registry';
 import type { ToolContext } from '../tools/Tool';
 import { centerPan, fitZoom, screenToDoc } from './coords';
 import { samplePixel } from './sample';
-import { drawBorder, drawCheckerboard, drawCursorCell, drawGrid, drawSprite } from './renderer';
+import {
+  drawBorder,
+  drawCheckerboard,
+  drawCursorCell,
+  drawGrid,
+  drawSelection,
+  drawSprite,
+} from './renderer';
 
 /** One wheel notch of vertical/horizontal scroll, in screen pixels. */
 const WHEEL_PAN_STEP = 48;
@@ -55,10 +63,17 @@ export function CanvasView() {
   const panY = useUIStore((s) => s.panY);
   const showGrid = useUIStore((s) => s.showGrid);
   const cursor = useUIStore((s) => s.cursor);
+  const fitRequest = useUIStore((s) => s.fitRequest);
+  const selection = useSelectionStore((s) => s.rect);
 
   const brushSize = useToolStore((s) => s.brushSize);
 
-  /** Center the sprite on first mount. */
+  /**
+   * Center the sprite on first mount, and again whenever something asks for a
+   * re-fit — `Ctrl+N` (`docs/06-workflows.md` W2 step 2) replaces the document
+   * without unmounting this component, so `fitRequest` is the only signal that
+   * fires in both cases.
+   */
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
@@ -73,9 +88,10 @@ export function CanvasView() {
     );
     useUIStore.getState().setZoom(z);
     useUIStore.getState().setPan(px, py);
-    // Intentionally mount-only.
+    // `sprite` deliberately excluded: every pixel edit touches the store too,
+    // and this must not re-center the view on every stroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fitRequest]);
 
   /** Keep the backing store sized to the element, accounting for HiDPI. */
   const resize = useCallback(() => {
@@ -118,19 +134,27 @@ export function CanvasView() {
     drawSprite(ctx, sprite, activeFrameId, vp);
     if (showGrid && zoom >= GRID_AUTO_ZOOM) drawGrid(ctx, sprite, vp);
     drawBorder(ctx, sprite, vp);
+    if (selection) drawSelection(ctx, vp, selection);
     if (cursor && !panning.current) {
       drawCursorCell(ctx, vp, cursor.x, cursor.y, brushSize);
     }
-  }, [sprite, activeFrameId, revision, zoom, panX, panY, showGrid, cursor, brushSize]);
+  }, [sprite, activeFrameId, revision, zoom, panX, panY, showGrid, cursor, brushSize, selection]);
 
-  /** Apply the active tool to the active cel. */
-  const paint = useCallback(
+  /**
+   * Apply the active tool to the active cel.
+   *
+   * `phase` covers all three pointer events a gesture can produce. `'up'`
+   * exists so Select and Move can finalize a selection
+   * (`docs/08-roadmap.md` Phase 3) — every other tool leaves `onPointerUp`
+   * unimplemented, so this is a no-op for them.
+   */
+  const dispatch = useCallback(
     (
+      phase: 'down' | 'move' | 'up',
       x: number,
       y: number,
       prevX: number,
       prevY: number,
-      down: boolean,
       button: number,
       alt: boolean,
     ) => {
@@ -152,7 +176,7 @@ export function CanvasView() {
       const buffer = getBuffer(cel.id);
       if (!buffer) return;
 
-      if (down && !tool.readOnly) {
+      if (phase === 'down' && !tool.readOnly) {
         // One copy per gesture. The dirty rect is diffed out of it on release
         // (docs/03-data-model.md §6).
         stroke.current = beginStroke(cel.id, buffer, cel.width, cel.height);
@@ -174,6 +198,8 @@ export function CanvasView() {
         fillContiguous: toolState.fillContiguous,
         anchor: anchor.current,
         strokeState: strokeState.current,
+        selection: useSelectionStore.getState().rect,
+        setSelection: (r) => useSelectionStore.getState().setRect(r),
         restore: () => {
           if (snapshot) restoreStroke(snapshot, buffer);
         },
@@ -190,12 +216,26 @@ export function CanvasView() {
         },
       };
 
-      if (down) tool.onPointerDown(ctx, x, y);
-      else tool.onPointerMove(ctx, x, y, prevX, prevY);
+      if (phase === 'down') tool.onPointerDown(ctx, x, y);
+      else if (phase === 'move') tool.onPointerMove(ctx, x, y, prevX, prevY);
+      else tool.onPointerUp?.(ctx, x, y);
 
       if (!tool.readOnly) doc.touch(cel.id);
     },
     [],
+  );
+
+  const paint = useCallback(
+    (
+      x: number,
+      y: number,
+      prevX: number,
+      prevY: number,
+      down: boolean,
+      button: number,
+      alt: boolean,
+    ) => dispatch(down ? 'down' : 'move', x, y, prevX, prevY, button, alt),
+    [dispatch],
   );
 
   /** Close the gesture and record it as a single undo step. */
@@ -267,12 +307,23 @@ export function CanvasView() {
 
   const endStroke = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (drawing.current) commitStroke();
+      if (drawing.current) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const { x, y } = screenToDoc(
+          useUIStore.getState(),
+          e.clientX - rect.left,
+          e.clientY - rect.top,
+        );
+        // Select/Move finalize their gesture here (`docs/08-roadmap.md` Phase
+        // 3); every other tool leaves `onPointerUp` unimplemented.
+        dispatch('up', x, y, x, y, e.button, e.altKey);
+        commitStroke();
+      }
       drawing.current = false;
       panning.current = false;
       e.currentTarget.releasePointerCapture?.(e.pointerId);
     },
-    [commitStroke],
+    [commitStroke, dispatch],
   );
 
   /**

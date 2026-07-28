@@ -373,6 +373,30 @@ select:focus-visible {
   color: var(--text);
   min-width: 28px;
   text-align: right;
+  cursor: text;
+  border-radius: 3px;
+}
+
+.field .value:hover,
+.field .value:focus-visible {
+  background: var(--bg-elevated);
+  outline: 1px solid var(--border-strong);
+}
+
+/* The number field a slider's value becomes on click (`docs/05-ui-design.md`
+   §7.6 — "click the value to type it"). */
+.value-input {
+  flex: none;
+  width: 44px;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg-app);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
 }
 
 .field.check {
@@ -386,6 +410,23 @@ select:focus-visible {
   width: 14px;
   height: 14px;
   margin: 0;
+}
+
+/* New Sprite's custom width/height (`docs/06-workflows.md` W2 step 1). */
+.dims-row {
+  gap: var(--space-1);
+}
+
+.dim-input {
+  width: 64px;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .hint {

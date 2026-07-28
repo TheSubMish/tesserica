@@ -109,6 +109,27 @@ describe('removeLayer', () => {
   });
 });
 
+describe('newDocument', () => {
+  it('replaces the sprite with a single blank layer at the requested size', () => {
+    useDocumentStore.getState().addLayer('extra'); // prove the old layers are gone, not appended to
+    useDocumentStore.getState().newDocument(12, 9);
+
+    const s = useDocumentStore.getState();
+    expect([s.sprite.width, s.sprite.height]).toEqual([12, 9]);
+    expect(s.sprite.layers).toHaveLength(1);
+    expect(s.sprite.frames).toHaveLength(1);
+    expect(s.sprite.cels).toHaveLength(1);
+    expect(getBuffer(s.sprite.cels[0].id)?.length).toBe(12 * 9 * 4);
+  });
+
+  it('never mints an id that collides with one from the replaced document', () => {
+    const staleIds = useDocumentStore.getState().sprite.layers.map((l) => l.id);
+    useDocumentStore.getState().newDocument(4, 4);
+    const freshIds = useDocumentStore.getState().sprite.layers.map((l) => l.id);
+    expect(staleIds.some((id) => freshIds.includes(id))).toBe(false);
+  });
+});
+
 describe('toggleLayerVisibility', () => {
   it('flips visibility and bumps the revision so the canvas redraws', () => {
     const s = useDocumentStore.getState();

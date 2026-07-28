@@ -62,6 +62,14 @@ interface DocumentState {
   setProjectPath(path: string | null): void;
   /** Replace the whole document, e.g. after opening a `.tess`. */
   replaceDocument(sprite: Sprite, pixels: Map<CelId, Uint8ClampedArray>): void;
+  /**
+   * Start a fresh document — `Ctrl+N` (`docs/06-workflows.md` W2 step 1).
+   *
+   * One raster layer, one frame, blank. Routed through `replaceDocument` so it
+   * gets the same buffer-release and id-reservation guarantees as opening a
+   * `.tess`, rather than a second copy of that bookkeeping.
+   */
+  newDocument(width: number, height: number): void;
 
   /**
    * Signal a change. Passing the cel that changed lets the renderer re-upload
@@ -180,6 +188,30 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       activeFrameId: sprite.frames[0]?.id ?? s.activeFrameId,
       revision: s.revision + 1,
     }));
+  },
+
+  newDocument: (width, height) => {
+    const frame: Frame = { id: makeId('f'), durationMs: 100 };
+    const layer: Layer = {
+      id: makeId('l'),
+      kind: 'raster',
+      name: 'Layer 1',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+    };
+    const cel: Cel = {
+      id: makeId('c'),
+      layerId: layer.id,
+      frameId: frame.id,
+      x: 0,
+      y: 0,
+      width,
+      height,
+    };
+    const sprite: Sprite = { width, height, layers: [layer], frames: [frame], cels: [cel] };
+    get().replaceDocument(sprite, new Map());
   },
 
   touch: (celId) => {

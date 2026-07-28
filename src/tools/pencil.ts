@@ -39,7 +39,7 @@ export function isRedundantCorner(a: Point, b: Point, c: Point): boolean {
 }
 
 function plot(ctx: ToolContext, x: number, y: number, color: RGBA): void {
-  stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, color);
+  stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, color, ctx.selection);
 
   if (!ctx.pixelPerfect || ctx.brushSize > 1) return;
 

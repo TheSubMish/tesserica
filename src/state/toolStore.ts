@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { RGBA } from '../model/types';
 
-export type ToolId = 'pencil' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'eyedropper';
+export type ToolId =
+  'pencil' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'eyedropper' | 'select' | 'move';
 
 interface ToolState {
   activeTool: ToolId;

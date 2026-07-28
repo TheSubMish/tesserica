@@ -7,7 +7,13 @@ import {
   setPixel,
 } from '../model/pixelBuffers';
 import type { Sprite } from '../model/types';
-import { drawCheckerboard, drawGrid, drawSprite, invalidateRenderCache } from './renderer';
+import {
+  drawCheckerboard,
+  drawGrid,
+  drawSelection,
+  drawSprite,
+  invalidateRenderCache,
+} from './renderer';
 
 /**
  * jsdom has no 2D context and no `ImageData`, so the renderer is exercised
@@ -50,6 +56,8 @@ function stubContext() {
     stroke: record('stroke'),
     drawImage: record('drawImage'),
     putImageData: record('putImageData'),
+    setLineDash: record('setLineDash'),
+    lineDashOffset: 0,
   };
   return ctx;
 }
@@ -251,6 +259,28 @@ describe('dirty-layer caching', () => {
     sprite.layers[0].opacity = 0.5;
     drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
     expect(scratchCalls().length).toBeGreaterThan(before);
+  });
+});
+
+describe('drawSelection', () => {
+  it('draws two offset dashed strokes, not one — colour alone must not carry the state', () => {
+    const ctx = stubContext();
+    drawSelection(
+      ctx as unknown as CanvasRenderingContext2D,
+      { zoom: 4, panX: 0, panY: 0 },
+      {
+        x: 1,
+        y: 1,
+        width: 2,
+        height: 3,
+      },
+    );
+
+    const strokes = ctx.calls.filter((c) => c.fn === 'strokeRect');
+    expect(strokes).toHaveLength(2);
+    // Same rect both times — zoom applied, pan applied.
+    expect(strokes[0].args).toEqual(strokes[1].args);
+    expect(strokes[0].args).toEqual([4.5, 4.5, 8, 12]);
   });
 });
 

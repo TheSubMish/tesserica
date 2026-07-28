@@ -13,7 +13,9 @@
 
 import type { Cel, CelId, Layer, Sprite } from '../model/types';
 import { celRevision, getBuffer } from '../model/pixelBuffers';
+import { canvasCompositeOp } from './blend';
 import type { Viewport } from './coords';
+import type { Rect } from '../model/rect';
 
 /**
  * Fixed 8px in *screen* space, deliberately not scaled by zoom
@@ -182,9 +184,20 @@ export function compositeSprite(sprite: Sprite, frameId: string): HTMLCanvasElem
     // `drawImage` off the cel's own canvas. Straight alpha is preserved:
     // Canvas2D's source-over on unassociated ImageData is what we want, and no
     // premultiplication is introduced anywhere on this path.
+    //
+    // Blend modes beyond normal use the browser's native
+    // `globalCompositeOperation` here rather than `blend.ts`'s per-pixel maths
+    // — this is the live *preview* half of the hybrid split
+    // (`docs/02-architecture.md` §3), already "deliberately approximate", and
+    // the names are literally the CSS/Canvas blend-mode keywords
+    // (`canvasCompositeOp`). Export (`flatten.ts`) and the eyedropper
+    // (`samplePixel`) use the hand-rolled W3C formulas directly, since those
+    // are the paths that must be exact.
     ctx.globalAlpha = layer.opacity;
+    ctx.globalCompositeOperation = canvasCompositeOp(layer.blendMode);
     ctx.drawImage(source, cel.x, cel.y);
     ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   pruneCelCache(sprite);
@@ -240,6 +253,35 @@ export function drawBorder(ctx: CanvasRenderingContext2D, sprite: Sprite, vp: Vi
     sprite.width * vp.zoom + 1,
     sprite.height * vp.zoom + 1,
   );
+  ctx.restore();
+}
+
+/**
+ * The active selection, drawn as marching ants (`docs/08-roadmap.md` Phase 3).
+ *
+ * Two offset dashed strokes, black and white, rather than one colour — a
+ * single-colour dashed line disappears against art of the same colour, and
+ * "never encode state in colour alone" (`docs/05-ui-design.md` §8) applies to
+ * the selection outline as much as anything else in the UI.
+ */
+export function drawSelection(ctx: CanvasRenderingContext2D, vp: Viewport, r: Rect): void {
+  const x = Math.round(vp.panX + r.x * vp.zoom) + 0.5;
+  const y = Math.round(vp.panY + r.y * vp.zoom) + 0.5;
+  const w = r.width * vp.zoom;
+  const h = r.height * vp.zoom;
+
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+
+  ctx.strokeStyle = '#000000';
+  ctx.lineDashOffset = 0;
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineDashOffset = 4;
+  ctx.strokeRect(x, y, w, h);
+
   ctx.restore();
 }
 

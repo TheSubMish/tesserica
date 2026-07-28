@@ -13,15 +13,17 @@ import { loadSourceImage } from '../convert/loadSource';
 import { useUIStore } from '../state/uiStore';
 import { ExportDialog } from './ExportDialog';
 import { FileMenu } from './FileMenu';
+import { NewSpriteDialog } from './NewSpriteDialog';
 import { openProject, pickImage, saveCurrentProject } from './project';
 import { useShortcuts } from './shortcuts';
 
 export function App() {
   const mode = useUIStore((s) => s.mode);
   const [exporting, setExporting] = useState(false);
+  const [creatingNew, setCreatingNew] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [dropping, setDropping] = useState(false);
-  useShortcuts();
+  useShortcuts({ onNewSprite: () => setCreatingNew(true) });
 
   const guard = async (label: string, run: () => Promise<string | null>) => {
     try {
@@ -77,6 +79,11 @@ export function App() {
       <header className="titlebar">
         <FileMenu
           items={[
+            {
+              label: 'New…',
+              shortcut: 'Ctrl+N',
+              onSelect: () => setCreatingNew(true),
+            },
             {
               label: 'Open…',
               shortcut: 'Ctrl+O',
@@ -183,6 +190,7 @@ export function App() {
       )}
 
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
+      {creatingNew && <NewSpriteDialog onClose={() => setCreatingNew(false)} />}
     </div>
   );
 }

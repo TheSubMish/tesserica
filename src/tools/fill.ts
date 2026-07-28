@@ -16,6 +16,7 @@
  */
 
 import { setPixel } from '../model/pixelBuffers';
+import { rectContains, type Rect } from '../model/rect';
 import type { RGBA } from '../model/types';
 
 function sameColor(buf: Uint8ClampedArray, i: number, c: readonly number[]): boolean {
@@ -26,7 +27,11 @@ function readColor(buf: Uint8ClampedArray, i: number): [number, number, number, 
   return [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
 }
 
-/** Replace every pixel in the cel matching the seed's colour. */
+/**
+ * `clip`, when given, confines the fill to a selection (`docs/08-roadmap.md`
+ * Phase 3) — global fill only recolours matching pixels inside it, and
+ * contiguous fill cannot flood out through its boundary.
+ */
 export function fillGlobal(
   buf: Uint8ClampedArray,
   width: number,
@@ -34,13 +39,18 @@ export function fillGlobal(
   seedX: number,
   seedY: number,
   color: RGBA,
+  clip?: Rect | null,
 ): void {
   if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return;
+  if (clip && !rectContains(clip, seedX, seedY)) return;
   const target = readColor(buf, (seedY * width + seedX) * 4);
   if (target.every((v, k) => v === color[k])) return;
 
-  for (let i = 0; i < buf.length; i += 4) {
-    if (sameColor(buf, i, target)) {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (clip && !rectContains(clip, x, y)) continue;
+      const i = (y * width + x) * 4;
+      if (!sameColor(buf, i, target)) continue;
       buf[i] = color[0];
       buf[i + 1] = color[1];
       buf[i + 2] = color[2];
@@ -57,15 +67,22 @@ export function fillContiguous(
   seedX: number,
   seedY: number,
   color: RGBA,
+  clip?: Rect | null,
 ): void {
   if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return;
+  if (clip && !rectContains(clip, seedX, seedY)) return;
 
   const target = readColor(buf, (seedY * width + seedX) * 4);
   // Filling a region with the colour it already has would never terminate.
   if (target.every((v, k) => v === color[k])) return;
 
   const matches = (x: number, y: number): boolean =>
-    x >= 0 && x < width && y >= 0 && y < height && sameColor(buf, (y * width + x) * 4, target);
+    x >= 0 &&
+    x < width &&
+    y >= 0 &&
+    y < height &&
+    (!clip || rectContains(clip, x, y)) &&
+    sameColor(buf, (y * width + x) * 4, target);
 
   const stack: { x: number; y: number }[] = [{ x: seedX, y: seedY }];
 

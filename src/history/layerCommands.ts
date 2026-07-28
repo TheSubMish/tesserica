@@ -13,7 +13,7 @@
  */
 
 import { getBuffer, releaseBuffer, setBuffer } from '../model/pixelBuffers';
-import type { Cel, CelId, Layer, LayerId } from '../model/types';
+import type { BlendMode, Cel, CelId, Layer, LayerId } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import type { Command, DocumentApi } from './command';
@@ -237,4 +237,8 @@ export function setLayerVisible(id: LayerId, visible: boolean): void {
 
 export function setLayerLocked(id: LayerId, locked: boolean): void {
   setProps(locked ? 'Lock Layer' : 'Unlock Layer', id, { locked });
+}
+
+export function setLayerBlendMode(id: LayerId, blendMode: BlendMode): void {
+  setProps('Layer Blend Mode', id, { blendMode });
 }

@@ -17,7 +17,18 @@ export const line: Tool = {
   id: 'line',
   label: 'Line',
   onPointerDown(ctx, x, y) {
-    drawLine(ctx.buffer, ctx.width, ctx.height, x, y, x, y, ctx.brushSize, colorFor(ctx));
+    drawLine(
+      ctx.buffer,
+      ctx.width,
+      ctx.height,
+      x,
+      y,
+      x,
+      y,
+      ctx.brushSize,
+      colorFor(ctx),
+      ctx.selection,
+    );
   },
   onPointerMove(ctx, x, y) {
     ctx.restore();
@@ -31,6 +42,7 @@ export const line: Tool = {
       y,
       ctx.brushSize,
       colorFor(ctx),
+      ctx.selection,
     );
   },
 };
@@ -39,7 +51,18 @@ export const rectangle: Tool = {
   id: 'rect',
   label: 'Rectangle',
   onPointerDown(ctx, x, y) {
-    drawRect(ctx.buffer, ctx.width, ctx.height, x, y, x, y, colorFor(ctx), ctx.shapeFill);
+    drawRect(
+      ctx.buffer,
+      ctx.width,
+      ctx.height,
+      x,
+      y,
+      x,
+      y,
+      colorFor(ctx),
+      ctx.shapeFill,
+      ctx.selection,
+    );
   },
   onPointerMove(ctx, x, y) {
     ctx.restore();
@@ -53,6 +76,7 @@ export const rectangle: Tool = {
       y,
       colorFor(ctx),
       ctx.shapeFill,
+      ctx.selection,
     );
   },
 };
@@ -61,7 +85,18 @@ export const ellipse: Tool = {
   id: 'ellipse',
   label: 'Ellipse',
   onPointerDown(ctx, x, y) {
-    drawEllipse(ctx.buffer, ctx.width, ctx.height, x, y, x, y, colorFor(ctx), ctx.shapeFill);
+    drawEllipse(
+      ctx.buffer,
+      ctx.width,
+      ctx.height,
+      x,
+      y,
+      x,
+      y,
+      colorFor(ctx),
+      ctx.shapeFill,
+      ctx.selection,
+    );
   },
   onPointerMove(ctx, x, y) {
     ctx.restore();
@@ -75,6 +110,7 @@ export const ellipse: Tool = {
       y,
       colorFor(ctx),
       ctx.shapeFill,
+      ctx.selection,
     );
   },
 };

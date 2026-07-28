@@ -6,6 +6,7 @@
  * the ones that matter.
  */
 
+import { SliderField } from '../app/SliderField';
 import { useToolStore } from '../state/toolStore';
 
 export function ToolOptions() {
@@ -25,17 +26,13 @@ export function ToolOptions() {
       </div>
 
       {hasBrush && (
-        <label className="field">
-          Size
-          <input
-            type="range"
-            min={1}
-            max={16}
-            value={brushSize}
-            onChange={(e) => useToolStore.getState().setBrushSize(Number(e.target.value))}
-          />
-          <span className="value">{brushSize}</span>
-        </label>
+        <SliderField
+          label="Size"
+          min={1}
+          max={16}
+          value={brushSize}
+          onChange={(v) => useToolStore.getState().setBrushSize(v)}
+        />
       )}
 
       {tool === 'pencil' && (

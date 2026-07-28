@@ -31,10 +31,31 @@ impl Default for ColorMode {
     }
 }
 
+/// `docs/03-data-model.md` §2.1 — the full W3C Compositing/Blending set.
+///
+/// Rust never composites layers itself (export flattens in TS, `docs/02` §6.2 —
+/// pixel buffers never cross IPC, and the flattened bytes are what Rust
+/// receives), so this enum exists purely so a `.tess` with a non-`normal`
+/// blend mode round-trips instead of failing to deserialize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BlendMode {
     Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
 }
 
 pub type Rgba = [u8; 4];
@@ -244,6 +265,36 @@ mod tests {
                 assert_eq!(source.settings.target_width, 64);
             }
             other => panic!("expected a conversion layer, got {other:?}"),
+        }
+    }
+
+    /// Phase 3 added fifteen blend modes beyond `normal`; a `.tess` saved with
+    /// one selected must still load, not just fail loudly.
+    #[test]
+    fn every_blend_mode_round_trips_kebab_case() {
+        let cases = [
+            (BlendMode::Normal, "normal"),
+            (BlendMode::Multiply, "multiply"),
+            (BlendMode::Screen, "screen"),
+            (BlendMode::Overlay, "overlay"),
+            (BlendMode::Darken, "darken"),
+            (BlendMode::Lighten, "lighten"),
+            (BlendMode::ColorDodge, "color-dodge"),
+            (BlendMode::ColorBurn, "color-burn"),
+            (BlendMode::HardLight, "hard-light"),
+            (BlendMode::SoftLight, "soft-light"),
+            (BlendMode::Difference, "difference"),
+            (BlendMode::Exclusion, "exclusion"),
+            (BlendMode::Hue, "hue"),
+            (BlendMode::Saturation, "saturation"),
+            (BlendMode::Color, "color"),
+            (BlendMode::Luminosity, "luminosity"),
+        ];
+        for (mode, wire) in cases {
+            let json = serde_json::to_value(mode).unwrap();
+            assert_eq!(json, wire);
+            let back: BlendMode = serde_json::from_value(json).unwrap();
+            assert_eq!(back, mode);
         }
     }
 

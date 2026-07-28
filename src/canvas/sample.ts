@@ -12,19 +12,48 @@
  */
 
 import { getBuffer } from '../model/pixelBuffers';
-import type { RGBA, Sprite } from '../model/types';
+import type { BlendMode, RGBA, Sprite } from '../model/types';
+import { blendFunction } from './blend';
 
-/** Source-over compositing of straight-alpha colours, in 0..255 / 0..1. */
-export function compositeOver(src: RGBA, srcAlpha: number, dst: RGBA): RGBA {
+/**
+ * Source-over compositing of straight-alpha colours, in 0..255 / 0..1.
+ *
+ * `blendMode` folds in via the W3C Compositing formula
+ * `Cs' = (1 − αb)·Cs + αb·B(Cb, Cs)`, then `Cs'` takes the place `Cs` occupied
+ * in plain source-over — the alpha maths (`outA`, the mix weights) is
+ * completely unchanged by blend mode, only the colour being mixed in is
+ * (`blend.ts`). `'normal'` skips the extra work: `B(Cb, Cs) = Cs` there, which
+ * makes `Cs' = Cs` identically, so this must stay behaviourally identical to
+ * the pre-blend-mode function for every existing caller.
+ */
+export function compositeOver(
+  src: RGBA,
+  srcAlpha: number,
+  dst: RGBA,
+  blendMode: BlendMode = 'normal',
+): RGBA {
   const sa = (src[3] / 255) * srcAlpha;
   const da = dst[3] / 255;
   const outA = sa + da * (1 - sa);
   if (outA <= 0) return [0, 0, 0, 0];
+
+  let blended: readonly [number, number, number] = [src[0], src[1], src[2]];
+  if (blendMode !== 'normal' && da > 0) {
+    const backdrop: readonly [number, number, number] = [dst[0] / 255, dst[1] / 255, dst[2] / 255];
+    const source: readonly [number, number, number] = [src[0] / 255, src[1] / 255, src[2] / 255];
+    const b = blendFunction(blendMode, backdrop, source);
+    blended = [
+      ((1 - da) * source[0] + da * b[0]) * 255,
+      ((1 - da) * source[1] + da * b[1]) * 255,
+      ((1 - da) * source[2] + da * b[2]) * 255,
+    ];
+  }
+
   const mix = (s: number, d: number) => (s * sa + d * da * (1 - sa)) / outA;
   return [
-    Math.round(mix(src[0], dst[0])),
-    Math.round(mix(src[1], dst[1])),
-    Math.round(mix(src[2], dst[2])),
+    Math.round(mix(blended[0], dst[0])),
+    Math.round(mix(blended[1], dst[1])),
+    Math.round(mix(blended[2], dst[2])),
     Math.round(outA * 255),
   ];
 }
@@ -47,7 +76,12 @@ export function samplePixel(sprite: Sprite, frameId: string, x: number, y: numbe
     if (!buf) continue;
 
     const i = (ly * cel.width + lx) * 4;
-    out = compositeOver([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]], layer.opacity, out);
+    out = compositeOver(
+      [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]],
+      layer.opacity,
+      out,
+      layer.blendMode,
+    );
   }
   return out;
 }

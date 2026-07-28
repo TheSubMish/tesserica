@@ -18,6 +18,7 @@
  *   retracts an L-corner it has just drawn.
  */
 
+import type { Rect } from '../model/rect';
 import type { RGBA } from '../model/types';
 
 export interface ToolContext {
@@ -42,6 +43,18 @@ export interface ToolContext {
   anchor: { x: number; y: number };
   /** Per-gesture scratch space; the canvas clears it at pointer-down. */
   strokeState: Record<string, unknown>;
+
+  /**
+   * The active rectangular selection, or `null` when nothing is selected
+   * (`docs/08-roadmap.md` Phase 3, "selection tools + move"). Painting tools
+   * clip to this; the Move tool translates its contents.
+   *
+   * v1 ships **rectangular marquee only** — ellipse, lasso and magic wand are
+   * not implemented, so this stays a `Rect` rather than a general mask.
+   */
+  selection: Rect | null;
+  /** Replace the selection, or pass `null` to clear it. */
+  setSelection(r: Rect | null): void;
 
   /** Restore the whole cel to its pointer-down state. */
   restore(): void;

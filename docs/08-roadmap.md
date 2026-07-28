@@ -99,13 +99,31 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
 
 **Goal:** ship it.
 
-- [ ] Blend modes beyond normal
-- [ ] Selection tools (rect, ellipse, lasso, magic wand) + move
-- [ ] Layer groups, clipping masks
-- [ ] Keyboard shortcuts complete (`05` §7); preferences
-- [ ] Accessibility pass (`05` §8), including color-blindness simulation
+- [x] Blend modes beyond normal — all sixteen from `03-data-model.md` §2.1. Composited
+      in `canvas/blend.ts` (W3C formulas, used by export and the eyedropper) and via
+      native `globalCompositeOperation` in the live renderer (`canvas/renderer.ts`) —
+      see that file for why the two are allowed to differ here, unlike the conversion
+      pipeline. The Rust `BlendMode` enum mirrors the wire format only; Rust never
+      composites layers.
+- [~] Selection tools (rect, ellipse, lasso, magic wand) + move — **rectangle marquee
+      and Move only.** `state/selectionStore.ts` holds a single `Rect`, not a general
+      mask, so ellipse/lasso/magic-wand selection is a data-model change, not just a
+      new tool, and did not land in this pass. Every paint tool (pencil, eraser, fill,
+      line, rect, ellipse) clips to the active selection.
+- [ ] Layer groups, clipping masks — not started.
+- [~] Keyboard shortcuts complete (`05` §7) — the interaction rules in §7 are now all
+      implemented, including "every slider is also a number field"
+      (`app/SliderField.tsx`, used by all nine sliders in the app) and `M`/`V` for
+      Select/Move. Not done: a dedicated click-to-zoom `Z` tool (`Ctrl`+wheel already
+      covers zoom-from-any-tool) and a preferences panel.
+- [~] Accessibility pass (`05` §8) — color-blindness simulation shipped
+      (`lib/colorBlind.ts`, palette panel). A systematic contrast/focus-order audit
+      beyond what already existed did not happen in this pass.
 - [ ] ~~Cross-platform verification~~ — **deferred, Linux only** (`10-decisions.md` D5)
-- [ ] Linux installers (`.deb`, `.AppImage`); README; first-run experience
+- [~] Linux installers (`.deb`, `.AppImage`); README; first-run experience — bundle
+      targets and icons were already configured (Phase 0); README's status line is
+      now current. Actually producing and testing installer artifacts, and a first-run
+      experience, did not happen in this pass.
 
 **Exit:** 🚀 **v1.** Editor + converter, meeting the §8 success criteria in
 `00-vision-and-scope.md`.

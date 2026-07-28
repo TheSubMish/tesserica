@@ -7,6 +7,7 @@
  * `restore` / `restorePixel` that the canvas normally supplies.
  */
 
+import type { Rect } from '../model/rect';
 import type { RGBA } from '../model/types';
 import type { ToolContext } from './Tool';
 
@@ -39,9 +40,13 @@ export function harness(init: Partial<ToolContext> & { size?: number } = {}): Ha
     fillContiguous: true,
     anchor: { x: 0, y: 0 },
     strokeState: {},
+    selection: null,
     picked: [],
     sampleSource: null,
 
+    setSelection(r: Rect | null) {
+      h.selection = r;
+    },
     snapshot() {
       saved = new Uint8ClampedArray(buffer);
       h.strokeState = {};

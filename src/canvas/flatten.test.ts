@@ -85,6 +85,14 @@ describe('flattenSprite', () => {
     expect(out).toHaveLength(W * H * 4);
   });
 
+  it('composites a non-normal blend mode, not just plain source-over', () => {
+    const sprite = makeSprite([layer('a'), layer('b', { blendMode: 'multiply' })]);
+    setPixel(allocateBuffer('cel-a', W, H), W, H, 0, 0, [200, 100, 50, 255]);
+    setPixel(allocateBuffer('cel-b', W, H), W, H, 0, 0, [128, 128, 128, 255]);
+    // multiply(200/255, 128/255) * 255 ≈ 100.4 → rounds to 100, etc.
+    expect(px(flattenSprite(sprite, 'f1'), 0, 0)).toEqual([100, 50, 25, 255]);
+  });
+
   it('clips a cel that hangs off the edge', () => {
     const sprite = makeSprite([layer('a')], [{ x: 3, y: 3, width: 4, height: 4 }]);
     const buf = allocateBuffer('cel-a', 4, 4);

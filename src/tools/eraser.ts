@@ -17,9 +17,20 @@ export const eraser: Tool = {
   id: 'eraser',
   label: 'Eraser',
   onPointerDown(ctx, x, y) {
-    stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, TRANSPARENT);
+    stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, TRANSPARENT, ctx.selection);
   },
   onPointerMove(ctx, x, y, prevX, prevY) {
-    drawLine(ctx.buffer, ctx.width, ctx.height, prevX, prevY, x, y, ctx.brushSize, TRANSPARENT);
+    drawLine(
+      ctx.buffer,
+      ctx.width,
+      ctx.height,
+      prevX,
+      prevY,
+      x,
+      y,
+      ctx.brushSize,
+      TRANSPARENT,
+      ctx.selection,
+    );
   },
 };

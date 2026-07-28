@@ -6,14 +6,17 @@ cropping. Built with Tauri v2, React and Rust.
 
 The name is from _tessera_, the individual tile in a mosaic.
 
-> **Status: Phase 0.** The app opens a window, you can draw on a canvas and zoom in.
-> Nothing else works yet. See `docs/08-roadmap.md`.
+> **Status: Phases 0–2 complete, Phase 3 (v1 release) underway.** Draw with seven tools
+> across layers with the full W3C blend-mode set, pick from bundled or imported
+> palettes, drop a photo in and convert it live, and keep editing the result as a
+> layer whose settings stay live. See `docs/08-roadmap.md` for what is and is not
+> built yet.
 
 ## What makes it different
 
 Conversion produces a **live, re-editable layer inside a real editor** rather than
 dumping a PNG. The `[ Edit → ]` button in Convert mode is the concrete expression of
-that; it arrives in Phase 2.
+that.
 
 ## Documentation
 

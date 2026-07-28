@@ -55,6 +55,34 @@ describe('compositeOver', () => {
   it('scales the source by layer opacity', () => {
     expect(compositeOver([0, 0, 0, 255], 0.5, [255, 255, 255, 255])).toEqual([128, 128, 128, 255]);
   });
+
+  describe('blend modes', () => {
+    it('multiplies an opaque source over an opaque backdrop', () => {
+      expect(compositeOver([128, 128, 128, 255], 1, [255, 255, 255, 255], 'multiply')).toEqual([
+        128, 128, 128, 255,
+      ]);
+    });
+
+    it('falls back to the plain colour when the backdrop is fully transparent', () => {
+      // No backdrop colour to blend against — Cs' collapses to Cs regardless
+      // of mode, same as `normal`.
+      expect(compositeOver([10, 20, 30, 255], 1, [0, 0, 0, 0], 'multiply')).toEqual([
+        10, 20, 30, 255,
+      ]);
+    });
+
+    it('screens an opaque white source to white regardless of backdrop', () => {
+      expect(compositeOver([255, 255, 255, 255], 1, [10, 20, 30, 255], 'screen')).toEqual([
+        255, 255, 255, 255,
+      ]);
+    });
+
+    it('is unaffected by blend mode when the source itself is fully transparent', () => {
+      expect(compositeOver([10, 20, 30, 0], 1, [200, 200, 200, 255], 'multiply')).toEqual([
+        200, 200, 200, 255,
+      ]);
+    });
+  });
 });
 
 describe('samplePixel', () => {
