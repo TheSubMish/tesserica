@@ -14,21 +14,42 @@ function layer(id: string, over: Partial<LayerBase> = {}): Layer {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    parentId: null,
+    clippingMask: false,
+    ...over,
+  };
+}
+
+function group(id: string, over: Partial<LayerBase> = {}): Layer {
+  return {
+    id,
+    kind: 'group',
+    name: id,
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'normal',
+    parentId: null,
+    clippingMask: false,
+    collapsed: false,
     ...over,
   };
 }
 
 function sprite(layers: Layer[], size = 4): { sprite: Sprite; frameId: string } {
   const frame: Frame = { id: 'f1', durationMs: 100 };
-  const cels: Cel[] = layers.map((l) => ({
-    id: `cel-${l.id}`,
-    layerId: l.id,
-    frameId: frame.id,
-    x: 0,
-    y: 0,
-    width: size,
-    height: size,
-  }));
+  // Groups have no pixels of their own — no cel to create for them.
+  const cels: Cel[] = layers
+    .filter((l) => l.kind !== 'group')
+    .map((l) => ({
+      id: `cel-${l.id}`,
+      layerId: l.id,
+      frameId: frame.id,
+      x: 0,
+      y: 0,
+      width: size,
+      height: size,
+    }));
   cels.forEach((c) => allocateBuffer(c.id, size, size));
   return {
     sprite: { width: size, height: size, layers, frames: [frame], cels },
@@ -108,6 +129,73 @@ describe('samplePixel', () => {
     const { sprite: s, frameId } = sprite([layer('a')]);
     expect(samplePixel(s, frameId, -1, 0)).toBeNull();
     expect(samplePixel(s, frameId, 4, 0)).toBeNull();
+  });
+});
+
+describe('groups', () => {
+  it('composites children as a unit, then applies the group’s own opacity', () => {
+    const bg = layer('bg');
+    const g = group('g', { opacity: 0.5 });
+    const child = layer('child', { parentId: 'g' });
+    const { sprite: s, frameId } = sprite([bg, g, child]);
+
+    setPixel(allocateBuffer('cel-bg', 4, 4), 4, 4, 0, 0, [255, 0, 0, 255]);
+    setPixel(allocateBuffer('cel-child', 4, 4), 4, 4, 0, 0, [0, 0, 255, 255]);
+
+    // Half-opacity blue over opaque red — 50/50, not blue's own alpha diluted
+    // by the child's un-applied opacity.
+    expect(samplePixel(s, frameId, 0, 0)).toEqual([128, 0, 128, 255]);
+  });
+
+  it('hides every descendant when the group itself is hidden', () => {
+    const g = group('g', { visible: false });
+    const child = layer('child', { parentId: 'g' });
+    const { sprite: s, frameId } = sprite([g, child]);
+    setPixel(allocateBuffer('cel-child', 4, 4), 4, 4, 0, 0, [1, 2, 3, 255]);
+
+    expect(samplePixel(s, frameId, 0, 0)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('clipping masks', () => {
+  it('shows a clipped layer only where the base below has its own alpha', () => {
+    const base = layer('base');
+    const clip = layer('clip', { clippingMask: true });
+    const { sprite: s, frameId } = sprite([base, clip]);
+
+    // Base is opaque red at (0,0), fully transparent at (1,1).
+    setPixel(allocateBuffer('cel-base', 4, 4), 4, 4, 0, 0, [255, 0, 0, 255]);
+    // Clip layer is opaque blue everywhere.
+    const clipBuf = allocateBuffer('cel-clip', 4, 4);
+    setPixel(clipBuf, 4, 4, 0, 0, [0, 0, 255, 255]);
+    setPixel(clipBuf, 4, 4, 1, 1, [0, 0, 255, 255]);
+
+    expect(samplePixel(s, frameId, 0, 0)).toEqual([0, 0, 255, 255]);
+    expect(samplePixel(s, frameId, 1, 1)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('contributes nothing when there is no base to clip to', () => {
+    const clip = layer('clip', { clippingMask: true });
+    const { sprite: s, frameId } = sprite([clip]);
+    setPixel(allocateBuffer('cel-clip', 4, 4), 4, 4, 0, 0, [9, 9, 9, 255]);
+
+    expect(samplePixel(s, frameId, 0, 0)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('never crosses a group boundary', () => {
+    // A clip layer inside a group must not reach past the group's own edge
+    // to a layer sitting below the group at the top level.
+    const outerBase = layer('outerBase');
+    const g = group('g');
+    const innerClip = layer('innerClip', { parentId: 'g', clippingMask: true });
+    const { sprite: s, frameId } = sprite([outerBase, g, innerClip]);
+
+    setPixel(allocateBuffer('cel-outerBase', 4, 4), 4, 4, 0, 0, [255, 0, 0, 255]);
+    setPixel(allocateBuffer('cel-innerClip', 4, 4), 4, 4, 0, 0, [0, 0, 255, 255]);
+
+    // Nothing inside the group to clip to, so the clip layer contributes
+    // nothing; the group is otherwise empty, so only the outer base shows.
+    expect(samplePixel(s, frameId, 0, 0)).toEqual([255, 0, 0, 255]);
   });
 });
 

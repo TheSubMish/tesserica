@@ -134,6 +134,8 @@ describe('reconvertLayer — live re-editing', () => {
             locked: false,
             opacity: 1,
             blendMode: 'normal',
+            parentId: null,
+            clippingMask: false,
           },
         ],
         frames: [{ id: 'f1', durationMs: 100 }],

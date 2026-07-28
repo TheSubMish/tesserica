@@ -53,6 +53,24 @@ export interface LayerBase {
   /** 0..1 */
   opacity: number;
   blendMode: BlendMode;
+  /**
+   * `docs/03-data-model.md` §2.1 — groups nest via this pointer into the same
+   * flat `Sprite.layers` array rather than a separate tree structure. A
+   * layer's siblings are every other layer sharing its `parentId`; their
+   * relative order is whatever order they appear in the flat array, which
+   * need not be contiguous with each other or with the parent (see
+   * `model/layerTree.ts`).
+   */
+  parentId: LayerId | null;
+  /**
+   * "Clip to layer below" (Photoshop/Krita/Aseprite convention): a `true`
+   * layer is masked by the *own* alpha of the nearest non-clipping layer
+   * below it, scoped to its own parent/group — never across a group boundary.
+   * See `canvas/layerTree.ts`.
+   */
+  clippingMask: boolean;
+  // `effects` (docs/03-data-model.md §5) is Phase 7 — deliberately omitted
+  // rather than added unused.
 }
 
 /**
@@ -71,12 +89,16 @@ export interface ConversionSource {
 /**
  * `docs/03-data-model.md` §2.1.
  *
- * Group and tilemap arrive with their phases; `conversion` is here because it
- * is the product thesis — a conversion is a live, re-editable layer inside a
- * real editor rather than a PNG dump.
+ * Tilemap arrives with its phase (6); `conversion` is here because it is the
+ * product thesis — a conversion is a live, re-editable layer inside a real
+ * editor rather than a PNG dump. `group` has no pixels of its own: its
+ * members are every other layer whose `parentId` points at it, and it
+ * composites as a unit (`canvas/layerTree.ts`).
  */
 export type Layer =
-  (LayerBase & { kind: 'raster' }) | (LayerBase & { kind: 'conversion'; source: ConversionSource });
+  | (LayerBase & { kind: 'raster' })
+  | (LayerBase & { kind: 'group'; collapsed: boolean })
+  | (LayerBase & { kind: 'conversion'; source: ConversionSource });
 
 export interface Frame {
   id: FrameId;

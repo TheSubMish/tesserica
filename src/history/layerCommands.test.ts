@@ -3,33 +3,40 @@ import { getBuffer, getPixel, setPixel } from '../model/pixelBuffers';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import {
+  addGroup,
   addLayer,
   deleteLayer,
+  groupLayer,
   moveLayer,
   renameLayer,
+  setLayerClippingMask,
   setLayerLocked,
   setLayerOpacity,
+  setLayerParent,
   setLayerVisible,
+  ungroupLayer,
 } from './layerCommands';
 
 const doc = () => useDocumentStore.getState();
 const history = () => useHistoryStore.getState();
 const names = () => doc().sprite.layers.map((l) => l.name);
 
-/** Reset to a single "Layer 1" between tests without reimporting the module. */
+/**
+ * Reset to a single "Layer 1" between tests without reimporting the module.
+ *
+ * This rebuilds the document rather than deleting layers one by one. Peeling
+ * layers off the end of the flat array cannot express "empty the document":
+ * `removeLayer` cascades into a group's descendants and refuses any delete
+ * that would leave zero layers, so a trailing group whose children sit
+ * earlier in the array — exactly what `groupLayer` produces — is undeletable
+ * and the loop never terminates.
+ */
 beforeEach(() => {
   history().clear();
-  while (doc().sprite.layers.length > 1) {
-    doc().removeLayer(doc().sprite.layers[doc().sprite.layers.length - 1].id);
-  }
-  const only = doc().sprite.layers[0];
-  doc().updateLayer(only.id, {
-    name: 'Layer 1',
-    visible: true,
-    locked: false,
-    opacity: 1,
-  });
-  doc().setActiveLayer(only.id);
+  const { width, height } = doc().sprite;
+  doc().newDocument(width, height);
+  doc().updateLayer(doc().sprite.layers[0].id, { name: 'Layer 1' });
+  doc().setActiveLayer(doc().sprite.layers[0].id);
   history().clear();
 });
 
@@ -199,5 +206,125 @@ describe('opacity coalescing', () => {
     expect(doc().sprite.layers[0].opacity).toBe(1);
     setLayerOpacity(id, -2, 2);
     expect(doc().sprite.layers[0].opacity).toBe(0);
+  });
+});
+
+describe('groups', () => {
+  it('creates an empty group as a sibling of the active layer', () => {
+    addGroup('Folder');
+    const g = doc().sprite.layers.find((l) => l.name === 'Folder');
+    expect(g?.kind).toBe('group');
+    expect(g?.parentId).toBeNull();
+    // A group has no pixels of its own.
+    expect(doc().celsForLayer(g!.id)).toHaveLength(0);
+  });
+
+  it('wraps a layer in a new group as one undo step', () => {
+    const id = doc().sprite.layers[0].id;
+    groupLayer(id);
+
+    const layer = doc().sprite.layers.find((l) => l.id === id)!;
+    expect(layer.parentId).not.toBeNull();
+    const group = doc().sprite.layers.find((l) => l.id === layer.parentId)!;
+    expect(group.kind).toBe('group');
+
+    history().undo();
+    expect(doc().sprite.layers.find((l) => l.id === id)!.parentId).toBeNull();
+    expect(doc().sprite.layers.some((l) => l.kind === 'group')).toBe(false);
+  });
+
+  it('reparents a layer into and out of a group', () => {
+    addGroup('Folder');
+    const group = doc().sprite.layers.find((l) => l.kind === 'group')!;
+    const leaf = doc().sprite.layers.find((l) => l.kind !== 'group')!;
+
+    setLayerParent(leaf.id, group.id);
+    expect(doc().sprite.layers.find((l) => l.id === leaf.id)!.parentId).toBe(group.id);
+
+    history().undo();
+    expect(doc().sprite.layers.find((l) => l.id === leaf.id)!.parentId).toBeNull();
+  });
+
+  it('refuses to nest a group inside its own descendant', () => {
+    addGroup('Outer');
+    const outer = doc().sprite.layers.find((l) => l.name === 'Outer')!;
+    addGroup('Inner');
+    const inner = doc().sprite.layers.find((l) => l.name === 'Inner')!;
+    setLayerParent(inner.id, outer.id);
+    history().clear();
+
+    setLayerParent(outer.id, inner.id);
+    expect(doc().sprite.layers.find((l) => l.id === outer.id)!.parentId).toBeNull();
+    expect(history().past).toHaveLength(0);
+  });
+
+  it('deletes a group and every descendant as one undo step', () => {
+    addLayer('survivor'); // otherwise deleting the group would zero out the document
+    addGroup('Folder');
+    const group = doc().sprite.layers.find((l) => l.name === 'Folder')!;
+    const leaf = doc().sprite.layers.find((l) => l.name === 'Layer 1')!;
+    setLayerParent(leaf.id, group.id);
+    history().clear();
+
+    const before = doc().sprite.layers.length;
+    deleteLayer(group.id);
+    expect(doc().sprite.layers).toHaveLength(before - 2);
+    expect(doc().sprite.layers.some((l) => l.id === group.id || l.id === leaf.id)).toBe(false);
+
+    history().undo();
+    expect(doc().sprite.layers).toHaveLength(before);
+    expect(doc().sprite.layers.find((l) => l.id === leaf.id)!.parentId).toBe(group.id);
+  });
+
+  it('dissolves a group, promoting its children back to its own parent', () => {
+    addGroup('Outer');
+    const outer = doc().sprite.layers.find((l) => l.name === 'Outer')!;
+    const leaf = doc().sprite.layers.find((l) => l.kind !== 'group')!;
+    setLayerParent(leaf.id, outer.id);
+    history().clear();
+
+    ungroupLayer(outer.id);
+    expect(doc().sprite.layers.some((l) => l.id === outer.id)).toBe(false);
+    expect(doc().sprite.layers.find((l) => l.id === leaf.id)!.parentId).toBeNull();
+
+    history().undo();
+    expect(doc().sprite.layers.some((l) => l.id === outer.id)).toBe(true);
+    expect(doc().sprite.layers.find((l) => l.id === leaf.id)!.parentId).toBe(outer.id);
+  });
+
+  it('moves a layer relative to its siblings only, not the whole flat array', () => {
+    addGroup('Folder');
+    const group = doc().sprite.layers.find((l) => l.name === 'Folder')!;
+    addLayer('inA');
+    setLayerParent(doc().activeLayerId, group.id);
+    addLayer('inB');
+    setLayerParent(doc().activeLayerId, group.id);
+    history().clear();
+
+    const childNames = () =>
+      doc()
+        .sprite.layers.filter((l) => l.parentId === group.id)
+        .map((l) => l.name);
+    expect(childNames()).toEqual(['inA', 'inB']);
+
+    const inA = doc().sprite.layers.find((l) => l.name === 'inA')!;
+    moveLayer(inA.id, 1);
+    expect(childNames()).toEqual(['inB', 'inA']);
+    // The top-level stack (bg + the group itself) is untouched by a move
+    // that happened entirely inside the group.
+    expect(doc().sprite.layers.filter((l) => l.parentId === null)).toHaveLength(2);
+
+    history().undo();
+    expect(childNames()).toEqual(['inA', 'inB']);
+  });
+});
+
+describe('clipping masks', () => {
+  it('toggles and undoes', () => {
+    const id = doc().sprite.layers[0].id;
+    setLayerClippingMask(id, true);
+    expect(doc().sprite.layers[0].clippingMask).toBe(true);
+    history().undo();
+    expect(doc().sprite.layers[0].clippingMask).toBe(false);
   });
 });

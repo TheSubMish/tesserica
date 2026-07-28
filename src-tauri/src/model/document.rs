@@ -70,6 +70,17 @@ pub struct LayerBase {
     /// 0..1
     pub opacity: f32,
     pub blend_mode: BlendMode,
+    /// `docs/03-data-model.md` §2.1 — groups nest via this pointer into the
+    /// same flat `layers` array rather than a separate tree structure.
+    /// `#[serde(default)]` so a `.tess` saved before Phase 3 (no groups)
+    /// still loads: an absent field means "top level", same as an explicit
+    /// `null`.
+    #[serde(default)]
+    pub parent_id: Option<LayerId>,
+    /// "Clip to layer below". Rust never composites layers (see `Layer`'s own
+    /// doc comment), so this — like `BlendMode` — only has to round-trip.
+    #[serde(default)]
+    pub clipping_mask: bool,
 }
 
 /// What makes convert→edit continuous (`docs/03-data-model.md` §2.1).
@@ -91,14 +102,25 @@ pub struct ConversionSource {
 
 /// The discriminated union from `docs/03-data-model.md` §2.1.
 ///
-/// Group and tilemap arrive with their phases; `conversion` is here because it
-/// is the product thesis.
+/// Tilemap arrives with its phase (6); `conversion` is here because it is the
+/// product thesis. `Group` lands in Phase 3 alongside clipping masks —
+/// compositing a group (rendering its children onto an intermediate buffer,
+/// then treating that as one layer) happens entirely in TS
+/// (`canvas/renderer.ts`, `canvas/flatten.ts`); Rust never composites layers
+/// at all (`docs/02-architecture.md` §6.2 — pixel buffers never cross IPC, so
+/// there is nothing here for Rust to composite *with*), so this variant only
+/// has to round-trip through a `.tess` faithfully.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Layer {
     Raster {
         #[serde(flatten)]
         base: LayerBase,
+    },
+    Group {
+        #[serde(flatten)]
+        base: LayerBase,
+        collapsed: bool,
     },
     Conversion {
         #[serde(flatten)]
@@ -111,6 +133,7 @@ impl Layer {
     pub fn base(&self) -> &LayerBase {
         match self {
             Layer::Raster { base } => base,
+            Layer::Group { base, .. } => base,
             Layer::Conversion { base, .. } => base,
         }
     }
@@ -240,6 +263,8 @@ mod tests {
                 locked: false,
                 opacity: 1.0,
                 blend_mode: BlendMode::Normal,
+                parent_id: None,
+                clipping_mask: false,
             },
             source: ConversionSource {
                 source_id: 42,
@@ -311,5 +336,79 @@ mod tests {
         });
         let layer: Layer = serde_json::from_value(json).expect("deserializes");
         assert!(matches!(layer, Layer::Raster { .. }));
+    }
+
+    /// Phase 3's "Layer groups, clipping masks" roadmap item — a group has to
+    /// round-trip its `collapsed` flag, and children have to keep their
+    /// `parentId` pointer into it, exactly like the TS side's flat-array +
+    /// `parentId` scheme (`docs/03-data-model.md` §2.1).
+    #[test]
+    fn a_group_layer_round_trips_with_its_children() {
+        let group = Layer::Group {
+            base: LayerBase {
+                id: "g1".into(),
+                name: "Character".into(),
+                visible: true,
+                locked: false,
+                opacity: 1.0,
+                blend_mode: BlendMode::Normal,
+                parent_id: None,
+                clipping_mask: false,
+            },
+            collapsed: true,
+        };
+        let child = Layer::Raster {
+            base: LayerBase {
+                id: "l1".into(),
+                name: "outline".into(),
+                visible: true,
+                locked: false,
+                opacity: 1.0,
+                blend_mode: BlendMode::Normal,
+                parent_id: Some("g1".into()),
+                clipping_mask: true,
+            },
+        };
+
+        let group_json = serde_json::to_value(&group).expect("serializes");
+        assert_eq!(group_json["kind"], "group");
+        assert_eq!(group_json["collapsed"], true);
+        assert_eq!(group_json["parentId"], serde_json::Value::Null);
+
+        let child_json = serde_json::to_value(&child).expect("serializes");
+        assert_eq!(child_json["parentId"], "g1");
+        assert_eq!(child_json["clippingMask"], true);
+
+        let group_back: Layer = serde_json::from_value(group_json).expect("deserializes");
+        match group_back {
+            Layer::Group { base, collapsed } => {
+                assert_eq!(base.id, "g1");
+                assert!(collapsed);
+                assert_eq!(base.parent_id, None);
+            }
+            other => panic!("expected a group layer, got {other:?}"),
+        }
+
+        let child_back: Layer = serde_json::from_value(child_json).expect("deserializes");
+        assert_eq!(child_back.base().parent_id.as_deref(), Some("g1"));
+        assert!(child_back.base().clipping_mask);
+    }
+
+    /// A `.tess` saved before Phase 3 has neither field at all — the reader
+    /// must default to "top level, not clipped" rather than refuse to load.
+    #[test]
+    fn parent_id_and_clipping_mask_default_when_absent() {
+        let json = serde_json::json!({
+            "kind": "raster",
+            "id": "l1",
+            "name": "bg",
+            "visible": true,
+            "locked": false,
+            "opacity": 1.0,
+            "blendMode": "normal"
+        });
+        let layer: Layer = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(layer.base().parent_id, None);
+        assert!(!layer.base().clipping_mask);
     }
 }

@@ -15,22 +15,43 @@ function layer(id: string, over: Partial<LayerBase> = {}): Layer {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    parentId: null,
+    clippingMask: false,
+    ...over,
+  };
+}
+
+function group(id: string, over: Partial<LayerBase> = {}): Layer {
+  return {
+    id,
+    kind: 'group',
+    name: id,
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'normal',
+    parentId: null,
+    clippingMask: false,
+    collapsed: false,
     ...over,
   };
 }
 
 function makeSprite(layers: Layer[], cels?: Partial<Cel>[]): Sprite {
   const frame: Frame = { id: 'f1', durationMs: 100 };
-  const list: Cel[] = layers.map((l, i) => ({
-    id: `cel-${l.id}`,
-    layerId: l.id,
-    frameId: frame.id,
-    x: 0,
-    y: 0,
-    width: W,
-    height: H,
-    ...(cels?.[i] ?? {}),
-  }));
+  // Groups have no pixels of their own — no cel to create for them.
+  const list: Cel[] = layers
+    .filter((l) => l.kind !== 'group')
+    .map((l, i) => ({
+      id: `cel-${l.id}`,
+      layerId: l.id,
+      frameId: frame.id,
+      x: 0,
+      y: 0,
+      width: W,
+      height: H,
+      ...(cels?.[i] ?? {}),
+    }));
   for (const c of list) allocateBuffer(c.id, c.width, c.height);
   return { width: W, height: H, layers, frames: [frame], cels: list };
 }
@@ -100,5 +121,58 @@ describe('flattenSprite', () => {
     const out = flattenSprite(sprite, 'f1');
     expect(px(out, 3, 3)).toEqual([5, 5, 5, 255]);
     expect(out).toHaveLength(W * H * 4);
+  });
+
+  describe('groups', () => {
+    it('composites children as a unit, then applies the group’s own opacity', () => {
+      const sprite = makeSprite([
+        layer('bg'),
+        group('g', { opacity: 0.5 }),
+        layer('child', { parentId: 'g' }),
+      ]);
+      setPixel(allocateBuffer('cel-bg', W, H), W, H, 0, 0, [255, 0, 0, 255]);
+      setPixel(allocateBuffer('cel-child', W, H), W, H, 0, 0, [0, 0, 255, 255]);
+      expect(px(flattenSprite(sprite, 'f1'), 0, 0)).toEqual([128, 0, 128, 255]);
+    });
+
+    it('hides every descendant when the group itself is hidden', () => {
+      const sprite = makeSprite([
+        group('g', { visible: false }),
+        layer('child', { parentId: 'g' }),
+      ]);
+      setPixel(allocateBuffer('cel-child', W, H), W, H, 0, 0, [1, 2, 3, 255]);
+      expect(px(flattenSprite(sprite, 'f1'), 0, 0)).toEqual([0, 0, 0, 0]);
+    });
+  });
+
+  describe('clipping masks', () => {
+    it('shows a clipped layer only where the base below has its own alpha', () => {
+      const sprite = makeSprite([layer('base'), layer('clip', { clippingMask: true })]);
+      setPixel(allocateBuffer('cel-base', W, H), W, H, 0, 0, [255, 0, 0, 255]);
+      const clipBuf = allocateBuffer('cel-clip', W, H);
+      setPixel(clipBuf, W, H, 0, 0, [0, 0, 255, 255]);
+      setPixel(clipBuf, W, H, 1, 1, [0, 0, 255, 255]);
+
+      const out = flattenSprite(sprite, 'f1');
+      expect(px(out, 0, 0)).toEqual([0, 0, 255, 255]);
+      expect(px(out, 1, 1)).toEqual([0, 0, 0, 0]);
+    });
+
+    it('contributes nothing when there is no base to clip to', () => {
+      const sprite = makeSprite([layer('clip', { clippingMask: true })]);
+      setPixel(allocateBuffer('cel-clip', W, H), W, H, 0, 0, [9, 9, 9, 255]);
+      expect(px(flattenSprite(sprite, 'f1'), 0, 0)).toEqual([0, 0, 0, 0]);
+    });
+
+    it('never crosses a group boundary', () => {
+      const sprite = makeSprite([
+        layer('outerBase'),
+        group('g'),
+        layer('innerClip', { parentId: 'g', clippingMask: true }),
+      ]);
+      setPixel(allocateBuffer('cel-outerBase', W, H), W, H, 0, 0, [255, 0, 0, 255]);
+      setPixel(allocateBuffer('cel-innerClip', W, H), W, H, 0, 0, [0, 0, 255, 255]);
+      expect(px(flattenSprite(sprite, 'f1'), 0, 0)).toEqual([255, 0, 0, 255]);
+    });
   });
 });

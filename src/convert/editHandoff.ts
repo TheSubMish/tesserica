@@ -52,6 +52,8 @@ export function conversionDocument(
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    parentId: null,
+    clippingMask: false,
     source: { sourceId, settings },
   };
 

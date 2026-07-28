@@ -19,6 +19,8 @@ function loaded(): Sprite {
         locked: false,
         opacity: 1,
         blendMode: 'normal',
+        parentId: null,
+        clippingMask: false,
       },
       {
         id: 'l2',
@@ -28,6 +30,8 @@ function loaded(): Sprite {
         locked: false,
         opacity: 0.5,
         blendMode: 'normal',
+        parentId: null,
+        clippingMask: false,
       },
     ],
     frames: [{ id: 'f1', durationMs: 100 }],

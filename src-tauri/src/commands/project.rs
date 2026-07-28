@@ -360,6 +360,8 @@ mod tests {
                     locked: false,
                     opacity: 1.0,
                     blend_mode: BlendMode::Normal,
+                    parent_id: None,
+                    clipping_mask: false,
                 },
             }],
             frames: vec![Frame {

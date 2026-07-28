@@ -110,7 +110,22 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       mask, so ellipse/lasso/magic-wand selection is a data-model change, not just a
       new tool, and did not land in this pass. Every paint tool (pencil, eraser, fill,
       line, rect, ellipse) clips to the active selection.
-- [ ] Layer groups, clipping masks — not started.
+- [x] Layer groups, clipping masks — groups nest via a `parentId` pointer into
+      the same flat `Sprite.layers` array rather than a separate tree
+      (`model/layerTree.ts`, `03-data-model.md` §2.1); a group has no pixels
+      of its own and composites its children onto an isolated canvas
+      (`canvas/renderer.ts::compositeScope`), which is also where "clip to
+      layer below" is resolved, scoped to one group and never crossing a
+      group boundary. Both `canvas/flatten.ts` (export) and `canvas/sample.ts`
+      (eyedropper) walk the same tree recursively so a clipped or grouped
+      layer reads the same way everywhere. A hidden or locked group cascades
+      to every descendant for both display and editing
+      (`isEffectivelyVisible`/`isEffectivelyLocked`). The Rust `Layer::Group`
+      variant round-trips `parentId`/`clippingMask`/`collapsed` through
+      `.tess` only — Rust never composites layers at all, groups included.
+      There is no nesting-depth limit and no multi-select; grouping wraps one
+      layer at a time and further members are reassigned via the layer
+      panel's Parent selector.
 - [~] Keyboard shortcuts complete (`05` §7) — the interaction rules in §7 are now all
       implemented, including "every slider is also a number field"
       (`app/SliderField.tsx`, used by all nine sliders in the app) and `M`/`V` for

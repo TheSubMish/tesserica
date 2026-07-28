@@ -12,7 +12,8 @@
  */
 
 import { getBuffer } from '../model/pixelBuffers';
-import type { BlendMode, RGBA, Sprite } from '../model/types';
+import { childrenOf } from '../model/layerTree';
+import type { BlendMode, Cel, LayerId, RGBA, Sprite } from '../model/types';
 import { blendFunction } from './blend';
 
 /**
@@ -58,30 +59,70 @@ export function compositeOver(
   ];
 }
 
-export function samplePixel(sprite: Sprite, frameId: string, x: number, y: number): RGBA | null {
-  if (x < 0 || y < 0 || x >= sprite.width || y >= sprite.height) return null;
+/** The layer's own pixel at one document coordinate, or `null` outside its cel. */
+function sampleCel(cel: Cel, x: number, y: number): RGBA | null {
+  const lx = x - cel.x;
+  const ly = y - cel.y;
+  if (lx < 0 || ly < 0 || lx >= cel.width || ly >= cel.height) return null;
 
+  const buf = getBuffer(cel.id);
+  if (!buf) return null;
+
+  const i = (ly * cel.width + lx) * 4;
+  return [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
+}
+
+/**
+ * Composite one document pixel through one scope — the top-level stack when
+ * `parentId` is `null`, or one group's children otherwise
+ * (`model/layerTree.ts`). A group recurses into this same function and its
+ * result is folded back in as if it were an ordinary layer, which is what
+ * makes "a group composites as one unit" true without a separate code path.
+ *
+ * Clipping masks (`docs/08-roadmap.md` Phase 3, "clip to layer below") never
+ * cross a scope boundary: `base` tracks only the nearest non-clipping layer
+ * *within this call*, reset to `null` on every recursive entry.
+ */
+function compositeScopePixel(
+  sprite: Sprite,
+  frameId: string,
+  parentId: LayerId | null,
+  x: number,
+  y: number,
+): RGBA {
   let out: RGBA = [0, 0, 0, 0];
-  for (const layer of sprite.layers) {
+  /** The nearest non-clipping layer's own contribution, alpha already scaled
+   * by its opacity — what a clipping layer above it is masked by. */
+  let base: RGBA | null = null;
+
+  for (const layer of childrenOf(sprite.layers, parentId)) {
     if (!layer.visible || layer.opacity === 0) continue;
 
-    const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-    if (!cel) continue;
+    const own: RGBA | null =
+      layer.kind === 'group'
+        ? compositeScopePixel(sprite, frameId, layer.id, x, y)
+        : (() => {
+            const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+            return cel ? sampleCel(cel, x, y) : null;
+          })();
+    if (!own) continue;
 
-    const lx = x - cel.x;
-    const ly = y - cel.y;
-    if (lx < 0 || ly < 0 || lx >= cel.width || ly >= cel.height) continue;
-
-    const buf = getBuffer(cel.id);
-    if (!buf) continue;
-
-    const i = (ly * cel.width + lx) * 4;
-    out = compositeOver(
-      [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]],
-      layer.opacity,
-      out,
-      layer.blendMode,
-    );
+    if (layer.clippingMask) {
+      // Nothing below to clip to in this scope — Photoshop/Krita/Aseprite all
+      // treat this as contributing nothing, not as an unclipped layer.
+      if (!base) continue;
+      const ownAlpha = (own[3] / 255) * layer.opacity;
+      const clipAlpha = Math.round(ownAlpha * (base[3] / 255) * 255);
+      out = compositeOver([own[0], own[1], own[2], clipAlpha], 1, out, layer.blendMode);
+    } else {
+      out = compositeOver(own, layer.opacity, out, layer.blendMode);
+      base = [own[0], own[1], own[2], Math.round((own[3] / 255) * layer.opacity * 255)];
+    }
   }
   return out;
+}
+
+export function samplePixel(sprite: Sprite, frameId: string, x: number, y: number): RGBA | null {
+  if (x < 0 || y < 0 || x >= sprite.width || y >= sprite.height) return null;
+  return compositeScopePixel(sprite, frameId, null, x, y);
 }

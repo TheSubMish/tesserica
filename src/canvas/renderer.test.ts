@@ -100,6 +100,8 @@ function makeSprite(width: number, height: number): Sprite {
         locked: false,
         opacity: 1,
         blendMode: 'normal',
+        parentId: null,
+        clippingMask: false,
       },
     ],
     frames: [{ id: 'f1', durationMs: 100 }],

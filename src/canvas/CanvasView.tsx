@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getBuffer } from '../model/pixelBuffers';
+import { isEffectivelyLocked, isEffectivelyVisible } from '../model/layerTree';
 import {
   beginStroke,
   finishStroke,
@@ -168,8 +169,17 @@ export function CanvasView() {
       const tool = getTool(alt ? 'eyedropper' : toolState.activeTool);
 
       // A read-only tool has nothing to write to and must still work on a
-      // locked or hidden layer.
-      if (!tool.readOnly && (!layer || layer.locked || !layer.visible)) return;
+      // locked or hidden layer. "Locked"/"hidden" are inherited from an
+      // ancestor group (roadmap Phase 3, "Layer groups, clipping masks") —
+      // a raster layer inside a hidden group must not be paintable just
+      // because its own `visible` flag still says true.
+      if (
+        !tool.readOnly &&
+        (!layer ||
+          isEffectivelyLocked(doc.sprite.layers, layer.id) ||
+          !isEffectivelyVisible(doc.sprite.layers, layer.id))
+      )
+        return;
 
       const cel = doc.activeCel();
       if (!cel) return;

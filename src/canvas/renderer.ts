@@ -11,8 +11,9 @@
  *   4. cursor cell preview
  */
 
-import type { Cel, CelId, Layer, Sprite } from '../model/types';
+import type { Cel, CelId, Layer, LayerId, Sprite } from '../model/types';
 import { celRevision, getBuffer } from '../model/pixelBuffers';
+import { childrenOf } from '../model/layerTree';
 import { canvasCompositeOp } from './blend';
 import type { Viewport } from './coords';
 import type { Rect } from '../model/rect';
@@ -67,21 +68,35 @@ let compositeSignature: string | null = null;
 export function invalidateRenderCache(): void {
   celCache.clear();
   compositeSignature = null;
+  canvasPool.clear();
 }
 
 /**
  * What the composite depends on. Anything not in here must not be able to
  * change the output, or the cache will serve a stale frame.
+ *
+ * Recurses into groups — a change to a nested layer must still invalidate
+ * the top-level composite, since the group it lives in is redrawn as part of
+ * the same pass. `collapsed` is deliberately excluded: it only affects the
+ * layer *panel's* display, never the canvas.
  */
 function signatureOf(sprite: Sprite, frameId: string): string {
   const parts: string[] = [`${sprite.width}x${sprite.height}@${frameId}`];
-  for (const layer of sprite.layers) {
-    const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-    parts.push(
-      `${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.blendMode}:` +
-        `${cel ? `${cel.id}@${cel.x},${cel.y}#${celRevision(cel.id)}` : '-'}`,
-    );
-  }
+  const walk = (parentId: LayerId | null): void => {
+    for (const layer of childrenOf(sprite.layers, parentId)) {
+      const cel =
+        layer.kind === 'group'
+          ? undefined
+          : sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+      parts.push(
+        `${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.blendMode}:` +
+          `${layer.clippingMask ? 1 : 0}:` +
+          `${layer.kind === 'group' ? 'G' : cel ? `${cel.id}@${cel.x},${cel.y}#${celRevision(cel.id)}` : '-'}`,
+      );
+      if (layer.kind === 'group') walk(layer.id);
+    }
+  };
+  walk(null);
   return parts.join('|');
 }
 
@@ -121,6 +136,111 @@ function pruneCelCache(sprite: Sprite): void {
 
 function isDrawable(layer: Layer): boolean {
   return layer.visible && layer.opacity > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Group nesting + clipping masks (`docs/08-roadmap.md` Phase 3, "Layer
+// groups, clipping masks")
+//
+// A group renders its children onto an isolated canvas — transparent
+// backdrop, its own clip stack — then that canvas is composited into whatever
+// is beneath the group exactly like a raster layer's cel would be, using the
+// group's *own* opacity and blend mode. Clipping masks reuse the same
+// "isolated contribution" idea: a clipped layer is masked by the nearest
+// non-clipping layer's own alpha (not the running composite's), scoped to
+// one group's children and never crossing into a parent or child scope.
+//
+// Canvases are pooled by a `${purpose}:${depth}` key rather than allocated
+// per layer. Recursion here is a synchronous depth-first walk, and every
+// pooled canvas is fully consumed (drawn into its caller) before the next
+// sibling at the same depth could recycle it, so reuse is safe and the pool
+// stays bounded by nesting depth, not layer count.
+// ---------------------------------------------------------------------------
+
+const canvasPool = new Map<string, HTMLCanvasElement>();
+
+function pooled(key: string, w: number, h: number): CanvasRenderingContext2D {
+  let c = canvasPool.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    canvasPool.set(key, c);
+  }
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+  }
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('2D context unavailable');
+  ctx.clearRect(0, 0, w, h);
+  return ctx;
+}
+
+/**
+ * Composite one scope — the top-level stack when `parentId` is `null`, or
+ * one group's children otherwise (`model/layerTree.ts`) — onto a pooled
+ * canvas sized to the whole sprite, and return it.
+ */
+function compositeScope(
+  sprite: Sprite,
+  frameId: string,
+  parentId: LayerId | null,
+  depth: number,
+): HTMLCanvasElement {
+  const { width: w, height: h } = sprite;
+  const sctx = pooled(`scope:${depth}`, w, h);
+
+  /** The nearest non-clipping layer's own contribution, at its own opacity. */
+  let baseCtx: CanvasRenderingContext2D | null = null;
+
+  for (const layer of childrenOf(sprite.layers, parentId)) {
+    if (!isDrawable(layer)) continue;
+
+    let source: HTMLCanvasElement | null;
+    let offsetX = 0;
+    let offsetY = 0;
+    if (layer.kind === 'group') {
+      source = compositeScope(sprite, frameId, layer.id, depth + 1);
+    } else {
+      const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+      if (!cel) continue;
+      source = celCanvas(cel);
+      offsetX = cel.x;
+      offsetY = cel.y;
+    }
+    if (!source) continue;
+
+    if (layer.clippingMask) {
+      if (!baseCtx) continue; // nothing below to clip to in this scope
+      const clipCtx = pooled(`clip:${depth}`, w, h);
+      clipCtx.globalAlpha = layer.opacity;
+      clipCtx.drawImage(source, offsetX, offsetY);
+      clipCtx.globalAlpha = 1;
+      // Keep only where the base layer's own shape has alpha.
+      clipCtx.globalCompositeOperation = 'destination-in';
+      clipCtx.drawImage(baseCtx.canvas, 0, 0);
+      clipCtx.globalCompositeOperation = 'source-over';
+
+      sctx.globalCompositeOperation = canvasCompositeOp(layer.blendMode);
+      sctx.drawImage(clipCtx.canvas, 0, 0);
+      sctx.globalCompositeOperation = 'source-over';
+    } else {
+      sctx.globalAlpha = layer.opacity;
+      sctx.globalCompositeOperation = canvasCompositeOp(layer.blendMode);
+      sctx.drawImage(source, offsetX, offsetY);
+      sctx.globalAlpha = 1;
+      sctx.globalCompositeOperation = 'source-over';
+
+      // This layer becomes the base for any clip layers stacked above it —
+      // snapshot its isolated contribution now, before `source` (a pooled
+      // group canvas, if this is a group) can be recycled by a later sibling.
+      baseCtx = pooled(`base:${depth}`, w, h);
+      baseCtx.globalAlpha = layer.opacity;
+      baseCtx.drawImage(source, offsetX, offsetY);
+      baseCtx.globalAlpha = 1;
+    }
+  }
+
+  return sctx.canvas;
 }
 
 export function drawCheckerboard(
@@ -171,34 +291,23 @@ export function compositeSprite(sprite: Sprite, frameId: string): HTMLCanvasElem
   if (!ctx) return canvas;
   ctx.clearRect(0, 0, sprite.width, sprite.height);
 
-  for (const layer of sprite.layers) {
-    if (!isDrawable(layer)) continue;
-
-    const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-    if (!cel) continue;
-
-    const source = celCanvas(cel);
-    if (!source) continue;
-
-    // `putImageData` ignores `globalAlpha`, so layer opacity has to come from
-    // `drawImage` off the cel's own canvas. Straight alpha is preserved:
-    // Canvas2D's source-over on unassociated ImageData is what we want, and no
-    // premultiplication is introduced anywhere on this path.
-    //
-    // Blend modes beyond normal use the browser's native
-    // `globalCompositeOperation` here rather than `blend.ts`'s per-pixel maths
-    // — this is the live *preview* half of the hybrid split
-    // (`docs/02-architecture.md` §3), already "deliberately approximate", and
-    // the names are literally the CSS/Canvas blend-mode keywords
-    // (`canvasCompositeOp`). Export (`flatten.ts`) and the eyedropper
-    // (`samplePixel`) use the hand-rolled W3C formulas directly, since those
-    // are the paths that must be exact.
-    ctx.globalAlpha = layer.opacity;
-    ctx.globalCompositeOperation = canvasCompositeOp(layer.blendMode);
-    ctx.drawImage(source, cel.x, cel.y);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-  }
+  // `putImageData` ignores `globalAlpha`, so layer opacity has to come from
+  // `drawImage` off the cel's own canvas. Straight alpha is preserved:
+  // Canvas2D's source-over on unassociated ImageData is what we want, and no
+  // premultiplication is introduced anywhere on this path.
+  //
+  // Blend modes beyond normal use the browser's native
+  // `globalCompositeOperation` here rather than `blend.ts`'s per-pixel maths
+  // — this is the live *preview* half of the hybrid split
+  // (`docs/02-architecture.md` §3), already "deliberately approximate", and
+  // the names are literally the CSS/Canvas blend-mode keywords
+  // (`canvasCompositeOp`). Export (`flatten.ts`) and the eyedropper
+  // (`samplePixel`) use the hand-rolled W3C formulas directly, since those
+  // are the paths that must be exact. Groups and clipping masks are resolved
+  // recursively in `compositeScope`, but the leaf-layer drawing rules above
+  // are unchanged.
+  const composited = compositeScope(sprite, frameId, null, 0);
+  ctx.drawImage(composited, 0, 0);
 
   pruneCelCache(sprite);
   compositeSignature = signature;

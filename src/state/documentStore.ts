@@ -23,6 +23,7 @@ import type {
   LayerId,
   Sprite,
 } from '../model/types';
+import { descendantIds } from '../model/layerTree';
 import {
   allocateBuffer,
   bumpCelRevision,
@@ -79,7 +80,13 @@ interface DocumentState {
 
   // ---- primitives ----
   /** Build a detached raster layer plus one cel per frame. */
-  createLayer(name?: string): { layer: Layer; cels: Cel[] };
+  createLayer(name?: string, parentId?: LayerId | null): { layer: Layer; cels: Cel[] };
+  /**
+   * Build a detached group layer. Groups hold no pixels of their own — their
+   * "contents" are just every other layer whose `parentId` points at them
+   * (`model/layerTree.ts`) — so there are no cels to allocate.
+   */
+  createGroup(name?: string, parentId?: LayerId | null): { layer: Layer; cels: Cel[] };
   /** Insert a layer at `index` in the bottom→top order. */
   insertLayer(layer: Layer, cels: Cel[], index: number): void;
   /**
@@ -87,7 +94,14 @@ interface DocumentState {
    * caller owns them, which is what lets a delete command hand them back.
    */
   removeLayerMetadata(id: LayerId): void;
-  moveLayer(id: LayerId, toIndex: number): void;
+  /**
+   * Exchange the stack position of two layers. Reordering is expressed as a
+   * swap rather than a splice-to-index so that moving a layer only ever
+   * disturbs the one sibling it trades places with — everything else's
+   * relative order, including layers that live in a different group, is
+   * untouched (`model/layerTree.ts`).
+   */
+  swapLayers(a: LayerId, b: LayerId): void;
   /**
    * Patch a layer's metadata.
    *
@@ -106,6 +120,13 @@ interface DocumentState {
    * `conversion` variant.
    */
   updateLayerSource(id: LayerId, source: ConversionSource): void;
+  /**
+   * Collapse/expand a group in the layer panel. Kept separate from
+   * `updateLayer` for the same reason `updateLayerSource` is: `collapsed`
+   * only exists on the `group` variant, and this is not something an undo
+   * step needs to remember (view state, not document content).
+   */
+  setGroupCollapsed(id: LayerId, collapsed: boolean): void;
   setActiveLayer(id: LayerId): void;
   layerIndex(id: LayerId): number;
 
@@ -136,6 +157,8 @@ function createInitialSprite(
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    parentId: null,
+    clippingMask: false,
   };
   const cel: Cel = {
     id: makeId('c'),
@@ -200,6 +223,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       locked: false,
       opacity: 1,
       blendMode: 'normal',
+      parentId: null,
+      clippingMask: false,
     };
     const cel: Cel = {
       id: makeId('c'),
@@ -219,7 +244,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set((s) => ({ revision: s.revision + 1 }));
   },
 
-  createLayer: (name) => {
+  createLayer: (name, parentId = null) => {
     const s = get();
     const layer: Layer = {
       id: makeId('l'),
@@ -229,6 +254,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       locked: false,
       opacity: 1,
       blendMode: 'normal',
+      parentId,
+      clippingMask: false,
     };
     // One cel per frame. Phase 1 has a single frame, but writing it as a map
     // over frames means adding frames in Phase 4 needs no change here.
@@ -242,6 +269,25 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       height: s.sprite.height,
     }));
     return { layer, cels };
+  },
+
+  createGroup: (name, parentId = null) => {
+    const s = get();
+    const count = s.sprite.layers.filter((l) => l.kind === 'group').length;
+    const layer: Layer = {
+      id: makeId('l'),
+      kind: 'group',
+      name: name ?? `Group ${count + 1}`,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      parentId,
+      clippingMask: false,
+      collapsed: false,
+    };
+    // No cels — a group has no pixels of its own (`docs/03-data-model.md` §2.1).
+    return { layer, cels: [] };
   },
 
   insertLayer: (layer, cels, index) =>
@@ -275,15 +321,13 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       };
     }),
 
-  moveLayer: (id, toIndex) =>
+  swapLayers: (a, b) =>
     set((s) => {
-      const from = s.sprite.layers.findIndex((l) => l.id === id);
-      if (from < 0) return s;
-      const clamped = Math.max(0, Math.min(toIndex, s.sprite.layers.length - 1));
-      if (clamped === from) return s;
+      const ia = s.sprite.layers.findIndex((l) => l.id === a);
+      const ib = s.sprite.layers.findIndex((l) => l.id === b);
+      if (ia < 0 || ib < 0 || ia === ib) return s;
       const layers = [...s.sprite.layers];
-      const [moved] = layers.splice(from, 1);
-      layers.splice(clamped, 0, moved);
+      [layers[ia], layers[ib]] = [layers[ib], layers[ia]];
       return { sprite: { ...s.sprite, layers }, revision: s.revision + 1 };
     }),
 
@@ -307,6 +351,17 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       revision: s.revision + 1,
     })),
 
+  setGroupCollapsed: (id, collapsed) =>
+    set((s) => ({
+      sprite: {
+        ...s.sprite,
+        layers: s.sprite.layers.map((l) =>
+          l.id === id && l.kind === 'group' ? { ...l, collapsed } : l,
+        ),
+      },
+      revision: s.revision + 1,
+    })),
+
   setActiveLayer: (id) => set({ activeLayerId: id }),
 
   layerIndex: (id) => get().sprite.layers.findIndex((l) => l.id === id),
@@ -318,11 +373,18 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   },
 
   removeLayer: (id) => {
-    if (get().sprite.layers.length <= 1) return; // never leave zero layers
-    get()
-      .celsForLayer(id)
-      .forEach((c) => releaseBuffer(c.id));
-    get().removeLayerMetadata(id);
+    const s = get();
+    // Deleting a group takes its descendants with it — an orphaned layer
+    // pointing at a `parentId` that no longer exists is not a state anything
+    // downstream (compositing, the panel's tree walk) should have to handle.
+    const ids = [id, ...descendantIds(s.sprite.layers, id)];
+    if (s.sprite.layers.length - ids.length < 1) return; // never leave zero layers
+    for (const lid of ids) {
+      get()
+        .celsForLayer(lid)
+        .forEach((c) => releaseBuffer(c.id));
+      get().removeLayerMetadata(lid);
+    }
   },
 
   toggleLayerVisibility: (id) => {

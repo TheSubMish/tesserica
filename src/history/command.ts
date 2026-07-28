@@ -28,7 +28,7 @@ export interface DocumentApi {
 
   insertLayer(layer: Layer, cels: Cel[], index: number): void;
   removeLayerMetadata(id: LayerId): void;
-  moveLayer(id: LayerId, toIndex: number): void;
+  swapLayers(a: LayerId, b: LayerId): void;
   updateLayer(id: LayerId, patch: Partial<Layer>): void;
   setActiveLayer(id: LayerId): void;
   celsForLayer(layerId: LayerId): Cel[];
