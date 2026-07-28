@@ -85,6 +85,14 @@ function EditStatusBar() {
       <span>{layerName}</span>
       <span className="sep">·</span>
       <span>{Math.round(zoom * 100)}%</span>
+      <button
+        className="statusbar-btn"
+        title="Center view on the picture (Home)"
+        aria-label="Center view on the picture"
+        onClick={() => useUIStore.getState().requestFit()}
+      >
+        ⌖
+      </button>
       <span className="sep">·</span>
       <span>{cursor ? `x:${cursor.x} y:${cursor.y}` : 'x:— y:—'}</span>
     </footer>

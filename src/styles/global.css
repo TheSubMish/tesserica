@@ -502,6 +502,26 @@ select:focus-visible {
   color: var(--border-strong);
 }
 
+.statusbar-btn {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+
+.statusbar-btn:hover,
+.statusbar-btn:focus-visible {
+  background: var(--bg-elevated);
+  color: var(--text);
+  outline: none;
+}
+
 .placeholder {
   display: grid;
   place-items: center;

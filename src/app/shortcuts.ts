@@ -103,6 +103,11 @@ export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
         case '-':
           ui.setZoom(ui.zoom / 2);
           break;
+        case 'home':
+          // Re-center the view on the sprite — the same fit CanvasView applies
+          // on mount, callable again after panning away from it.
+          ui.requestFit();
+          break;
         default:
           return;
       }

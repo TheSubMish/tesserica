@@ -147,3 +147,20 @@ class PreviewRuntime {
 }
 
 export const previewRuntime = new PreviewRuntime();
+
+// This module owns a singleton with a live `Worker` (`PreviewSession`) that
+// several other files import independently (`ConvertMode.tsx`,
+// `ConvertCanvas.tsx`, `loadSource.ts`, `editHandoff.ts`). Vite's default HMR
+// propagation can re-evaluate *this* file (recreating `previewRuntime` fresh,
+// with no session) while leaving some of those importers on the old instance
+// — the split-brain state `recoverProxy` above exists to paper over, and the
+// direct cause of the preview silently going blank in dev. `invalidate()`
+// forces a full page reload instead whenever this file (or anything it
+// depends on) changes, which always starts every singleton in this app fresh
+// and in step with each other. Never reached in a production build — there is
+// no HMR runtime there at all.
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    import.meta.hot?.invalidate('previewRuntime owns a live Worker and cannot be hot-swapped');
+  });
+}

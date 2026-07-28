@@ -203,4 +203,18 @@ describe('zooming', () => {
     expect(after.zoom).toBe(before.zoom);
     expect(after.panY).toBeGreaterThan(before.panY);
   });
+
+  it('Home re-centers the view on the picture after panning away', () => {
+    act(() => {
+      useUIStore.getState().panBy(400, -250);
+    });
+    expect(useUIStore.getState().panX).not.toBe(0);
+
+    const before = useUIStore.getState().fitRequest;
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    });
+
+    expect(useUIStore.getState().fitRequest).toBeGreaterThan(before);
+  });
 });

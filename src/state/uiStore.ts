@@ -12,10 +12,12 @@ interface UIState {
   /** Document-space cursor position, or null when off-canvas. */
   cursor: { x: number; y: number } | null;
   /**
-   * Bumped whenever the viewport should re-fit the sprite, e.g. `Ctrl+N`
-   * (`docs/06-workflows.md` W2 step 2). `CanvasView` watches this rather than
-   * sprite size directly, because a new document can share the previous one's
-   * dimensions and still needs its pan reset.
+   * Bumped whenever the viewport should re-fit and re-center the sprite —
+   * `Ctrl+N` (`docs/06-workflows.md` W2 step 2) and `Home`/the status bar's
+   * "center view" button. `CanvasView` watches this rather than sprite size
+   * directly, because a new document can share the previous one's dimensions
+   * and still needs its pan reset, and because "center the view" has to work
+   * even when nothing about the sprite itself has changed.
    */
   fitRequest: number;
 
@@ -26,6 +28,11 @@ interface UIState {
   setPan(x: number, y: number): void;
   toggleGrid(): void;
   setCursor(c: { x: number; y: number } | null): void;
+  /**
+   * Re-fit and re-center the canvas on the sprite — "move the view back to
+   * the center of the picture" after panning away, at whatever integer zoom
+   * fits the current viewport (`canvas/coords.ts::fitZoom`).
+   */
   requestFit(): void;
 }
 

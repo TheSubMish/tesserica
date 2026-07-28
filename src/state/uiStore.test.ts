@@ -59,6 +59,17 @@ describe('zoomAt', () => {
   });
 });
 
+describe('requestFit', () => {
+  it('bumps a counter CanvasView watches to re-center the sprite', () => {
+    // The store holds no geometry itself — `fitZoom`/`centerPan` live in
+    // `canvas/coords.ts` and CanvasView applies them when this changes
+    // (`Home`, the "center view" status-bar button, `Ctrl+N`).
+    const before = useUIStore.getState().fitRequest;
+    useUIStore.getState().requestFit();
+    expect(useUIStore.getState().fitRequest).toBe(before + 1);
+  });
+});
+
 describe('pan', () => {
   it('accumulates deltas', () => {
     useUIStore.getState().panBy(10, -5);
