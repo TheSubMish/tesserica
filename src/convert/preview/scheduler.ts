@@ -50,6 +50,18 @@ export interface SchedulerHooks {
   readonly onError?: (message: string, jobId: JobId) => void;
   /** Fires when the busy state changes, for a spinner or a status line. */
   readonly onBusyChange?: (busy: boolean) => void;
+  /**
+   * The worker reported `reason: 'missing-proxy'` — it lost the image this
+   * job asked it to convert. Return a fresh `PixelBuffer` to re-register and
+   * retry the job once; return `undefined` (or omit the hook) to fall
+   * through to `onError` as before.
+   *
+   * This only fires from a dev-mode Vite hot-reload hiccup (`session.ts`),
+   * never in a production build, but recovering silently there is worth it:
+   * the alternative is a preview that looks broken until the developer
+   * manually reloads the window.
+   */
+  readonly onMissingProxy?: () => PixelBuffer | undefined;
 }
 
 export interface SchedulerStats {
@@ -61,6 +73,8 @@ export interface SchedulerStats {
   readonly superseded: number;
   /** Results discarded because a newer job had already been dispatched. */
   readonly staleResults: number;
+  /** Times a `missing-proxy` error was recovered from automatically. */
+  readonly recovered: number;
 }
 
 export class PreviewScheduler {
@@ -84,6 +98,12 @@ export class PreviewScheduler {
   private dispatched = 0;
   private superseded = 0;
   private staleResults = 0;
+  private recovered = 0;
+
+  /** The settings behind the currently in-flight job, for a missing-proxy retry. */
+  private lastSettings: ConvertSettings | undefined;
+  /** Guards against retrying forever if recovery itself keeps failing. */
+  private recovering = false;
 
   constructor(private readonly hooks: SchedulerHooks) {}
 
@@ -93,6 +113,7 @@ export class PreviewScheduler {
       dispatched: this.dispatched,
       superseded: this.superseded,
       staleResults: this.staleResults,
+      recovered: this.recovered,
     };
   }
 
@@ -151,6 +172,23 @@ export class PreviewScheduler {
       return;
     }
 
+    if (response.type === 'error' && response.reason === 'missing-proxy' && !this.recovering) {
+      const buffer = this.hooks.onMissingProxy?.();
+      if (buffer && this.lastSettings) {
+        // One retry only: if `onMissingProxy` cannot actually fix things (the
+        // retried job fails too), `recovering` stops this branch running
+        // again and the second failure falls through to `onError` below.
+        this.recovering = true;
+        this.recovered++;
+        const retry = this.lastSettings;
+        this.inFlight = undefined;
+        this.setProxy(buffer);
+        this.dispatch(retry);
+        return;
+      }
+    }
+
+    this.recovering = false;
     this.inFlight = undefined;
 
     if (response.type === 'result') {
@@ -178,12 +216,14 @@ export class PreviewScheduler {
   reset(): void {
     this.inFlight = undefined;
     this.pending = undefined;
+    this.recovering = false;
     this.setBusy(false);
   }
 
   private dispatch(settings: ConvertSettings): void {
     const jobId = this.nextJobId++;
     this.inFlight = jobId;
+    this.lastSettings = settings;
     this.dispatched++;
     this.setBusy(true);
     this.hooks.post({ type: 'convert', jobId, proxyId: this.proxyId as ProxyId, settings }, []);

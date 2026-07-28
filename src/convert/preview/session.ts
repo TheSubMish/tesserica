@@ -15,6 +15,8 @@ export interface PreviewSessionHooks {
   readonly onResult: (result: PreviewResult) => void;
   readonly onError?: (message: string) => void;
   readonly onBusyChange?: (busy: boolean) => void;
+  /** See `PreviewScheduler`'s hook of the same name — forwarded verbatim. */
+  readonly onMissingProxy?: () => PixelBuffer | undefined;
 }
 
 export class PreviewSession {
@@ -29,6 +31,7 @@ export class PreviewSession {
       onResult: hooks.onResult,
       onError: hooks.onError ? (message) => hooks.onError?.(message) : undefined,
       onBusyChange: hooks.onBusyChange,
+      onMissingProxy: hooks.onMissingProxy,
     });
     this.worker.onmessage = (event: MessageEvent<PreviewResponse>) =>
       this.scheduler.handleMessage(event.data);

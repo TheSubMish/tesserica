@@ -58,7 +58,12 @@ export class PreviewCore {
     const proxy = this.proxies.get(proxyId);
     if (!proxy) {
       return {
-        response: { type: 'error', jobId, message: `no proxy ${proxyId} in this worker` },
+        response: {
+          type: 'error',
+          jobId,
+          message: `no proxy ${proxyId} in this worker`,
+          reason: 'missing-proxy',
+        },
         transfer: [],
       };
     }

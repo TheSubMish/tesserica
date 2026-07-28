@@ -296,3 +296,157 @@ describe('PreviewScheduler — latest wins', () => {
     expect(() => scheduler.request(settings())).toThrow(/setProxy/);
   });
 });
+
+/**
+ * Dev-mode Vite hot reload can re-evaluate the worker's module graph
+ * independently of the page (`session.ts`), leaving the worker with no record
+ * of a proxy the scheduler still believes is registered. This cannot happen in
+ * a production build — nothing else here recreates the worker without also
+ * recreating the scheduler — but recovering from it during development means
+ * a live preview never looks broken just because the developer's editor saved
+ * a file.
+ */
+describe('PreviewScheduler — recovering from a missing proxy', () => {
+  function setup(onMissingProxy: () => PixelBuffer | undefined) {
+    const posted: PreviewRequest[] = [];
+    const onResult = vi.fn();
+    const onError = vi.fn();
+    const scheduler = new PreviewScheduler({
+      post: (r) => posted.push(r),
+      onResult,
+      onError,
+      onMissingProxy,
+    });
+    scheduler.setProxy(solid(2, 2, [9, 9, 9, 255]));
+    return { posted, scheduler, onResult, onError };
+  }
+
+  function convertJobIds(posted: PreviewRequest[]): number[] {
+    return posted
+      .filter((r): r is Extract<PreviewRequest, { type: 'convert' }> => r.type === 'convert')
+      .map((r) => r.jobId);
+  }
+
+  it('re-registers a fresh proxy and retries the same job once, without surfacing an error', () => {
+    const recovery = solid(2, 2, [5, 5, 5, 255]);
+    const onMissingProxy = vi.fn(() => bufferFrom(2, 2, Uint8ClampedArray.from(recovery.data)));
+    const { posted, scheduler, onResult, onError } = setup(onMissingProxy);
+
+    scheduler.request(settings());
+    const [firstJobId] = convertJobIds(posted);
+    scheduler.handleMessage({
+      type: 'error',
+      jobId: firstJobId,
+      message: 'no proxy 1 in this worker',
+      reason: 'missing-proxy',
+    });
+
+    expect(onMissingProxy).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(posted.filter((r) => r.type === 'setProxy')).toHaveLength(2); // original + recovery
+    expect(convertJobIds(posted)).toHaveLength(2); // original job + the retry
+
+    const [, retryJobId] = convertJobIds(posted);
+    scheduler.handleMessage({
+      type: 'result',
+      jobId: retryJobId,
+      width: 2,
+      height: 2,
+      data: new ArrayBuffer(2 * 2 * 4),
+      indices: new ArrayBuffer(2 * 2 * 2),
+      colorsUsed: 1,
+      elapsedMs: 1,
+    });
+
+    expect(onResult).toHaveBeenCalledTimes(1);
+    expect(scheduler.stats.recovered).toBe(1);
+  });
+
+  it('gives up after one failed recovery attempt rather than retrying forever', () => {
+    const onMissingProxy = vi.fn(() => bufferFrom(2, 2, new Uint8ClampedArray(2 * 2 * 4)));
+    const { posted, scheduler, onResult, onError } = setup(onMissingProxy);
+
+    scheduler.request(settings());
+    const [firstJobId] = convertJobIds(posted);
+    scheduler.handleMessage({
+      type: 'error',
+      jobId: firstJobId,
+      message: 'no proxy 1 in this worker',
+      reason: 'missing-proxy',
+    });
+
+    const [, retryJobId] = convertJobIds(posted);
+    // The retry fails the exact same way — recovery must not loop forever.
+    scheduler.handleMessage({
+      type: 'error',
+      jobId: retryJobId,
+      message: 'no proxy 2 in this worker',
+      reason: 'missing-proxy',
+    });
+
+    expect(onMissingProxy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onResult).not.toHaveBeenCalled();
+    expect(scheduler.stats.recovered).toBe(1);
+  });
+
+  it('falls straight through to onError when there is nothing to recover with', () => {
+    const onMissingProxy = vi.fn(() => undefined);
+    const { posted, scheduler, onError } = setup(onMissingProxy);
+
+    scheduler.request(settings());
+    const [firstJobId] = convertJobIds(posted);
+    scheduler.handleMessage({
+      type: 'error',
+      jobId: firstJobId,
+      message: 'no proxy 1 in this worker',
+      reason: 'missing-proxy',
+    });
+
+    expect(onMissingProxy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(scheduler.stats.recovered).toBe(0);
+  });
+
+  it('is a per-job guard, not a one-time-ever guard: a later job can recover too', () => {
+    const onMissingProxy = vi.fn(() => bufferFrom(2, 2, new Uint8ClampedArray(2 * 2 * 4)));
+    const { posted, scheduler, onResult } = setup(onMissingProxy);
+    const result = (jobId: number) => ({
+      type: 'result' as const,
+      jobId,
+      width: 2,
+      height: 2,
+      data: new ArrayBuffer(2 * 2 * 4),
+      indices: new ArrayBuffer(2 * 2 * 2),
+      colorsUsed: 1,
+      elapsedMs: 1,
+    });
+
+    // First job: recovers, then succeeds.
+    scheduler.request(settings());
+    let [jobId] = convertJobIds(posted);
+    scheduler.handleMessage({
+      type: 'error',
+      jobId,
+      message: 'no proxy 1 in this worker',
+      reason: 'missing-proxy',
+    });
+    scheduler.handleMessage(result(convertJobIds(posted)[1]));
+    expect(onResult).toHaveBeenCalledTimes(1);
+    expect(onMissingProxy).toHaveBeenCalledTimes(1);
+
+    // A second, independent job also hits a missing-proxy error — the guard
+    // from the first recovery must not have disabled recovery permanently.
+    scheduler.request(settings({ brightness: 0.2 }));
+    [, , jobId] = convertJobIds(posted);
+    scheduler.handleMessage({
+      type: 'error',
+      jobId,
+      message: 'no proxy 2 in this worker',
+      reason: 'missing-proxy',
+    });
+
+    expect(onMissingProxy).toHaveBeenCalledTimes(2);
+    expect(scheduler.stats.recovered).toBe(2);
+  });
+});

@@ -63,6 +63,16 @@ export interface PreviewErrorMessage {
   readonly type: 'error';
   readonly jobId: JobId;
   readonly message: string;
+  /**
+   * Set when the worker had no record of the proxy a job referenced
+   * (`core.ts`). In production the worker and the main-thread scheduler are
+   * created together and never diverge; in dev, Vite hot-reloading the
+   * worker's module graph independently of the page can reset it. The
+   * discriminant lets `PreviewScheduler` attempt one automatic recovery
+   * before surfacing anything to the user, rather than string-matching
+   * `message` (which is for display, not for control flow).
+   */
+  readonly reason?: 'missing-proxy';
 }
 
 export type PreviewResponse = PreviewResultMessage | PreviewErrorMessage;

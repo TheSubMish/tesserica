@@ -65,7 +65,33 @@ class PreviewRuntime {
       onResult: (result) => this.acceptResult(result),
       onError: (message) => this.hooks?.onError(message),
       onBusyChange: (busy) => this.hooks?.onBusyChange(busy),
+      onMissingProxy: () => this.recoverProxy(),
     });
+  }
+
+  /**
+   * Rebuild a proxy from the "before" image this runtime already keeps, for
+   * `PreviewScheduler`'s one-shot recovery.
+   *
+   * That image is a genuine independent copy, not the buffer that was handed
+   * to the worker — `setSource` below transfers the buffer it sends, which
+   * detaches it on this side, so re-deriving from `frames.source` is the only
+   * pixel data left to recover with. In production this is never called: the
+   * worker and this runtime are created together and never lose track of each
+   * other. It exists for Vite's dev-mode hot reload, which can re-evaluate the
+   * worker's module graph independently of the page (`session.ts`).
+   */
+  private recoverProxy(): PixelBuffer | undefined {
+    const source = this.frames.source;
+    if (!source) return undefined;
+    if (import.meta.env.DEV) {
+      // Deliberately visible: this only fires from a dev-mode hiccup and is
+      // worth knowing happened.
+      console.warn(
+        '[preview] worker lost its proxy (likely a hot-reload artifact) — recovering automatically',
+      );
+    }
+    return bufferFrom(source.width, source.height, new Uint8ClampedArray(source.data));
   }
 
   /**
