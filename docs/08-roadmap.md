@@ -423,7 +423,63 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       (undo restored it, complete with its original id and range), and
       inserted a new frame before the tag's range to confirm it shifted from
       `[1,2]` to `[2,3]` live, matching the unit-tested shift logic exactly.
-- [ ] Export: spritesheet (+ metadata JSON), animated GIF
+- [x] Export: spritesheet (+ metadata JSON), animated GIF — follows the
+      existing `export_png` pattern one axis over: `src/export/
+      animationExport.ts` picks *which* frames and in *what* order (the whole
+      sprite, or one tag scoped to it — `spritesheetSelection` keeps a tag's
+      forward index range with no ping-pong duplication, since a spritesheet
+      is a set of unique images and direction is metadata for the engine to
+      read from `frameTags` at runtime; `gifFrameSequence` instead expands a
+      tag through `model/tags.ts::tagFrameSequence`, since a GIF *is* the
+      playback with no metadata layer left afterwards), reuses
+      `flattenSprite` per frame unchanged (Rust still never composites
+      layers), and concatenates the results into one buffer for a single
+      `stageBytes` call. `src-tauri/src/commands/animation_export.rs` adds
+      `export_spritesheet`/`export_gif`, receiving only already-flattened
+      RGBA plus metadata, never per-layer pixels. Spritesheet: lays frames
+      into a fixed-column grid (default 4, `docs/06-workflows.md` W3's own
+      example, clamped to the frame count) and reuses `export::scale_nearest`
+      to scale the *assembled sheet* as one nearest-neighbour pass —
+      equivalent to scaling each cell, since NN never mixes across a cell
+      boundary — then writes an Aseprite-shaped "array" metadata JSON
+      alongside the PNG: `frames`/`frameTags` with the identical
+      forward/reverse/pingpong vocabulary this project's own `TagDirection`
+      already uses, chosen over a bespoke schema or TexturePacker's hash
+      shape because it's already what Phaser/PixiJS importers expect. GIF:
+      encoded via `image::codecs::gif` — already a project dependency;
+      enabling its `gif` Cargo feature pulled in `gif` 0.14 (MIT OR
+      Apache-2.0) and `color_quant` 1.1.0 (MIT), so no new top-level crate was
+      needed. Always loops infinitely — empirically the `gif` crate's decoder
+      maps *both* `Repeat::Infinite` and an absent loop extension to
+      `LoopCount::Infinite`, so there is no unambiguous "play once" it can
+      express, and `06-workflows.md` W3 step 9 only ever asks for a looping
+      GIF anyway. 17 Rust tests (grid layout math, sheet assembly, JSON
+      shape/round-trip, real PNG+JSON file output decoded back, GIF frame
+      count/delay/loop decoded back, integer-scale nearest-neighbour on both
+      paths, buffer-length validation, and two tests decoding the exact
+      camelCase JSON shape the frontend actually sends into the request
+      structs) plus 11 TS unit tests for the frame-selection/concatenation
+      logic. `ExportDialog.tsx` gained a Format switcher (PNG / Spritesheet /
+      GIF) and a Frames selector (all frames, or one tag) that only appears
+      once the sprite has tags. Verified live: `npm run tauri dev`'s WebView
+      rendered blank in this container (the same documented flakiness as
+      Phase 3), and no xdotool/screenshot tooling was available this session
+      to drive it blind either, so the fallback was the Vite dev bundle in a
+      real headless Chrome over CDP — created frames and a "walk" tag through
+      actual Timeline UI clicks (not synthetic store calls; an early attempt
+      at dynamically importing store modules silently produced a second,
+      disconnected module instance), opened Export, and confirmed by
+      screenshot and DOM state that the Frames selector appears once the tag
+      exists, scoping to it correctly drops the previewed frame count and
+      grid math (4 frames/4×1 → 3 frames/3×1) for both spritesheet and GIF,
+      and the no-backend path shows an honest error rather than hanging. That
+      pass caught and fixed one real rough edge (the Columns field showing an
+      unclamped value that disagreed with the hint below it). The Rust IPC
+      leg itself can't be exercised this way (no `__TAURI_INTERNALS__`
+      outside the Tauri shell), so it's covered instead by the 17 Rust tests
+      above, including the two wire-shape decode tests and the two that
+      write real files and decode them back with `image`'s own GIF/PNG
+      decoders — genuinely inspected output, not just "didn't crash."
 - [ ] Performance: sustain target fps; **decide on WebGL2** here if Canvas2D falls short
 
 **Exit:** ✅ **W3 complete.**
