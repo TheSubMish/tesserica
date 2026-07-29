@@ -244,7 +244,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               aria-label="Columns"
               min={1}
               max={Math.max(1, previewFrameCount)}
-              value={columns}
+              // Shows the *effective* (clamped) value, not the raw stored one
+              // — otherwise the field could read "4" while the hint below it
+              // (and the actual export) uses 3, which reads as a bug rather
+              // than a deliberate clamp.
+              value={clampedColumns}
               onChange={(e) => setColumns(Math.round(e.target.valueAsNumber) || 1)}
             />
           </label>

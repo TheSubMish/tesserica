@@ -539,6 +539,52 @@ pub fn encode_gif(
 mod tests {
     use super::*;
 
+    // -- wire format ----------------------------------------------------------
+    //
+    // These two decode a JSON string shaped exactly like what
+    // `src/ipc/commands.ts::exportSpritesheet`/`exportGif` actually sends
+    // (camelCase keys, straight off a real `invoke()` call) rather than
+    // constructing the Rust struct directly — the one thing a live desktop
+    // run would otherwise be needed to catch: a silent camelCase/snake_case
+    // field-name mismatch between the two languages that `serde`'s
+    // `rename_all` is supposed to bridge.
+
+    #[test]
+    fn spritesheet_request_deserializes_the_frontends_camelcase_wire_shape() {
+        let json = r#"{
+            "stageId": 1,
+            "frameWidth": 4,
+            "frameHeight": 4,
+            "scale": 2,
+            "columns": 2,
+            "frames": [{"durationMs": 100}, {"durationMs": 150}],
+            "tags": [{"name": "walk", "from": 0, "to": 1, "direction": "forward"}],
+            "path": "/tmp/x.png"
+        }"#;
+        let request: ExportSpritesheetRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.stage_id, 1);
+        assert_eq!(request.frame_width, 4);
+        assert_eq!(request.frame_height, 4);
+        assert_eq!(request.frames.len(), 2);
+        assert_eq!(request.frames[1].duration_ms, 150);
+        assert_eq!(request.tags[0].direction, "forward");
+    }
+
+    #[test]
+    fn gif_request_deserializes_the_frontends_camelcase_wire_shape() {
+        let json = r#"{
+            "stageId": 1,
+            "frameWidth": 8,
+            "frameHeight": 8,
+            "scale": 1,
+            "durationsMs": [100, 100, 150],
+            "path": "/tmp/x.gif"
+        }"#;
+        let request: ExportGifRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.frame_width, 8);
+        assert_eq!(request.durations_ms, vec![100, 100, 150]);
+    }
+
     // -- SheetLayout --------------------------------------------------------
 
     #[test]
