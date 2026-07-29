@@ -6,7 +6,7 @@ import {
   getBuffer,
   setPixel,
 } from '../model/pixelBuffers';
-import type { Sprite } from '../model/types';
+import type { Cel, Sprite } from '../model/types';
 import {
   drawCheckerboard,
   drawGrid,
@@ -246,6 +246,45 @@ describe('dirty-layer caching', () => {
 
     // Three uploads total: two cold, one for the cel that changed.
     expect(contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData')).toHaveLength(3);
+  });
+
+  it('re-uploads a cel that becomes linked even when the two revision numbers coincide', () => {
+    // Regression: `celCanvas`'s cache used to key solely on the numeric
+    // revision, not on *which buffer* produced it. Two cels each edited
+    // exactly once both sit at revision 1 — a `Link Cel` (docs/03-data-model.md
+    // §2.2) that repoints one at the other's buffer must still force a
+    // re-upload, not silently keep showing the pre-link pixels because "1 ===
+    // 1" looked unchanged.
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(8, 8);
+    allocateBuffer('cel2', 8, 8);
+    sprite.layers.push({ ...sprite.layers[0], id: 'l2', name: 'Layer 2' });
+    const cel2: Cel = { id: 'cel2', layerId: 'l2', frameId: 'f1', x: 0, y: 0, width: 8, height: 8 };
+    sprite.cels.push(cel2);
+
+    // One edit each — both land on revision 1.
+    setPixel(getBuffer('cel')!, 8, 8, 0, 0, [10, 20, 30, 255]);
+    bumpCelRevision('cel');
+    setPixel(getBuffer('cel2')!, 8, 8, 7, 7, [40, 50, 60, 255]);
+    bumpCelRevision('cel2');
+
+    const ctx = stubContext();
+    const vp = { zoom: 4, panX: 0, panY: 0 };
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    const uploadsBefore = contexts
+      .flatMap((c) => c.calls)
+      .filter((c) => c.fn === 'putImageData').length;
+    expect(uploadsBefore).toBe(2); // one per cel, cold cache
+
+    // Link cel2 to cel's buffer — its resolved bufferId changes from 'cel2'
+    // to 'cel', whose revision also happens to be 1.
+    cel2.linkedTo = 'cel';
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+
+    const uploadsAfter = contexts
+      .flatMap((c) => c.calls)
+      .filter((c) => c.fn === 'putImageData').length;
+    expect(uploadsAfter).toBeGreaterThan(uploadsBefore);
   });
 
   it('recomposites when a layer property changes without any pixel changing', () => {

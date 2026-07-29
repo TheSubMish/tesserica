@@ -63,6 +63,8 @@ function getScratch(w: number, h: number): HTMLCanvasElement {
 
 interface CelCacheEntry {
   canvas: HTMLCanvasElement;
+  /** The buffer id this canvas's pixels came from — see `celCanvas` below. */
+  bufferId: CelId;
   revision: number;
   width: number;
   height: number;
@@ -86,6 +88,16 @@ export function invalidateRenderCache(): void {
  * the top-level composite, since the group it lives in is redrawn as part of
  * the same pass. `collapsed` is deliberately excluded: it only affects the
  * layer *panel's* display, never the canvas.
+ *
+ * The buffer id a cel resolves to (`celBufferId`) is included alongside its
+ * revision, not just the revision number alone: `Link Cel` / `Unlink Cel`
+ * (`history/frameCommands.ts`) repoint a cel from its own buffer to another
+ * cel's (or back), and the two buffers' revision counters increment
+ * independently — a cel with one edit sits at revision 1 whichever buffer it
+ * is currently reading, so the revision number alone cannot tell "now showing
+ * a different buffer" apart from "unchanged". Since the id string differs
+ * whenever the buffer does, appending it is enough on its own to invalidate
+ * correctly even when the revision numbers coincide.
  */
 function signatureOf(sprite: Sprite, frameId: string): string {
   const parts: string[] = [`${sprite.width}x${sprite.height}@${frameId}`];
@@ -95,10 +107,11 @@ function signatureOf(sprite: Sprite, frameId: string): string {
         layer.kind === 'group'
           ? undefined
           : sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+      const bufferId = cel ? celBufferId(cel) : null;
       parts.push(
         `${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.blendMode}:` +
           `${layer.clippingMask ? 1 : 0}:` +
-          `${layer.kind === 'group' ? 'G' : cel ? `${cel.id}@${cel.x},${cel.y}#${celRevision(celBufferId(cel))}` : '-'}`,
+          `${layer.kind === 'group' ? 'G' : cel ? `${cel.id}@${cel.x},${cel.y}~${bufferId}#${celRevision(bufferId!)}` : '-'}`,
       );
       if (layer.kind === 'group') walk(layer.id);
     }
@@ -115,6 +128,14 @@ function signatureOf(sprite: Sprite, frameId: string): string {
  * through `celBufferId` — the cache entry itself stays keyed by the cel's own
  * id, since two linked cels are still two distinct display slots that happen
  * to show the same content.
+ *
+ * The cache must also record *which* buffer id that revision number came
+ * from, not just the number: `Link Cel` (`history/frameCommands.ts`) can
+ * repoint a cel from its own buffer to another cel's buffer whose revision
+ * counter is independently incrementing. Comparing the revision alone risks
+ * a coincidental match — two single-edit cels both sitting at revision 1,
+ * say — which would silently serve the old buffer's stale canvas right
+ * after linking. `Unlink Cel` produces the same risk in reverse.
  */
 function celCanvas(cel: Cel): HTMLCanvasElement | null {
   const bufferId = celBufferId(cel);
@@ -123,7 +144,7 @@ function celCanvas(cel: Cel): HTMLCanvasElement | null {
 
   const revision = celRevision(bufferId);
   const cached = celCache.get(cel.id);
-  if (cached && cached.revision === revision) return cached.canvas;
+  if (cached && cached.bufferId === bufferId && cached.revision === revision) return cached.canvas;
 
   const canvas = cached?.canvas ?? document.createElement('canvas');
   if (canvas.width !== cel.width || canvas.height !== cel.height) {
@@ -137,7 +158,7 @@ function celCanvas(cel: Cel): HTMLCanvasElement | null {
   ctx.clearRect(0, 0, cel.width, cel.height);
   ctx.putImageData(new ImageData(buf, cel.width, cel.height), 0, 0);
 
-  celCache.set(cel.id, { canvas, revision, width: cel.width, height: cel.height });
+  celCache.set(cel.id, { canvas, bufferId, revision, width: cel.width, height: cel.height });
   return canvas;
 }
 
