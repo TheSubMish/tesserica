@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { docToScreen, screenToDoc } from '../canvas/coords';
-import { MAX_ZOOM, MIN_ZOOM, useUIStore } from './uiStore';
+import { MAX_ONION_SKIN_RANGE, MAX_ZOOM, MIN_ZOOM, useUIStore } from './uiStore';
 
 beforeEach(() => {
   useUIStore.setState({ zoom: 8, panX: 0, panY: 0, showGrid: true, cursor: null });
@@ -83,5 +83,42 @@ describe('pan', () => {
     const s = useUIStore.getState();
     const screen = docToScreen(s, 12, 9);
     expect(screenToDoc(s, screen.x, screen.y)).toEqual({ x: 12, y: 9 });
+  });
+});
+
+describe('onion skin', () => {
+  beforeEach(() => {
+    useUIStore.setState({ onionSkinEnabled: false, onionSkinBefore: 1, onionSkinAfter: 1 });
+  });
+
+  it('is off by default so a single-frame sprite never shows a ghost of itself', () => {
+    // Fresh module state, not the beforeEach override above.
+    expect(useUIStore.getInitialState().onionSkinEnabled).toBe(false);
+  });
+
+  it('toggles independently of any other view state', () => {
+    useUIStore.getState().toggleOnionSkin();
+    expect(useUIStore.getState().onionSkinEnabled).toBe(true);
+    useUIStore.getState().toggleOnionSkin();
+    expect(useUIStore.getState().onionSkinEnabled).toBe(false);
+  });
+
+  it('sets before/after ranges independently', () => {
+    useUIStore.getState().setOnionSkinBefore(3);
+    useUIStore.getState().setOnionSkinAfter(0);
+    expect(useUIStore.getState().onionSkinBefore).toBe(3);
+    expect(useUIStore.getState().onionSkinAfter).toBe(0);
+  });
+
+  it('clamps range to [0, MAX_ONION_SKIN_RANGE]', () => {
+    useUIStore.getState().setOnionSkinBefore(-5);
+    expect(useUIStore.getState().onionSkinBefore).toBe(0);
+    useUIStore.getState().setOnionSkinAfter(999);
+    expect(useUIStore.getState().onionSkinAfter).toBe(MAX_ONION_SKIN_RANGE);
+  });
+
+  it('rounds a fractional range to the nearest integer', () => {
+    useUIStore.getState().setOnionSkinBefore(2.6);
+    expect(useUIStore.getState().onionSkinBefore).toBe(3);
   });
 });

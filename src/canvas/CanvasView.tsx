@@ -6,10 +6,11 @@
  * (docs/02-architecture.md §4).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { getBuffer } from '../model/pixelBuffers';
 import { isEffectivelyLocked, isEffectivelyVisible } from '../model/layerTree';
 import { celBufferId } from '../model/types';
+import { onionSkinFrames } from '../model/onionSkin';
 import {
   beginStroke,
   finishStroke,
@@ -30,6 +31,7 @@ import {
   drawCheckerboard,
   drawCursorCell,
   drawGrid,
+  drawOnionSkin,
   drawSelection,
   drawSprite,
 } from './renderer';
@@ -71,7 +73,29 @@ export function CanvasView() {
   const showGrid = useUIStore((s) => s.showGrid);
   const cursor = useUIStore((s) => s.cursor);
   const fitRequest = useUIStore((s) => s.fitRequest);
+  const onionSkinEnabled = useUIStore((s) => s.onionSkinEnabled);
+  const onionSkinBefore = useUIStore((s) => s.onionSkinBefore);
+  const onionSkinAfter = useUIStore((s) => s.onionSkinAfter);
   const selection = useSelectionStore((s) => s.selection);
+
+  /**
+   * Which nearby frames to ghost, if any — view-only (`docs/08-roadmap.md`
+   * Phase 4 "Onion skinning"), computed here rather than inside the redraw
+   * effect so it participates in the effect's own dependency list without
+   * hand-rolling the equality check.
+   */
+  const onionSkinGhosts = useMemo(
+    () =>
+      onionSkinEnabled
+        ? onionSkinFrames(
+            sprite.frames,
+            sprite.frames.findIndex((f) => f.id === activeFrameId),
+            onionSkinBefore,
+            onionSkinAfter,
+          )
+        : [],
+    [onionSkinEnabled, sprite.frames, activeFrameId, onionSkinBefore, onionSkinAfter],
+  );
 
   const brushSize = useToolStore((s) => s.brushSize);
 
@@ -138,6 +162,10 @@ export function CanvasView() {
     ctx.fillRect(0, 0, w, h);
 
     drawCheckerboard(ctx, panX, panY, sprite.width * zoom, sprite.height * zoom);
+    // Ghosts of nearby frames are drawn *underneath* the active frame's own
+    // content — tinted and translucent, view-only, never paintable or
+    // exported (`canvas/renderer.ts::drawOnionSkin`).
+    if (onionSkinGhosts.length > 0) drawOnionSkin(ctx, sprite, vp, onionSkinGhosts);
     drawSprite(ctx, sprite, activeFrameId, vp);
     if (showGrid && zoom >= GRID_AUTO_ZOOM) drawGrid(ctx, sprite, vp);
     drawBorder(ctx, sprite, vp);
@@ -145,7 +173,19 @@ export function CanvasView() {
     if (cursor && !panning.current) {
       drawCursorCell(ctx, vp, cursor.x, cursor.y, brushSize);
     }
-  }, [sprite, activeFrameId, revision, zoom, panX, panY, showGrid, cursor, brushSize, selection]);
+  }, [
+    sprite,
+    activeFrameId,
+    revision,
+    zoom,
+    panX,
+    panY,
+    showGrid,
+    cursor,
+    brushSize,
+    selection,
+    onionSkinGhosts,
+  ]);
 
   /**
    * Apply the active tool to the active cel.

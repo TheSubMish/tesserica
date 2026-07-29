@@ -15,6 +15,18 @@ interface UIState {
    * toggled from the title bar's Timeline button or the `T` shortcut.
    */
   showTimeline: boolean;
+  /**
+   * Onion skinning (`docs/08-roadmap.md` Phase 4, `docs/05-ui-design.md` §5) —
+   * view-only, so it lives alongside `showGrid` rather than in the document:
+   * it never affects a cel buffer or an export. Toggled and range-configured
+   * from the Timeline panel; off by default so a single-frame sprite never
+   * shows a ghost of itself. Range is frame counts, not pixels — `before`/
+   * `after` are independent so a walk cycle can weight one direction over
+   * the other.
+   */
+  onionSkinEnabled: boolean;
+  onionSkinBefore: number;
+  onionSkinAfter: number;
   /** Document-space cursor position, or null when off-canvas. */
   cursor: { x: number; y: number } | null;
   /**
@@ -34,6 +46,9 @@ interface UIState {
   setPan(x: number, y: number): void;
   toggleGrid(): void;
   toggleTimeline(): void;
+  toggleOnionSkin(): void;
+  setOnionSkinBefore(n: number): void;
+  setOnionSkinAfter(n: number): void;
   setCursor(c: { x: number; y: number } | null): void;
   /**
    * Re-fit and re-center the canvas on the sprite — "move the view back to
@@ -49,6 +64,12 @@ export const MAX_ZOOM = 64;
 /** Grid appears automatically above this zoom (docs/05-ui-design.md §4). */
 export const GRID_AUTO_ZOOM = 4;
 
+/** A range past this is more clutter than reference — same order of magnitude as Aseprite's own default ceiling. */
+export const MAX_ONION_SKIN_RANGE = 8;
+
+const clampOnionSkinRange = (n: number): number =>
+  Math.max(0, Math.min(MAX_ONION_SKIN_RANGE, Math.round(n)));
+
 export const useUIStore = create<UIState>((set) => ({
   mode: 'edit',
   zoom: 8,
@@ -56,6 +77,9 @@ export const useUIStore = create<UIState>((set) => ({
   panY: 0,
   showGrid: true,
   showTimeline: false,
+  onionSkinEnabled: false,
+  onionSkinBefore: 1,
+  onionSkinAfter: 1,
   cursor: null,
   fitRequest: 0,
 
@@ -82,6 +106,9 @@ export const useUIStore = create<UIState>((set) => ({
   setPan: (x, y) => set({ panX: x, panY: y }),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   toggleTimeline: () => set((s) => ({ showTimeline: !s.showTimeline })),
+  toggleOnionSkin: () => set((s) => ({ onionSkinEnabled: !s.onionSkinEnabled })),
+  setOnionSkinBefore: (n) => set({ onionSkinBefore: clampOnionSkinRange(n) }),
+  setOnionSkinAfter: (n) => set({ onionSkinAfter: clampOnionSkinRange(n) }),
   setCursor: (c) => set({ cursor: c }),
   requestFit: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
 }));
