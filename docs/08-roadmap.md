@@ -318,7 +318,65 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       with real `Ctrl+Z`/`Ctrl+Y` key dispatch. Unit tests cover grid
       construction, playback timing/looping, and duration editing
       (`panels/timeline.test.ts`, `panels/TimelinePanel.test.tsx`).
-- [ ] Onion skinning with tint and configurable range
+- [x] Onion skinning with tint and configurable range — `model/onionSkin.ts::
+      onionSkinFrames` is the pure frame-selection logic: given the active
+      frame's index and a before/after count, it walks outward in each
+      direction, wrapping the way playback loops does
+      (`panels/timeline.ts::nextFrameIndex`/`prevFrameIndex`) since the
+      flagship workflow (W3) is a looping walk cycle, and stops a direction
+      as soon as it would revisit an already-claimed frame rather than ever
+      showing the same frame twice (only bites when `before + after` reaches
+      the number of other frames that exist). `canvas/renderer.ts::
+      drawOnionSkin` composites each named ghost frame through the existing
+      `compositeScope` (deliberately bypassing `compositeSprite`'s
+      single-slot cache, which is tuned to serve one frame fast, not several
+      at once), recolours it to a flat tint with a `source-atop` fill so the
+      composite's own alpha shape is kept, and blits it at an
+      opacity that decays with distance from the active frame. Convention:
+      earlier frames tint red (`ONION_TINT_PAST`), later frames tint blue
+      (`ONION_TINT_FUTURE`) — the Aseprite/Pixelorama pairing, asymmetric on
+      purpose so direction reads without relying on position alone
+      (`05-ui-design.md` §8). `CanvasView.tsx` draws the ghost list between
+      the checkerboard and the active frame's own composite, so ghosts are
+      always underneath live content and never intercept pointer events —
+      there is no code path from `drawOnionSkin` back into the tool
+      dispatch, so a ghost can never be painted on. The toggle and the two
+      range fields (`onionSkinEnabled`/`onionSkinBefore`/`onionSkinAfter`,
+      clamped to `[0, MAX_ONION_SKIN_RANGE=8]`) live in `state/uiStore.ts`
+      alongside `showGrid` — view state, off by default, never touching a
+      cel buffer or `.tess`. The Timeline panel's transport row gets a
+      `◐ onion` button plus before/after count fields, matching
+      `05-ui-design.md` §5's own mockup; both range fields are disabled
+      until the toggle is on, and the toggle itself is disabled below two
+      frames like every other transport control there. Unit tests:
+      `model/onionSkin.test.ts` (frame selection, wrapping, the
+      already-claimed stop condition), `canvas/renderer.test.ts` (tint per
+      direction, opacity falloff, `source-atop` ordering, no-ghosts is a
+      no-op), `state/uiStore.test.ts` (toggle, clamped range), an explicit
+      regression in `canvas/flatten.test.ts` pinning down that
+      `flattenSprite` — the export path — produces byte-identical output
+      regardless of onion-skin state (it has no import of `uiStore` at all;
+      the test exists so that stays a contract, not an implicit property of
+      file structure), and `panels/TimelinePanel.test.tsx` for the new
+      transport controls. Verified live against the running Vite dev bundle
+      over Chrome DevTools Protocol (desktop `tauri dev` not attempted,
+      consistent with this container's documented WebView flakiness):
+      opened the Timeline panel, added two more frames, drew a distinct
+      opaque pixel on each of the three frames at a different position so
+      none would occlude another, enabled onion skinning and read back real
+      canvas pixels — confirmed the "before" neighbour rendered red-tinted
+      and translucent, the "after" neighbour blue-tinted and translucent,
+      and the active frame's own pixel stayed exactly `[255,0,0,255]`
+      throughout (never diluted by the overlay); changed the range to
+      before=0/after=2 and confirmed the ghost set and per-distance opacity
+      falloff updated accordingly through the real UI number fields;
+      toggled off and confirmed both ghost pixels reverted to plain
+      checkerboard; called `flattenSprite` directly against the live,
+      hand-populated document with onion skinning on vs. off and got
+      byte-identical output; and dispatched a real pointer down/up at the
+      screen location showing the translucent "after" ghost, confirming the
+      stroke landed only on the active frame's own cel while the ghosted
+      frame's cel was completely untouched.
 - [ ] Tags with preset names (idle/walk/run/attack/hurt/death)
 - [ ] Export: spritesheet (+ metadata JSON), animated GIF
 - [ ] Performance: sustain target fps; **decide on WebGL2** here if Canvas2D falls short
