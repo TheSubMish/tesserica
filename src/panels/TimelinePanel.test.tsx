@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getBuffer, setPixel } from '../model/pixelBuffers';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
+import { useUIStore } from '../state/uiStore';
 import { TimelinePanel } from './TimelinePanel';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,6 +18,7 @@ beforeEach(() => {
   useHistoryStore.getState().clear();
   doc().newDocument(4, 4);
   useHistoryStore.getState().clear();
+  useUIStore.setState({ onionSkinEnabled: false, onionSkinBefore: 1, onionSkinAfter: 1 });
 
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -189,5 +191,61 @@ describe('editing through the grid selects the real cel', () => {
     expect(cel).toBeDefined();
     expect(getBuffer(cel!.id)).toBeDefined();
     setPixel(getBuffer(cel!.id)!, cel!.width, cel!.height, 0, 0, [1, 2, 3, 255]);
+  });
+});
+
+describe('onion skinning', () => {
+  const onionToggle = () => button('Toggle onion skinning');
+  const beforeInput = () =>
+    container.querySelector('input[aria-label="Frames before to ghost"]') as HTMLInputElement;
+  const afterInput = () =>
+    container.querySelector('input[aria-label="Frames after to ghost"]') as HTMLInputElement;
+
+  it('is off by default and disabled with only one frame', () => {
+    expect(onionToggle().getAttribute('aria-pressed')).toBe('false');
+    expect(onionToggle().disabled).toBe(true);
+  });
+
+  it('toggles the shared view-state store, which is what CanvasView reads', () => {
+    act(() => button('Add frame').click());
+    act(() => root.render(<TimelinePanel />));
+
+    expect(onionToggle().disabled).toBe(false);
+    act(() => onionToggle().click());
+
+    expect(useUIStore.getState().onionSkinEnabled).toBe(true);
+    act(() => root.render(<TimelinePanel />));
+    expect(onionToggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('range inputs start disabled until onion skinning is enabled', () => {
+    expect(beforeInput().disabled).toBe(true);
+    expect(afterInput().disabled).toBe(true);
+
+    act(() => useUIStore.getState().toggleOnionSkin());
+    act(() => root.render(<TimelinePanel />));
+
+    expect(beforeInput().disabled).toBe(false);
+    expect(afterInput().disabled).toBe(false);
+  });
+
+  it('editing the before/after fields updates the store independently', () => {
+    act(() => useUIStore.getState().toggleOnionSkin());
+    act(() => root.render(<TimelinePanel />));
+
+    act(() => {
+      setNativeInputValue(beforeInput(), '3');
+      beforeInput().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(useUIStore.getState().onionSkinBefore).toBe(3);
+    expect(useUIStore.getState().onionSkinAfter).toBe(1);
+
+    act(() => root.render(<TimelinePanel />));
+    act(() => {
+      setNativeInputValue(afterInput(), '0');
+      afterInput().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(useUIStore.getState().onionSkinAfter).toBe(0);
+    expect(useUIStore.getState().onionSkinBefore).toBe(3); // untouched by the other field
   });
 });

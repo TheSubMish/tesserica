@@ -29,7 +29,12 @@
  * adjacent in markup without adding a wrapping element that would break that
  * flat child order.
  *
- * Onion skinning and tags (`docs/08-roadmap.md` Phase 4, later bullets) are
+ * Onion skinning's toggle and before/after range live in the transport row,
+ * next to Play (`docs/05-ui-design.md` §5's own mockup puts "◐ onion" there).
+ * The overlay itself is drawn by `CanvasView`/`canvas/renderer.ts::
+ * drawOnionSkin` — this panel only owns the two numbers and the on/off
+ * switch, all in `state/uiStore.ts` since they are view state, never
+ * document state. Tags (`docs/08-roadmap.md` Phase 4, next bullet) are
  * deliberately not part of this panel yet.
  */
 
@@ -46,6 +51,7 @@ import {
 import { visibleLayerRows } from '../model/layerTree';
 import type { Cel, Frame, FrameId, Layer } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
+import { MAX_ONION_SKIN_RANGE, useUIStore } from '../state/uiStore';
 import {
   celAt,
   nextFrameIndex,
@@ -58,6 +64,10 @@ export function TimelinePanel() {
   const sprite = useDocumentStore((s) => s.sprite);
   const activeLayerId = useDocumentStore((s) => s.activeLayerId);
   const activeFrameId = useDocumentStore((s) => s.activeFrameId);
+
+  const onionSkinEnabled = useUIStore((s) => s.onionSkinEnabled);
+  const onionSkinBefore = useUIStore((s) => s.onionSkinBefore);
+  const onionSkinAfter = useUIStore((s) => s.onionSkinAfter);
 
   const rows = visibleLayerRows(sprite.layers);
   const frames = sprite.frames;
@@ -158,6 +168,49 @@ export function TimelinePanel() {
           >
             ⏭
           </button>
+        </span>
+        <span className="timeline-onion" title="Onion skinning — ghosted nearby frames">
+          <button
+            className="timeline-onion-toggle"
+            aria-label="Toggle onion skinning"
+            aria-pressed={onionSkinEnabled}
+            disabled={frames.length < 2}
+            onClick={() => useUIStore.getState().toggleOnionSkin()}
+          >
+            ◐ onion
+          </button>
+          <label className="timeline-onion-range">
+            <span aria-hidden="true">−</span>
+            <input
+              type="number"
+              min={0}
+              max={MAX_ONION_SKIN_RANGE}
+              aria-label="Frames before to ghost"
+              title="Frames before to ghost"
+              disabled={!onionSkinEnabled}
+              value={onionSkinBefore}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) useUIStore.getState().setOnionSkinBefore(v);
+              }}
+            />
+          </label>
+          <label className="timeline-onion-range">
+            <span aria-hidden="true">+</span>
+            <input
+              type="number"
+              min={0}
+              max={MAX_ONION_SKIN_RANGE}
+              aria-label="Frames after to ghost"
+              title="Frames after to ghost"
+              disabled={!onionSkinEnabled}
+              value={onionSkinAfter}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) useUIStore.getState().setOnionSkinAfter(v);
+              }}
+            />
+          </label>
         </span>
         <span className="timeline-frame-ops">
           <button title="Add frame" aria-label="Add frame" onClick={() => addFrame(activeFrameId)}>
