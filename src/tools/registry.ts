@@ -6,6 +6,7 @@ import { ellipse, line, rectangle } from './line';
 import { move } from './move';
 import { picker } from './picker';
 import { select } from './select';
+import { zoom } from './zoom';
 import type { ToolId } from '../state/toolStore';
 
 export const tools: Record<ToolId, Tool> = {
@@ -18,6 +19,7 @@ export const tools: Record<ToolId, Tool> = {
   eyedropper: picker,
   select,
   move,
+  zoom,
 };
 
 export function getTool(id: ToolId): Tool {

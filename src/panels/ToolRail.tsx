@@ -14,6 +14,7 @@ const TOOLS: { id: ToolId; glyph: string; label: string; key: string }[] = [
   { id: 'eyedropper', glyph: '💧', label: 'Eyedropper', key: 'I' },
   { id: 'select', glyph: '⬚', label: 'Select', key: 'M' },
   { id: 'move', glyph: '⇄', label: 'Move', key: 'V' },
+  { id: 'zoom', glyph: '🔍', label: 'Zoom', key: 'Z' },
 ];
 
 export function ToolRail() {

@@ -35,6 +35,11 @@ import {
 
 /** One wheel notch of vertical/horizontal scroll, in screen pixels. */
 const WHEEL_PAN_STEP = 48;
+/**
+ * Zoom step for both `Ctrl`+wheel (any tool) and the `Z` tool's click-to-zoom
+ * (docs/05-ui-design.md §4.1, §7.2) — one constant so the two stay in lockstep.
+ */
+const ZOOM_STEP_FACTOR = 1.25;
 
 export function CanvasView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -274,6 +279,17 @@ export function CanvasView() {
         return;
       }
 
+      // Zoom tool: click zooms in toward the cursor, `Alt`+click zooms out,
+      // reusing the exact step `Ctrl`+wheel uses (docs/05-ui-design.md §4.1)
+      // so the two stay consistent. This is a viewport operation, not a
+      // document edit, so — like Space-drag panning above — it bypasses tool
+      // dispatch and the undo machinery entirely (see `tools/zoom.ts`).
+      if (useToolStore.getState().activeTool === 'zoom') {
+        const factor = e.altKey ? 1 / ZOOM_STEP_FACTOR : ZOOM_STEP_FACTOR;
+        useUIStore.getState().zoomAt(factor, sx, sy);
+        return;
+      }
+
       const { x, y } = screenToDoc(useUIStore.getState(), sx, sy);
       drawing.current = true;
       last.current = { x, y };
@@ -368,7 +384,7 @@ export function CanvasView() {
 
     if (e.ctrlKey || e.metaKey) {
       const rect = e.currentTarget.getBoundingClientRect();
-      const factor = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+      const factor = e.deltaY < 0 ? ZOOM_STEP_FACTOR : 1 / ZOOM_STEP_FACTOR;
       ui.zoomAt(factor, e.clientX - rect.left, e.clientY - rect.top);
       return;
     }

@@ -2,7 +2,16 @@ import { create } from 'zustand';
 import type { RGBA } from '../model/types';
 
 export type ToolId =
-  'pencil' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'eyedropper' | 'select' | 'move';
+  | 'pencil'
+  | 'eraser'
+  | 'fill'
+  | 'line'
+  | 'rect'
+  | 'ellipse'
+  | 'eyedropper'
+  | 'select'
+  | 'move'
+  | 'zoom';
 
 /**
  * Sub-mode of the Select tool (`docs/05-ui-design.md` §4.1 — "Select: Rect,

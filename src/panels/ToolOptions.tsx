@@ -93,6 +93,8 @@ export function ToolOptions() {
       )}
 
       {tool === 'eyedropper' && <p className="hint">Alt picks a colour from any tool.</p>}
+
+      {tool === 'zoom' && <p className="hint">Click to zoom in, Alt+click to zoom out.</p>}
     </section>
   );
 }

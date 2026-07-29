@@ -146,11 +146,30 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       There is no nesting-depth limit and no multi-select; grouping wraps one
       layer at a time and further members are reassigned via the layer
       panel's Parent selector.
-- [~] Keyboard shortcuts complete (`05` §7) — the interaction rules in §7 are now all
+- [x] Keyboard shortcuts complete (`05` §7) — the interaction rules in §7 are now all
       implemented, including "every slider is also a number field"
       (`app/SliderField.tsx`, used by all nine sliders in the app) and `M`/`V` for
-      Select/Move. Not done: a dedicated click-to-zoom `Z` tool (`Ctrl`+wheel already
-      covers zoom-from-any-tool) and a preferences panel.
+      Select/Move. The one remaining piece, a dedicated click-to-zoom `Z` tool, landed:
+      `zoom` is a real `ToolId` (`state/toolStore.ts`) selectable from the rail
+      (`panels/ToolRail.tsx`) and via the `Z` key (`app/shortcuts.ts`), but it never
+      touches a cel buffer, so `tools/zoom.ts` is a documented no-op — `CanvasView`'s
+      `onPointerDown` special-cases `activeTool === 'zoom'` before tool dispatch and
+      calls `uiStore.zoomAt` directly, the same function and step (`ZOOM_STEP_FACTOR`,
+      shared with the `Ctrl`+wheel path) as the existing zoom-from-any-tool gesture, so
+      the two can never drift apart. `05-ui-design.md` §4.1 specifies the key but not
+      the click semantics, so the smallest reasonable thing was implemented and flagged
+      rather than invented further: click zooms in, `Alt`+click zooms out (the universal
+      convention for a magnifier tool, and free to use here because the zoom tool
+      bypasses the generic dispatch that turns `Alt` into the eyedropper for every other
+      tool). No preferences panel exists and none was built — a prior pass in this
+      project found no spec for one anywhere in `docs/`, and building one now would be
+      inventing scope rather than closing it. Verified live against the Vite dev bundle
+      over CDP (desktop `tauri dev` was not attempted given the documented GPU-contention
+      flakiness noted above): selected the tool both from the rail and via `Z`, clicked
+      to zoom in toward the click point (1000%→1250%, exactly the 1.25× step), `Alt`+
+      clicked at the same point to zoom out by the same step (1563%→1250%, the inverse
+      of 1.25×), and confirmed `Ctrl`+wheel from another tool still zooms in by the
+      identical step (1250%→1563%) after the shared-constant refactor.
 - [x] Accessibility pass (`05` §8) — color-blindness simulation shipped
       (`lib/colorBlind.ts`, palette panel) in an earlier pass; this one is the
       systematic contrast/focus-order audit that hadn't happened yet. Computed
