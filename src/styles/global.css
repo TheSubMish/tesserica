@@ -25,7 +25,10 @@ body {
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* Third row is the Timeline panel when shown (`docs/05-ui-design.md` §5) —
+     it is simply absent from the child list otherwise, so this extra `auto`
+     track goes unused rather than reserving space. */
+  grid-template-rows: auto 1fr auto auto;
   height: 100%;
 }
 
@@ -913,4 +916,169 @@ select:focus-visible {
   background: var(--bg-panel);
   color: var(--text);
   font-size: 14px;
+}
+
+/* ---- Timeline panel (docs/05-ui-design.md §5, roadmap Phase 4) ------------ */
+
+.timeline-panel {
+  height: 220px;
+  border-bottom: 0;
+  border-top: 1px solid var(--border);
+}
+
+.timeline-panel .panel-head {
+  height: auto;
+  min-height: 26px;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+}
+
+.timeline-transport,
+.timeline-frame-ops {
+  display: flex;
+  gap: 2px;
+}
+
+.timeline-grid-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.timeline-grid {
+  display: grid;
+  grid-auto-rows: var(--control-h);
+  align-content: start;
+  font-size: 12px;
+}
+
+.timeline-corner,
+.timeline-frame-head,
+.timeline-row-label {
+  background: var(--bg-panel);
+}
+
+/* Sticky headers so a long timeline still shows layer names and frame
+   numbers while scrolled — the grid's own scroll container is
+   `.timeline-grid-wrap`, so `top`/`left` here are relative to that. */
+.timeline-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+}
+
+.timeline-frame-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--space-1) 0;
+  border-left: 1px solid var(--border);
+}
+
+.timeline-frame-head.active {
+  background: var(--accent-muted);
+}
+
+.timeline-frame-number {
+  width: 20px;
+  height: 18px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.timeline-frame-head.active .timeline-frame-number {
+  color: var(--text);
+}
+
+.timeline-duration {
+  width: 44px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-app);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: center;
+  padding: 0;
+}
+
+.timeline-row-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.timeline-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.timeline-cell:hover {
+  background: var(--bg-elevated);
+}
+
+.timeline-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.timeline-cell-active {
+  background: var(--accent-muted);
+}
+
+.timeline-cell-empty {
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+.timeline-dot {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.timeline-link-btn {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.timeline-link-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.timeline-link-btn-linked {
+  color: var(--accent);
 }

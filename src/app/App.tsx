@@ -4,6 +4,7 @@ import { ConversionPanel } from '../panels/ConversionPanel';
 import { LayerPanel } from '../panels/LayerPanel';
 import { PalettePanel } from '../panels/PalettePanel';
 import { StatusBar } from '../panels/StatusBar';
+import { TimelinePanel } from '../panels/TimelinePanel';
 import { ToolOptions } from '../panels/ToolOptions';
 import { ToolRail } from '../panels/ToolRail';
 import { ConvertMode } from '../convert/ConvertMode';
@@ -19,6 +20,7 @@ import { useShortcuts } from './shortcuts';
 
 export function App() {
   const mode = useUIStore((s) => s.mode);
+  const showTimeline = useUIStore((s) => s.showTimeline);
   const [exporting, setExporting] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
@@ -141,6 +143,20 @@ export function App() {
             Edit
           </button>
         </div>
+        {/* Timeline is a panel inside Edit, not a mode (D7) — its toggle lives
+            here rather than a View menu, which does not exist anywhere else
+            in the app yet (`docs/05-ui-design.md` §5 allows either). */}
+        {mode === 'edit' && (
+          <button
+            className="statusbar-btn"
+            title="Toggle Timeline panel (T)"
+            aria-label="Toggle Timeline panel"
+            aria-pressed={showTimeline}
+            onClick={() => useUIStore.getState().toggleTimeline()}
+          >
+            ▤
+          </button>
+        )}
       </header>
 
       <div className="body">
@@ -170,6 +186,8 @@ export function App() {
           </>
         )}
       </div>
+
+      {mode === 'edit' && showTimeline && <TimelinePanel />}
 
       <StatusBar />
 

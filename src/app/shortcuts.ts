@@ -99,6 +99,11 @@ export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
         case "'":
           ui.toggleGrid();
           break;
+        case 't':
+          // Toggle the Timeline panel (`docs/05-ui-design.md` §5) — hidden by
+          // default, toggleable from here or the title bar's Timeline button.
+          ui.toggleTimeline();
+          break;
         case '+':
         case '=':
           ui.setZoom(ui.zoom * 2);

@@ -6,6 +6,7 @@ import {
   descendantIds,
   isEffectivelyLocked,
   isEffectivelyVisible,
+  visibleLayerRows,
   wouldCreateCycle,
 } from './layerTree';
 import type { Layer, LayerBase } from './types';
@@ -108,6 +109,26 @@ describe('isEffectivelyVisible / isEffectivelyLocked', () => {
   it('a plain visible/unlocked tree is unaffected', () => {
     expect(isEffectivelyVisible(layers, 'C')).toBe(true);
     expect(isEffectivelyLocked(layers, 'C')).toBe(false);
+  });
+});
+
+describe('visibleLayerRows', () => {
+  it('lists top-of-stack first with each group’s children indented beneath it', () => {
+    // layers = [bg, G[A, B[C]]] in bottom→top storage order.
+    const rows = visibleLayerRows(layers);
+    expect(rows.map((r) => [r.layer.id, r.depth])).toEqual([
+      ['G', 0],
+      ['B', 1],
+      ['C', 2],
+      ['A', 1],
+      ['bg', 0],
+    ]);
+  });
+
+  it('omits a collapsed group’s children entirely', () => {
+    const g: Layer = { ...(group('G', null) as Layer & { kind: 'group' }), collapsed: true };
+    const collapsed: Layer[] = [g, raster('A', 'G')];
+    expect(visibleLayerRows(collapsed).map((r) => r.layer.id)).toEqual(['G']);
   });
 });
 

@@ -9,6 +9,12 @@ interface UIState {
   panX: number;
   panY: number;
   showGrid: boolean;
+  /**
+   * Timeline panel visibility (`docs/05-ui-design.md` §5, `docs/10-decisions.md`
+   * D7) — hidden by default so people making single sprites never see it,
+   * toggled from the title bar's Timeline button or the `T` shortcut.
+   */
+  showTimeline: boolean;
   /** Document-space cursor position, or null when off-canvas. */
   cursor: { x: number; y: number } | null;
   /**
@@ -27,6 +33,7 @@ interface UIState {
   panBy(dx: number, dy: number): void;
   setPan(x: number, y: number): void;
   toggleGrid(): void;
+  toggleTimeline(): void;
   setCursor(c: { x: number; y: number } | null): void;
   /**
    * Re-fit and re-center the canvas on the sprite — "move the view back to
@@ -48,6 +55,7 @@ export const useUIStore = create<UIState>((set) => ({
   panX: 0,
   panY: 0,
   showGrid: true,
+  showTimeline: false,
   cursor: null,
   fitRequest: 0,
 
@@ -73,6 +81,7 @@ export const useUIStore = create<UIState>((set) => ({
   panBy: (dx, dy) => set((s) => ({ panX: s.panX + dx, panY: s.panY + dy })),
   setPan: (x, y) => set({ panX: x, panY: y }),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+  toggleTimeline: () => set((s) => ({ showTimeline: !s.showTimeline })),
   setCursor: (c) => set({ cursor: c }),
   requestFit: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
 }));

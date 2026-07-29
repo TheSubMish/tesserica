@@ -87,3 +87,29 @@ export function wouldCreateCycle(
   if (newParentId === id) return true;
   return descendantIds(layers, id).includes(newParentId);
 }
+
+export interface LayerRow {
+  layer: Layer;
+  depth: number;
+}
+
+/**
+ * Top-of-stack-first display order, each group's children indented directly
+ * beneath it and omitted entirely while the group is collapsed.
+ *
+ * Shared between `panels/LayerPanel.tsx` and `panels/TimelinePanel.tsx`
+ * (`docs/08-roadmap.md` Phase 4, "Timeline panel") — the timeline's row axis
+ * is the same layer tree the layer panel shows, so both walk this one
+ * function rather than keeping two copies of the ordering rule in sync.
+ */
+export function visibleLayerRows(layers: readonly Layer[]): LayerRow[] {
+  const rows: LayerRow[] = [];
+  const walk = (parentId: LayerId | null, depth: number): void => {
+    for (const l of [...childrenOf(layers, parentId)].reverse()) {
+      rows.push({ layer: l, depth });
+      if (l.kind === 'group' && !l.collapsed) walk(l.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return rows;
+}

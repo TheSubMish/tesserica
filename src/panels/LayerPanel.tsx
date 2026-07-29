@@ -32,8 +32,8 @@ import {
   setLayerVisible,
   ungroupLayer,
 } from '../history/layerCommands';
-import { childrenOf, wouldCreateCycle } from '../model/layerTree';
-import type { BlendMode, Layer, LayerId } from '../model/types';
+import { visibleLayerRows, wouldCreateCycle } from '../model/layerTree';
+import type { BlendMode, Layer } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 
 /** `docs/03-data-model.md` §2.1 — the full W3C set, in the order Photoshop-family tools use. */
@@ -55,31 +55,6 @@ const BLEND_MODES: { value: BlendMode; label: string }[] = [
   { value: 'color', label: 'Color' },
   { value: 'luminosity', label: 'Luminosity' },
 ];
-
-interface Row {
-  layer: Layer;
-  depth: number;
-}
-
-/**
- * Top-of-stack-first display order, each group's children indented directly
- * beneath it and omitted entirely while the group is collapsed.
- *
- * The underlying `Sprite.layers` array does not require a group's children to
- * be contiguous with it (`model/layerTree.ts`) — this is what reconstructs
- * the visual tree from that flat, possibly-interleaved storage.
- */
-function visibleRows(layers: Layer[]): Row[] {
-  const rows: Row[] = [];
-  const walk = (parentId: LayerId | null, depth: number): void => {
-    for (const l of [...childrenOf(layers, parentId)].reverse()) {
-      rows.push({ layer: l, depth });
-      if (l.kind === 'group' && !l.collapsed) walk(l.id, depth + 1);
-    }
-  };
-  walk(null, 0);
-  return rows;
-}
 
 export function LayerPanel() {
   const layers = useDocumentStore((s) => s.sprite.layers);
@@ -156,7 +131,7 @@ export function LayerPanel() {
       </div>
 
       <div className="layer-list" role="listbox" aria-label="Layers">
-        {visibleRows(layers).map(({ layer: l, depth }) => (
+        {visibleLayerRows(layers).map(({ layer: l, depth }) => (
           <div
             key={l.id}
             className="layer-row"
