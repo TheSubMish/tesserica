@@ -120,7 +120,7 @@ export function App() {
                   return path;
                 }),
             },
-            { label: 'Export PNG…', onSelect: () => setExporting(true) },
+            { label: 'Export…', onSelect: () => setExporting(true) },
           ]}
         />
         <span className="wordmark">Tesserica</span>

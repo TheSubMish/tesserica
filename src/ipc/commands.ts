@@ -73,6 +73,70 @@ export async function exportPng(request: {
 }
 
 // ---------------------------------------------------------------------------
+// Spritesheet + animated GIF export (`docs/08-roadmap.md` Phase 4 "Export:
+// spritesheet (+ metadata JSON), animated GIF").
+//
+// Same shape as `exportPng`: the frontend flattens and concatenates every
+// frame it wants exported (`export/animationExport.ts`) and stages the whole
+// buffer once; Rust never receives per-layer pixels, only the already-
+// composited RGBA plus metadata (durations, tag ranges).
+// ---------------------------------------------------------------------------
+
+export interface SpritesheetFrameInput {
+  durationMs: number;
+}
+
+export interface SpritesheetTagInput {
+  name: string;
+  from: number;
+  to: number;
+  direction: string;
+}
+
+export interface ExportSpritesheetResult {
+  path: string;
+  jsonPath: string;
+  width: number;
+  height: number;
+  columns: number;
+  rows: number;
+  bytes: number;
+  jsonBytes: number;
+}
+
+export async function exportSpritesheet(request: {
+  stageId: StageId;
+  frameWidth: number;
+  frameHeight: number;
+  scale: ExportScale;
+  columns: number;
+  frames: SpritesheetFrameInput[];
+  tags: SpritesheetTagInput[];
+  path: string;
+}): Promise<ExportSpritesheetResult> {
+  return invoke<ExportSpritesheetResult>('export_spritesheet', { request });
+}
+
+export interface ExportGifResult {
+  path: string;
+  width: number;
+  height: number;
+  frames: number;
+  bytes: number;
+}
+
+export async function exportGif(request: {
+  stageId: StageId;
+  frameWidth: number;
+  frameHeight: number;
+  scale: ExportScale;
+  durationsMs: number[];
+  path: string;
+}): Promise<ExportGifResult> {
+  return invoke<ExportGifResult>('export_gif', { request });
+}
+
+// ---------------------------------------------------------------------------
 // `.tess` (docs/03-data-model.md §7)
 // ---------------------------------------------------------------------------
 
