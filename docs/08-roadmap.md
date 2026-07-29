@@ -105,11 +105,31 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       see that file for why the two are allowed to differ here, unlike the conversion
       pipeline. The Rust `BlendMode` enum mirrors the wire format only; Rust never
       composites layers.
-- [~] Selection tools (rect, ellipse, lasso, magic wand) + move — **rectangle marquee
-      and Move only.** `state/selectionStore.ts` holds a single `Rect`, not a general
-      mask, so ellipse/lasso/magic-wand selection is a data-model change, not just a
-      new tool, and did not land in this pass. Every paint tool (pencil, eraser, fill,
-      line, rect, ellipse) clips to the active selection.
+- [x] Selection tools (rect, ellipse, lasso, magic wand) + move — `model/selection.ts`
+      generalizes the store from a bare `Rect` to a `Selection` (a bounding rect plus an
+      optional row-major mask; the mask is omitted for a plain rectangle, so the common
+      case allocates nothing). `tools/select.ts` is one tool with a `selectMode`
+      (`state/toolStore.ts`), the same pattern as Fill's contiguous/global option, not
+      four separate tools (`05-ui-design.md` §4.1 lists it that way too): rect/ellipse
+      drag out live like the Rectangle/Ellipse draw tools (`tools/shapes.ts::
+      ellipseSelection`, sharing its row-span scanline with the filled-draw code path
+      so a selection and a filled draw agree pixel-for-pixel); lasso rasterizes a
+      freehand path with an even-odd scanline (`model/polygon.ts::polygonSelection`);
+      magic wand is a 4-connected flood (`tools/fill.ts::wandSelection`, sharing
+      `walkContiguousRuns` with `fillContiguous` — the shared walk keeps its own
+      `visited` set rather than relying on the callback repainting a pixel to stop
+      re-visiting it, since the wand callback only marks a mask and never touches the
+      buffer `matches` reads from). Every paint tool (pencil, eraser, fill, line, rect,
+      ellipse) clips to `Selection` via `selectionContains`, and `tools/move.ts` only
+      extracts/clears pixels the mask actually selects, so moving an ellipse or lasso
+      selection leaves the rest of its bounding box alone. Marching ants walk the
+      mask's real boundary edges (`model/selection.ts::selectionEdges`), not the
+      bounding box, so a non-rectangular selection outlines its actual shape
+      (`canvas/renderer.ts::drawSelection`). Verified live in `tauri dev`: dragged
+      rect/ellipse/lasso selections and a wand click all rendered the correct marching
+      ants, and moving a wand selection correctly left an incidental opaque pixel
+      behind (it broke the flood's colour match, so the mask had a hole there) while
+      translating the rest.
 - [x] Layer groups, clipping masks — groups nest via a `parentId` pointer into
       the same flat `Sprite.layers` array rather than a separate tree
       (`model/layerTree.ts`, `03-data-model.md` §2.1); a group has no pixels

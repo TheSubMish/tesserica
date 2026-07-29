@@ -7,7 +7,7 @@
  */
 
 import { setPixel } from '../model/pixelBuffers';
-import { rectContains, type Rect } from '../model/rect';
+import { selectionContains, type Selection } from '../model/selection';
 import type { RGBA } from '../model/types';
 
 /**
@@ -23,10 +23,10 @@ export function stampBrush(
   cy: number,
   size: number,
   color: RGBA,
-  clip?: Rect | null,
+  clip?: Selection | null,
 ): void {
   if (size <= 1) {
-    if (clip && !rectContains(clip, cx, cy)) return;
+    if (!selectionContains(clip, cx, cy)) return;
     setPixel(buf, width, height, cx, cy, color);
     return;
   }
@@ -36,7 +36,7 @@ export function stampBrush(
     for (let dx = 0; dx < size; dx++) {
       const x = cx - offset + dx;
       const y = cy - offset + dy;
-      if (clip && !rectContains(clip, x, y)) continue;
+      if (!selectionContains(clip, x, y)) continue;
       setPixel(buf, width, height, x, y, color);
     }
   }
@@ -88,7 +88,7 @@ export function drawLine(
   y1: number,
   size: number,
   color: RGBA,
-  clip?: Rect | null,
+  clip?: Selection | null,
 ): void {
   for (const p of linePoints(x0, y0, x1, y1)) {
     stampBrush(buf, width, height, p.x, p.y, size, color, clip);

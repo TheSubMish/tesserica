@@ -8,7 +8,7 @@
  */
 
 import { setPixel } from '../model/pixelBuffers';
-import { rectContains, type Rect } from '../model/rect';
+import { selectionContains, selectionFromMask, type Selection } from '../model/selection';
 import type { RGBA } from '../model/types';
 import type { Point } from './raster';
 
@@ -37,11 +37,11 @@ export function drawRect(
   y1: number,
   color: RGBA,
   filled: boolean,
-  clip?: Rect | null,
+  clip?: Selection | null,
 ): void {
   const { left, top, right, bottom } = normalizeDrag(x0, y0, x1, y1);
   const put = (x: number, y: number) => {
-    if (clip && !rectContains(clip, x, y)) return;
+    if (!selectionContains(clip, x, y)) return;
     setPixel(buf, width, height, x, y, color);
   };
 
@@ -143,6 +143,25 @@ export function ellipsePoints(x0: number, y0: number, x1: number, y1: number): P
   return points;
 }
 
+/**
+ * Group an outline's points into one `{min, max}` x-span per row. Shared by
+ * `drawEllipse`'s filled branch and `ellipseSelection`: scanline-filling the
+ * outline keeps a filled draw, an outlined draw, and a selection mask all
+ * agree on exactly the same set of pixels.
+ */
+function ellipseRowSpans(points: Point[]): Map<number, { min: number; max: number }> {
+  const rows = new Map<number, { min: number; max: number }>();
+  for (const p of points) {
+    const row = rows.get(p.y);
+    if (!row) rows.set(p.y, { min: p.x, max: p.x });
+    else {
+      if (p.x < row.min) row.min = p.x;
+      if (p.x > row.max) row.max = p.x;
+    }
+  }
+  return rows;
+}
+
 export function drawEllipse(
   buf: Uint8ClampedArray,
   width: number,
@@ -153,11 +172,11 @@ export function drawEllipse(
   y1: number,
   color: RGBA,
   filled: boolean,
-  clip?: Rect | null,
+  clip?: Selection | null,
 ): void {
   const points = ellipsePoints(x0, y0, x1, y1);
   const put = (x: number, y: number) => {
-    if (clip && !rectContains(clip, x, y)) return;
+    if (!selectionContains(clip, x, y)) return;
     setPixel(buf, width, height, x, y, color);
   };
 
@@ -169,16 +188,40 @@ export function drawEllipse(
   // Fill by spanning between the outline's extremes on each row. Scanline
   // filling the outline itself keeps the filled and outlined shapes identical
   // at the edge, which matters when a user draws one on top of the other.
-  const rows = new Map<number, { min: number; max: number }>();
-  for (const p of points) {
-    const row = rows.get(p.y);
-    if (!row) rows.set(p.y, { min: p.x, max: p.x });
-    else {
-      if (p.x < row.min) row.min = p.x;
-      if (p.x > row.max) row.max = p.x;
-    }
-  }
+  const rows = ellipseRowSpans(points);
   for (const [y, row] of rows) {
     for (let x = row.min; x <= row.max; x++) put(x, y);
   }
+}
+
+/**
+ * Rasterize a dragged ellipse into a `Selection` mask — always filled,
+ * regardless of the draw tool's outline/filled option, since a selection has
+ * no "outline" concept (`docs/08-roadmap.md` Phase 3, "selection tools").
+ */
+export function ellipseSelection(x0: number, y0: number, x1: number, y1: number): Selection | null {
+  const points = ellipsePoints(x0, y0, x1, y1);
+  if (points.length === 0) return null;
+
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const p of points) {
+    if (p.x < left) left = p.x;
+    if (p.x > right) right = p.x;
+    if (p.y < top) top = p.y;
+    if (p.y > bottom) bottom = p.y;
+  }
+  const width = right - left + 1;
+  const height = bottom - top + 1;
+  const mask = new Uint8Array(width * height);
+
+  const rows = ellipseRowSpans(points);
+  for (const [y, row] of rows) {
+    for (let x = row.min; x <= row.max; x++) {
+      mask[(y - top) * width + (x - left)] = 1;
+    }
+  }
+  return selectionFromMask({ x: left, y: top, width, height }, mask);
 }

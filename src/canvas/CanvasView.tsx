@@ -65,7 +65,7 @@ export function CanvasView() {
   const showGrid = useUIStore((s) => s.showGrid);
   const cursor = useUIStore((s) => s.cursor);
   const fitRequest = useUIStore((s) => s.fitRequest);
-  const selection = useSelectionStore((s) => s.rect);
+  const selection = useSelectionStore((s) => s.selection);
 
   const brushSize = useToolStore((s) => s.brushSize);
 
@@ -206,10 +206,11 @@ export function CanvasView() {
         pixelPerfect: toolState.pixelPerfect,
         shapeFill: toolState.shapeFill,
         fillContiguous: toolState.fillContiguous,
+        selectMode: toolState.selectMode,
         anchor: anchor.current,
         strokeState: strokeState.current,
-        selection: useSelectionStore.getState().rect,
-        setSelection: (r) => useSelectionStore.getState().setRect(r),
+        selection: useSelectionStore.getState().selection,
+        setSelection: (s) => useSelectionStore.getState().setSelection(s),
         restore: () => {
           if (snapshot) restoreStroke(snapshot, buffer);
         },

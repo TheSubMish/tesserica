@@ -35,7 +35,7 @@ describe('move tool', () => {
       width: W,
       height: H,
       anchor: { x: 1, y: 1 },
-      selection: { x: 0, y: 0, width: 4, height: 4 },
+      selection: { bounds: { x: 0, y: 0, width: 4, height: 4 } },
     });
     c.snapshot();
 
@@ -47,6 +47,30 @@ describe('move tool', () => {
     expect(getPixel(c.buffer, W, H, 1, 1)).toEqual([0, 0, 0, 0]);
     // ...and the untouched pixel outside the selection is undisturbed.
     expect(getPixel(c.buffer, W, H, 6, 6)).toEqual([0, 0, 255, 255]);
+  });
+
+  it('respects a masked selection — pixels inside the bounding box but outside the mask stay put', () => {
+    const buf = blank();
+    setPixel(buf, W, H, 1, 1, RED); // inside the mask
+    setPixel(buf, W, H, 0, 0, [0, 0, 255, 255]); // inside the bounding box, outside the mask
+    // A 2×2 mask over a 2×2 bounding box, but only the (1,1) corner selected.
+    const mask = new Uint8Array([0, 0, 0, 1]);
+    const c = harness({
+      buffer: buf,
+      width: W,
+      height: H,
+      anchor: { x: 1, y: 1 },
+      selection: { bounds: { x: 0, y: 0, width: 2, height: 2 }, mask },
+    });
+    c.snapshot();
+
+    move.onPointerDown(c, 1, 1);
+    move.onPointerMove(c, 4, 4, 1, 1);
+
+    expect(getPixel(c.buffer, W, H, 4, 4)).toEqual(RED);
+    expect(getPixel(c.buffer, W, H, 1, 1)).toEqual([0, 0, 0, 0]);
+    // The blue pixel was never part of the selection — untouched, not cleared.
+    expect(getPixel(c.buffer, W, H, 0, 0)).toEqual([0, 0, 255, 255]);
   });
 
   it('redraws from the pointer-down snapshot rather than accumulating drift', () => {
@@ -71,7 +95,7 @@ describe('move tool', () => {
       width: W,
       height: H,
       anchor: { x: 0, y: 0 },
-      selection: { x: 0, y: 0, width: 2, height: 2 },
+      selection: { bounds: { x: 0, y: 0, width: 2, height: 2 } },
     });
     c.snapshot();
 
@@ -79,11 +103,11 @@ describe('move tool', () => {
     move.onPointerMove(c, 3, 1, 0, 0);
     move.onPointerUp?.(c, 3, 1);
 
-    expect(c.selection).toEqual({ x: 3, y: 1, width: 2, height: 2 });
+    expect(c.selection).toEqual({ bounds: { x: 3, y: 1, width: 2, height: 2 } });
   });
 
   it('leaves the selection alone when the pointer never moved', () => {
-    const original = { x: 0, y: 0, width: 2, height: 2 };
+    const original = { bounds: { x: 0, y: 0, width: 2, height: 2 } };
     const c = harness({
       buffer: blank(),
       width: W,

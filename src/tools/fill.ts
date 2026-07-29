@@ -16,7 +16,7 @@
  */
 
 import { setPixel } from '../model/pixelBuffers';
-import { rectContains, type Rect } from '../model/rect';
+import { selectionContains, selectionFromMask, type Selection } from '../model/selection';
 import type { RGBA } from '../model/types';
 
 function sameColor(buf: Uint8ClampedArray, i: number, c: readonly number[]): boolean {
@@ -39,16 +39,16 @@ export function fillGlobal(
   seedX: number,
   seedY: number,
   color: RGBA,
-  clip?: Rect | null,
+  clip?: Selection | null,
 ): void {
   if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return;
-  if (clip && !rectContains(clip, seedX, seedY)) return;
+  if (!selectionContains(clip, seedX, seedY)) return;
   const target = readColor(buf, (seedY * width + seedX) * 4);
   if (target.every((v, k) => v === color[k])) return;
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (clip && !rectContains(clip, x, y)) continue;
+      if (!selectionContains(clip, x, y)) continue;
       const i = (y * width + x) * 4;
       if (!sameColor(buf, i, target)) continue;
       buf[i] = color[0];
@@ -67,10 +67,10 @@ export function fillContiguous(
   seedX: number,
   seedY: number,
   color: RGBA,
-  clip?: Rect | null,
+  clip?: Selection | null,
 ): void {
   if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return;
-  if (clip && !rectContains(clip, seedX, seedY)) return;
+  if (!selectionContains(clip, seedX, seedY)) return;
 
   const target = readColor(buf, (seedY * width + seedX) * 4);
   // Filling a region with the colour it already has would never terminate.
@@ -81,28 +81,59 @@ export function fillContiguous(
     x < width &&
     y >= 0 &&
     y < height &&
-    (!clip || rectContains(clip, x, y)) &&
+    selectionContains(clip, x, y) &&
     sameColor(buf, (y * width + x) * 4, target);
+
+  walkContiguousRuns(width, height, seedX, seedY, matches, (left, right, y) => {
+    for (let px = left; px <= right; px++) setPixel(buf, width, height, px, y, color);
+  });
+}
+
+/**
+ * Scanline contiguous-region walk shared by `fillContiguous` and
+ * `wandSelection` — the geometry of "find every pixel 4-connected to the
+ * seed that matches" is identical; only what happens to a matching run
+ * differs (paint it, versus mark it in a mask).
+ *
+ * Tracks its own `visited` set rather than relying on `visitRun` to make a
+ * pixel stop matching. `fillContiguous`'s callback happens to do that too
+ * (painting a pixel a different colour makes it fail `matches` on a later
+ * scan), but `wandSelection`'s callback only marks a mask — it never touches
+ * the buffer `matches` reads from, so without an explicit `visited` set the
+ * walk would revisit the same run forever.
+ */
+function walkContiguousRuns(
+  width: number,
+  height: number,
+  seedX: number,
+  seedY: number,
+  matches: (x: number, y: number) => boolean,
+  visitRun: (left: number, right: number, y: number) => void,
+): void {
+  const visited = new Uint8Array(width * height);
+  const test = (x: number, y: number): boolean =>
+    x >= 0 && x < width && y >= 0 && y < height && !visited[y * width + x] && matches(x, y);
 
   const stack: { x: number; y: number }[] = [{ x: seedX, y: seedY }];
 
   while (stack.length > 0) {
     const { x, y } = stack.pop()!;
-    if (!matches(x, y)) continue;
+    if (!test(x, y)) continue;
 
     let left = x;
-    while (matches(left - 1, y)) left--;
+    while (test(left - 1, y)) left--;
     let right = x;
-    while (matches(right + 1, y)) right++;
+    while (test(right + 1, y)) right++;
 
-    for (let px = left; px <= right; px++) setPixel(buf, width, height, px, y, color);
+    for (let px = left; px <= right; px++) visited[y * width + px] = 1;
+    visitRun(left, right, y);
 
     // Seed the rows above and below once per contiguous run rather than once
     // per pixel.
     for (const ny of [y - 1, y + 1]) {
       let inRun = false;
       for (let px = left; px <= right; px++) {
-        if (matches(px, ny)) {
+        if (test(px, ny)) {
           if (!inRun) {
             stack.push({ x: px, y: ny });
             inRun = true;
@@ -113,4 +144,35 @@ export function fillContiguous(
       }
     }
   }
+}
+
+/**
+ * Magic wand — select the 4-connected region matching the seed pixel's exact
+ * colour (`docs/05-ui-design.md` §4.1 lists it under "Select"; the same exact-
+ * match rationale as `fillContiguous` applies — Oklab tolerance is future
+ * work, not a v1 gap this tool needs to solve alone).
+ *
+ * Operates on the active layer's raw cel, like the bucket does, not the
+ * composited image — consistent with every other paint tool's clip
+ * semantics.
+ */
+export function wandSelection(
+  buf: Uint8ClampedArray,
+  width: number,
+  height: number,
+  seedX: number,
+  seedY: number,
+): Selection | null {
+  if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return null;
+
+  const target = readColor(buf, (seedY * width + seedX) * 4);
+  const matches = (x: number, y: number): boolean =>
+    x >= 0 && x < width && y >= 0 && y < height && sameColor(buf, (y * width + x) * 4, target);
+
+  const mask = new Uint8Array(width * height);
+  walkContiguousRuns(width, height, seedX, seedY, matches, (left, right, y) => {
+    for (let px = left; px <= right; px++) mask[y * width + px] = 1;
+  });
+
+  return selectionFromMask({ x: 0, y: 0, width, height }, mask);
 }

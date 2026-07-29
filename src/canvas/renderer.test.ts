@@ -270,19 +270,44 @@ describe('drawSelection', () => {
     drawSelection(
       ctx as unknown as CanvasRenderingContext2D,
       { zoom: 4, panX: 0, panY: 0 },
-      {
-        x: 1,
-        y: 1,
-        width: 2,
-        height: 3,
-      },
+      { bounds: { x: 1, y: 1, width: 2, height: 3 } },
     );
 
-    const strokes = ctx.calls.filter((c) => c.fn === 'strokeRect');
-    expect(strokes).toHaveLength(2);
-    // Same rect both times — zoom applied, pan applied.
-    expect(strokes[0].args).toEqual(strokes[1].args);
-    expect(strokes[0].args).toEqual([4.5, 4.5, 8, 12]);
+    const strokeCalls = ctx.calls.filter((c) => c.fn === 'stroke');
+    expect(strokeCalls).toHaveLength(2);
+
+    const moveTos = ctx.calls.filter((c) => c.fn === 'moveTo');
+    // A rect has 4 edges, walked once per pass (black, then white).
+    expect(moveTos).toHaveLength(8);
+    // Same path both times — zoom applied, pan applied.
+    expect(moveTos.slice(0, 4)).toEqual(moveTos.slice(4));
+    expect(moveTos[0].args).toEqual([4.5, 4.5]);
+  });
+
+  it('draws nothing for an empty selection', () => {
+    const ctx = stubContext();
+    drawSelection(
+      ctx as unknown as CanvasRenderingContext2D,
+      { zoom: 4, panX: 0, panY: 0 },
+      { bounds: { x: 0, y: 0, width: 0, height: 0 } },
+    );
+    expect(ctx.calls).toHaveLength(0);
+  });
+
+  it("outlines a mask's real boundary, not its bounding box", () => {
+    // An L-tromino — the top-left three cells of a 2×2 square, corner cell
+    // unselected. A rectangle outline would be wrong here.
+    const mask = new Uint8Array([1, 1, 1, 0]);
+    const ctx = stubContext();
+    drawSelection(
+      ctx as unknown as CanvasRenderingContext2D,
+      { zoom: 1, panX: 0, panY: 0 },
+      { bounds: { x: 0, y: 0, width: 2, height: 2 }, mask },
+    );
+    // Perimeter of an L-tromino is 8 unit edges (3 squares × 4 sides, minus
+    // the 2 interior edges shared between adjacent selected cells).
+    const moveTos = ctx.calls.filter((c) => c.fn === 'moveTo');
+    expect(moveTos).toHaveLength(16); // 8 edges × 2 passes
   });
 });
 

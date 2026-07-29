@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getPixel } from '../model/pixelBuffers';
 import type { RGBA } from '../model/types';
-import { drawEllipse, drawRect, ellipsePoints, normalizeDrag } from './shapes';
+import { drawEllipse, drawRect, ellipsePoints, ellipseSelection, normalizeDrag } from './shapes';
 import { ellipse, line, rectangle } from './line';
 import { harness, litPixels } from './testHarness';
 
@@ -54,7 +54,7 @@ describe('drawRect', () => {
 
   it('clips to a selection (`docs/08-roadmap.md` Phase 3)', () => {
     const buf = new Uint8ClampedArray(6 * 5 * 4);
-    drawRect(buf, 6, 5, 1, 1, 4, 3, RED, true, { x: 2, y: 0, width: 2, height: 5 });
+    drawRect(buf, 6, 5, 1, 1, 4, 3, RED, true, { bounds: { x: 2, y: 0, width: 2, height: 5 } });
     expect(litPixels(buf, 6, 5)).toEqual(new Set(['2,1', '3,1', '2,2', '3,2', '2,3', '3,3']));
   });
 });
@@ -132,6 +132,26 @@ describe('ellipsePoints', () => {
       '.#######.',
       '...###...',
     ]);
+  });
+});
+
+describe('ellipseSelection', () => {
+  it('masks the same pixels a filled ellipse draw would light', () => {
+    const drawn = render(9, 9, (b) => drawEllipse(b, 9, 9, 0, 0, 8, 8, RED, true));
+    const sel = ellipseSelection(0, 0, 8, 8)!;
+    for (let y = 0; y < 9; y++) {
+      for (let x = 0; x < 9; x++) {
+        const lx = x - sel.bounds.x;
+        const ly = y - sel.bounds.y;
+        const inMask =
+          lx >= 0 &&
+          ly >= 0 &&
+          lx < sel.bounds.width &&
+          ly < sel.bounds.height &&
+          sel.mask![ly * sel.bounds.width + lx] === 1;
+        expect(inMask).toBe(drawn[y][x] === '#');
+      }
+    }
   });
 });
 

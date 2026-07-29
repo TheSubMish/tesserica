@@ -18,8 +18,9 @@
  *   retracts an L-corner it has just drawn.
  */
 
-import type { Rect } from '../model/rect';
+import type { Selection } from '../model/selection';
 import type { RGBA } from '../model/types';
+import type { SelectMode } from '../state/toolStore';
 
 export interface ToolContext {
   /** Pixel buffer of the active cel. */
@@ -38,6 +39,8 @@ export interface ToolContext {
   shapeFill: boolean;
   /** Flood fill stops at the contiguous region rather than the whole cel. */
   fillContiguous: boolean;
+  /** Which selection shape the Select tool draws (`docs/08-roadmap.md` Phase 3). */
+  selectMode: SelectMode;
 
   /** Where the gesture started, in cel-local pixels. */
   anchor: { x: number; y: number };
@@ -45,16 +48,17 @@ export interface ToolContext {
   strokeState: Record<string, unknown>;
 
   /**
-   * The active rectangular selection, or `null` when nothing is selected
+   * The active selection, or `null` when nothing is selected
    * (`docs/08-roadmap.md` Phase 3, "selection tools + move"). Painting tools
    * clip to this; the Move tool translates its contents.
    *
-   * v1 ships **rectangular marquee only** — ellipse, lasso and magic wand are
-   * not implemented, so this stays a `Rect` rather than a general mask.
+   * A bounding `Rect` plus an optional mask (`model/selection.ts`) — the mask
+   * is what lets ellipse, lasso and magic-wand selections exist without every
+   * consumer needing a separate code path from the plain rectangular marquee.
    */
-  selection: Rect | null;
+  selection: Selection | null;
   /** Replace the selection, or pass `null` to clear it. */
-  setSelection(r: Rect | null): void;
+  setSelection(s: Selection | null): void;
 
   /** Restore the whole cel to its pointer-down state. */
   restore(): void;

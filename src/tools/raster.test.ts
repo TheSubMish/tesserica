@@ -53,7 +53,7 @@ describe('stampBrush — selection clipping', () => {
 
   it('drops pixels outside the selection', () => {
     const buf = blank(8, 8);
-    stampBrush(buf, 8, 8, 4, 4, 3, WHITE, { x: 4, y: 4, width: 1, height: 1 });
+    stampBrush(buf, 8, 8, 4, 4, 3, WHITE, { bounds: { x: 4, y: 4, width: 1, height: 1 } });
     expect(litPixels(buf, 8, 8)).toEqual(new Set(['4,4']));
   });
 });
@@ -99,7 +99,7 @@ describe('drawLine', () => {
 
   it('confines itself to a selection (`docs/08-roadmap.md` Phase 3)', () => {
     const buf = blank(8, 8);
-    drawLine(buf, 8, 8, 0, 5, 6, 5, 1, WHITE, { x: 2, y: 0, width: 3, height: 8 });
+    drawLine(buf, 8, 8, 0, 5, 6, 5, 1, WHITE, { bounds: { x: 2, y: 0, width: 3, height: 8 } });
     expect(litPixels(buf, 8, 8)).toEqual(new Set(['2,5', '3,5', '4,5']));
   });
 });

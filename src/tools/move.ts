@@ -6,23 +6,37 @@
  * its pointer-down state and redraw from scratch on every move, rather than
  * accumulating a translation onto the live buffer. That is what keeps a fast,
  * jittery drag from smearing copies of the moved region across the canvas.
+ *
+ * Respects a non-rectangular selection's mask: extracting and clearing only
+ * touch pixels the mask actually selects, so moving an ellipse or lasso
+ * selection does not disturb the rest of its bounding box.
  */
 
 import { getPixel, setPixel } from '../model/pixelBuffers';
 import { intersectRect, type Rect } from '../model/rect';
+import { selectionContains, type Selection } from '../model/selection';
 import type { Tool } from './Tool';
 
-/** Copy of a region's pixels, row-major, `width × height × 4` bytes. */
+/**
+ * Copy of a region's pixels, row-major, `width × height × 4` bytes. Pixels
+ * outside `sel` (when it carries a mask) are left as transparent zero, so
+ * `pasteRegion`'s "skip zero-alpha" check naturally leaves them untouched at
+ * the destination.
+ */
 function extractRegion(
   buf: Uint8ClampedArray,
   width: number,
   height: number,
   bounds: Rect,
+  sel: Selection | null,
 ): Uint8ClampedArray {
   const out = new Uint8ClampedArray(bounds.width * bounds.height * 4);
   for (let y = 0; y < bounds.height; y++) {
     for (let x = 0; x < bounds.width; x++) {
-      const p = getPixel(buf, width, height, bounds.x + x, bounds.y + y) ?? [0, 0, 0, 0];
+      const gx = bounds.x + x;
+      const gy = bounds.y + y;
+      if (!selectionContains(sel, gx, gy)) continue;
+      const p = getPixel(buf, width, height, gx, gy) ?? [0, 0, 0, 0];
       const i = (y * bounds.width + x) * 4;
       out.set(p, i);
     }
@@ -30,10 +44,20 @@ function extractRegion(
   return out;
 }
 
-function clearRegion(buf: Uint8ClampedArray, width: number, height: number, bounds: Rect): void {
+/** Only clears pixels the mask actually selected — never the whole bounding box. */
+function clearRegion(
+  buf: Uint8ClampedArray,
+  width: number,
+  height: number,
+  bounds: Rect,
+  sel: Selection | null,
+): void {
   for (let y = 0; y < bounds.height; y++) {
     for (let x = 0; x < bounds.width; x++) {
-      setPixel(buf, width, height, bounds.x + x, bounds.y + y, [0, 0, 0, 0]);
+      const gx = bounds.x + x;
+      const gy = bounds.y + y;
+      if (!selectionContains(sel, gx, gy)) continue;
+      setPixel(buf, width, height, gx, gy, [0, 0, 0, 0]);
     }
   }
 }
@@ -68,9 +92,15 @@ export const move: Tool = {
 
   onPointerDown(ctx) {
     const full: Rect = { x: 0, y: 0, width: ctx.width, height: ctx.height };
-    const bounds = intersectRect(ctx.selection ?? full, full);
+    const bounds = intersectRect(ctx.selection?.bounds ?? full, full);
     ctx.strokeState.bounds = bounds;
-    ctx.strokeState.original = extractRegion(ctx.buffer, ctx.width, ctx.height, bounds);
+    ctx.strokeState.original = extractRegion(
+      ctx.buffer,
+      ctx.width,
+      ctx.height,
+      bounds,
+      ctx.selection,
+    );
   },
 
   onPointerMove(ctx, x, y) {
@@ -81,7 +111,9 @@ export const move: Tool = {
     const dx = x - ctx.anchor.x;
     const dy = y - ctx.anchor.y;
     ctx.restore();
-    clearRegion(ctx.buffer, ctx.width, ctx.height, bounds);
+    // The selection itself does not change mid-gesture (only on pointer-up
+    // below), so clearing against the un-translated selection is correct here.
+    clearRegion(ctx.buffer, ctx.width, ctx.height, bounds, ctx.selection);
     pasteRegion(
       ctx.buffer,
       ctx.width,
@@ -101,6 +133,12 @@ export const move: Tool = {
     if (!bounds || !ctx.selection) return;
     const dx = x - ctx.anchor.x;
     const dy = y - ctx.anchor.y;
-    if (dx !== 0 || dy !== 0) ctx.setSelection({ ...bounds, x: bounds.x + dx, y: bounds.y + dy });
+    if (dx !== 0 || dy !== 0) {
+      const sel = ctx.selection;
+      ctx.setSelection({
+        ...sel,
+        bounds: { ...sel.bounds, x: sel.bounds.x + dx, y: sel.bounds.y + dy },
+      });
+    }
   },
 };

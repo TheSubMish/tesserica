@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getPixel, setPixel } from '../model/pixelBuffers';
 import type { RGBA } from '../model/types';
-import { fillContiguous, fillGlobal } from './fill';
+import { fillContiguous, fillGlobal, wandSelection } from './fill';
 import { bucket } from './bucket';
 import { harness } from './testHarness';
 
@@ -73,7 +73,7 @@ describe('fillGlobal', () => {
 
   it('only recolours matching pixels inside a selection (`docs/08-roadmap.md` Phase 3)', () => {
     const buf = blank();
-    fillGlobal(buf, W, H, 0, 0, GREEN, { x: 0, y: 0, width: 4, height: 8 });
+    fillGlobal(buf, W, H, 0, 0, GREEN, { bounds: { x: 0, y: 0, width: 4, height: 8 } });
     expect(getPixel(buf, W, H, 3, 0)).toEqual([0, 255, 0, 255]);
     expect(getPixel(buf, W, H, 4, 0)).toEqual([0, 0, 0, 0]);
   });
@@ -82,15 +82,53 @@ describe('fillGlobal', () => {
 describe('fillContiguous — selection clipping', () => {
   it('cannot flood out through the selection boundary', () => {
     const buf = blank();
-    fillContiguous(buf, W, H, 0, 0, GREEN, { x: 0, y: 0, width: 4, height: 8 });
+    fillContiguous(buf, W, H, 0, 0, GREEN, { bounds: { x: 0, y: 0, width: 4, height: 8 } });
     expect(getPixel(buf, W, H, 3, 7)).toEqual([0, 255, 0, 255]);
     expect(getPixel(buf, W, H, 4, 7)).toEqual([0, 0, 0, 0]);
   });
 
   it('ignores a seed outside the selection', () => {
     const buf = blank();
-    fillContiguous(buf, W, H, 5, 0, GREEN, { x: 0, y: 0, width: 4, height: 8 });
+    fillContiguous(buf, W, H, 5, 0, GREEN, { bounds: { x: 0, y: 0, width: 4, height: 8 } });
     expect(buf.every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe('wandSelection', () => {
+  it('selects the contiguous matching region, same footprint fillContiguous would paint', () => {
+    const buf = walled();
+    const sel = wandSelection(buf, W, H, 0, 0)!;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < 4; x++) {
+        const lx = x - sel.bounds.x;
+        const ly = y - sel.bounds.y;
+        expect(sel.mask![ly * sel.bounds.width + lx]).toBe(1);
+      }
+    }
+    // The wall itself is a different colour and must not be selected.
+    expect(sel.bounds.width).toBe(4);
+  });
+
+  it('does not leak diagonally, matching fillContiguous', () => {
+    const buf = blank();
+    for (let i = 0; i < W; i++) setPixel(buf, W, H, i, i, RED);
+    const sel = wandSelection(buf, W, H, W - 1, 0)!;
+    const gx = 0;
+    const gy = H - 1;
+    const lx = gx - sel.bounds.x;
+    const ly = gy - sel.bounds.y;
+    const inSel =
+      lx >= 0 &&
+      ly >= 0 &&
+      lx < sel.bounds.width &&
+      ly < sel.bounds.height &&
+      sel.mask![ly * sel.bounds.width + lx] === 1;
+    expect(inSel).toBe(false);
+  });
+
+  it('returns null for a seed outside the buffer', () => {
+    const buf = blank();
+    expect(wandSelection(buf, W, H, -1, 0)).toBeNull();
   });
 });
 

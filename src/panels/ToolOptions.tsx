@@ -7,7 +7,14 @@
  */
 
 import { SliderField } from '../app/SliderField';
-import { useToolStore } from '../state/toolStore';
+import { useToolStore, type SelectMode } from '../state/toolStore';
+
+const SELECT_MODES: { id: SelectMode; label: string }[] = [
+  { id: 'rect', label: 'Rect' },
+  { id: 'ellipse', label: 'Ellipse' },
+  { id: 'lasso', label: 'Lasso' },
+  { id: 'wand', label: 'Wand' },
+];
 
 export function ToolOptions() {
   const tool = useToolStore((s) => s.activeTool);
@@ -15,6 +22,7 @@ export function ToolOptions() {
   const pixelPerfect = useToolStore((s) => s.pixelPerfect);
   const shapeFill = useToolStore((s) => s.shapeFill);
   const fillContiguous = useToolStore((s) => s.fillContiguous);
+  const selectMode = useToolStore((s) => s.selectMode);
 
   const hasBrush = tool === 'pencil' || tool === 'eraser' || tool === 'line';
   const isShape = tool === 'rect' || tool === 'ellipse';
@@ -66,6 +74,22 @@ export function ToolOptions() {
           />
           Contiguous
         </label>
+      )}
+
+      {tool === 'select' && (
+        <div className="select-modes" role="radiogroup" aria-label="Selection shape">
+          {SELECT_MODES.map((m) => (
+            <label key={m.id} className="select-mode-option">
+              <input
+                type="radio"
+                name="select-mode"
+                checked={selectMode === m.id}
+                onChange={() => useToolStore.getState().setSelectMode(m.id)}
+              />
+              {m.label}
+            </label>
+          ))}
+        </div>
       )}
 
       {tool === 'eyedropper' && <p className="hint">Alt picks a colour from any tool.</p>}

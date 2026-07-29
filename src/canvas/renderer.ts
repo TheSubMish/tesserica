@@ -16,7 +16,7 @@ import { celRevision, getBuffer } from '../model/pixelBuffers';
 import { childrenOf } from '../model/layerTree';
 import { canvasCompositeOp } from './blend';
 import type { Viewport } from './coords';
-import type { Rect } from '../model/rect';
+import { selectionEdges, type Selection } from '../model/selection';
 
 /**
  * Fixed 8px in *screen* space, deliberately not scaled by zoom
@@ -372,24 +372,39 @@ export function drawBorder(ctx: CanvasRenderingContext2D, sprite: Sprite, vp: Vi
  * single-colour dashed line disappears against art of the same colour, and
  * "never encode state in colour alone" (`docs/05-ui-design.md` §8) applies to
  * the selection outline as much as anything else in the UI.
+ *
+ * Walks the mask's actual boundary edges (`model/selection.ts#selectionEdges`)
+ * rather than the bounding box, so ellipse, lasso and magic-wand selections
+ * outline their real shape instead of a rectangle around it.
  */
-export function drawSelection(ctx: CanvasRenderingContext2D, vp: Viewport, r: Rect): void {
-  const x = Math.round(vp.panX + r.x * vp.zoom) + 0.5;
-  const y = Math.round(vp.panY + r.y * vp.zoom) + 0.5;
-  const w = r.width * vp.zoom;
-  const h = r.height * vp.zoom;
+export function drawSelection(ctx: CanvasRenderingContext2D, vp: Viewport, sel: Selection): void {
+  const segments = selectionEdges(sel);
+  if (segments.length === 0) return;
+
+  const toScreen = (x: number, y: number): [number, number] => [
+    Math.round(vp.panX + x * vp.zoom) + 0.5,
+    Math.round(vp.panY + y * vp.zoom) + 0.5,
+  ];
+
+  const strokeAll = (color: string, offset: number) => {
+    ctx.strokeStyle = color;
+    ctx.lineDashOffset = offset;
+    ctx.beginPath();
+    for (const s of segments) {
+      const [x0, y0] = toScreen(s.x0, s.y0);
+      const [x1, y1] = toScreen(s.x1, s.y1);
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+    }
+    ctx.stroke();
+  };
 
   ctx.save();
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
 
-  ctx.strokeStyle = '#000000';
-  ctx.lineDashOffset = 0;
-  ctx.strokeRect(x, y, w, h);
-
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineDashOffset = 4;
-  ctx.strokeRect(x, y, w, h);
+  strokeAll('#000000', 0);
+  strokeAll('#ffffff', 4);
 
   ctx.restore();
 }

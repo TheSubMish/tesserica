@@ -412,6 +412,31 @@ select:focus-visible {
   margin: 0;
 }
 
+/* Select tool's shape choice (`docs/08-roadmap.md` Phase 3 — "selection
+   tools"): one radio group, the same footprint the checkbox options use. */
+.select-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.select-mode-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.select-mode-option input[type='radio'] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
 /* New Sprite's custom width/height (`docs/06-workflows.md` W2 step 1). */
 .dims-row {
   gap: var(--space-1);
