@@ -158,12 +158,46 @@ export interface Palette {
   source?: { kind: 'builtin' | 'lospec' | 'file' | 'custom'; ref?: string };
 }
 
+/**
+ * `docs/03-data-model.md` §2.3 — a named, inclusive range of frame *indices*
+ * (not frame ids: Aseprite's own convention, and what lets a tag survive a
+ * frame being duplicated or reordered elsewhere in the timeline without a
+ * dangling reference). "Preset tag names" (idle/walk/run/attack/hurt/death)
+ * are offered by the UI on creation, not enforced here — `name` is a plain
+ * string so a custom name is exactly as valid as a preset one.
+ *
+ * **Implementation note.** `03-data-model.md`'s sketch of `Tag` has no `id`
+ * field, only `name` — but every other collection in this model (`Layer`,
+ * `Frame`, `Cel`) is addressed by a stable id rather than by name, which is
+ * what makes rename-in-place and undo/redo unambiguous even when two tags
+ * share a name (a base tag plus a hand-copied variant, say). Added `id` here
+ * for the same reason, mirroring the `LayerId`/`FrameId`/`CelId` convention;
+ * the wire format gains one extra field, camelCase either way, so no
+ * translation layer is needed on the Rust side either.
+ */
+export type TagId = string;
+
+export type TagDirection = 'forward' | 'reverse' | 'pingpong';
+
+export interface Tag {
+  id: TagId;
+  name: string;
+  /** Frame indices, inclusive. `from <= to` always holds. */
+  from: number;
+  to: number;
+  direction: TagDirection;
+  repeat?: number;
+  /** CSS color string for the tag's chip in the Timeline panel. */
+  color: string;
+}
+
 export interface Sprite {
   width: number;
   height: number;
   layers: Layer[]; // bottom → top
   frames: Frame[];
   cels: Cel[];
+  tags: Tag[];
 }
 
 export const celKey = (layerId: LayerId, frameId: FrameId): string => `${layerId}:${frameId}`;

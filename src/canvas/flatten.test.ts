@@ -54,7 +54,7 @@ function makeSprite(layers: Layer[], cels?: Partial<Cel>[]): Sprite {
       ...(cels?.[i] ?? {}),
     }));
   for (const c of list) allocateBuffer(c.id, c.width, c.height);
-  return { width: W, height: H, layers, frames: [frame], cels: list };
+  return { width: W, height: H, layers, frames: [frame], cels: list, tags: [] };
 }
 
 const px = (buf: Uint8ClampedArray, x: number, y: number) =>

@@ -23,8 +23,11 @@ import type {
   LayerBase,
   LayerId,
   Sprite,
+  Tag,
+  TagId,
 } from '../model/types';
 import { descendantIds } from '../model/layerTree';
+import { shiftTagRangeForInsert, shiftTagRangeForRemove } from '../model/tags';
 import {
   allocateBuffer,
   bumpCelRevision,
@@ -166,6 +169,17 @@ interface DocumentState {
    * that makes a link or an unlink actually correct (`history/frameCommands.ts`).
    */
   setCelLink(celId: CelId, linkedTo: CelId | undefined): void;
+
+  // ---- tags (`docs/03-data-model.md` §2.3, roadmap Phase 4 "Tags with
+  // preset names") — no pixel buffers involved, so these primitives are
+  // simpler than the layer/frame ones above: a tag is pure metadata.
+  /** Insert a tag at `index` in creation order. */
+  insertTag(tag: Tag, index: number): void;
+  /** Drop a tag. There is nothing else referencing it, so this is final. */
+  removeTagMetadata(id: TagId): void;
+  /** Patch a tag's metadata (name, range, direction, repeat, color). */
+  updateTag(id: TagId, patch: Partial<Tag>): void;
+  tagIndex(id: TagId): number;
 }
 
 function createInitialSprite(
@@ -200,7 +214,7 @@ function createInitialSprite(
   allocateBuffer(cel.id, width, height);
 
   return {
-    sprite: { width, height, layers: [layer], frames: [frame], cels: [cel] },
+    sprite: { width, height, layers: [layer], frames: [frame], cels: [cel], tags: [] },
     activeLayerId: layer.id,
     activeFrameId: frame.id,
   };
@@ -238,7 +252,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     }
 
     set((s) => ({
-      sprite,
+      // `tags` postdates this shape — a `.tess` saved before tags existed has
+      // no such field on the wire, and the Timeline panel expects an array,
+      // not `undefined` (mirrors the Rust side's `#[serde(default)]`).
+      sprite: { ...sprite, tags: sprite.tags ?? [] },
       activeLayerId: sprite.layers[sprite.layers.length - 1]?.id ?? s.activeLayerId,
       activeFrameId: sprite.frames[0]?.id ?? s.activeFrameId,
       revision: s.revision + 1,
@@ -267,7 +284,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       width,
       height,
     };
-    const sprite: Sprite = { width, height, layers: [layer], frames: [frame], cels: [cel] };
+    const sprite: Sprite = {
+      width,
+      height,
+      layers: [layer],
+      frames: [frame],
+      cels: [cel],
+      tags: [],
+    };
     get().replaceDocument(sprite, new Map());
   },
 
@@ -468,23 +492,31 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         if (cel.linkedTo) continue; // shares another cel's buffer
         if (!getBuffer(cel.id)) allocateBuffer(cel.id, cel.width, cel.height);
       }
+      const clampedIndex = Math.max(0, Math.min(index, s.sprite.frames.length));
       const frames = [...s.sprite.frames];
-      frames.splice(Math.max(0, Math.min(index, frames.length)), 0, frame);
+      frames.splice(clampedIndex, 0, frame);
+      // A tag's `from`/`to` are frame *indices* — inserting a frame anywhere
+      // at or before a tag's range has to renumber it, or the tag silently
+      // starts pointing at different content (`model/tags.ts`).
+      const tags = s.sprite.tags.map((t) => shiftTagRangeForInsert(t, clampedIndex));
       return {
-        sprite: { ...s.sprite, frames, cels: [...s.sprite.cels, ...cels] },
+        sprite: { ...s.sprite, frames, cels: [...s.sprite.cels, ...cels], tags },
         revision: s.revision + 1,
       };
     }),
 
   removeFrameMetadata: (id) =>
     set((s) => {
+      const removedIndex = s.sprite.frames.findIndex((f) => f.id === id);
       const frames = s.sprite.frames.filter((f) => f.id !== id);
       if (frames.length === s.sprite.frames.length) return s;
+      const tags = s.sprite.tags.map((t) => shiftTagRangeForRemove(t, removedIndex, frames.length));
       return {
         sprite: {
           ...s.sprite,
           frames,
           cels: s.sprite.cels.filter((c) => c.frameId !== id),
+          tags,
         },
         activeFrameId:
           s.activeFrameId === id ? (frames[0]?.id ?? s.activeFrameId) : s.activeFrameId,
@@ -525,6 +557,31 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
       revision: s.revision + 1,
     })),
+
+  insertTag: (tag, index) =>
+    set((s) => {
+      const tags = [...s.sprite.tags];
+      tags.splice(Math.max(0, Math.min(index, tags.length)), 0, tag);
+      return { sprite: { ...s.sprite, tags }, revision: s.revision + 1 };
+    }),
+
+  removeTagMetadata: (id) =>
+    set((s) => {
+      const tags = s.sprite.tags.filter((t) => t.id !== id);
+      if (tags.length === s.sprite.tags.length) return s;
+      return { sprite: { ...s.sprite, tags }, revision: s.revision + 1 };
+    }),
+
+  updateTag: (id, patch) =>
+    set((s) => ({
+      sprite: {
+        ...s.sprite,
+        tags: s.sprite.tags.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      },
+      revision: s.revision + 1,
+    })),
+
+  tagIndex: (id) => get().sprite.tags.findIndex((t) => t.id === id),
 }));
 
 export type { CelId };

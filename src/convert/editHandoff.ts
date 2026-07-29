@@ -74,6 +74,7 @@ export function conversionDocument(
     layers: [layer],
     frames: [frame],
     cels: [cel],
+    tags: [],
   };
 
   return {

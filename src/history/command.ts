@@ -12,7 +12,17 @@
  * not an object graph to mutate in place.
  */
 
-import type { Cel, CelId, Frame, FrameId, Layer, LayerId, Sprite } from '../model/types';
+import type {
+  Cel,
+  CelId,
+  Frame,
+  FrameId,
+  Layer,
+  LayerId,
+  Sprite,
+  Tag,
+  TagId,
+} from '../model/types';
 
 /**
  * The slice of `documentStore` that commands are allowed to touch. Keeping it
@@ -44,6 +54,12 @@ export interface DocumentApi {
   celsForFrame(frameId: FrameId): Cel[];
   /** Point one cel at another's buffer (`undefined` clears the link). */
   setCelLink(celId: CelId, linkedTo: CelId | undefined): void;
+
+  // ---- tags (`docs/03-data-model.md` §2.3, roadmap Phase 4 "Tags with
+  // preset names") ----
+  insertTag(tag: Tag, index: number): void;
+  removeTagMetadata(id: TagId): void;
+  updateTag(id: TagId, patch: Partial<Tag>): void;
 }
 
 export interface Command {

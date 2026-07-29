@@ -5,7 +5,13 @@ import { useDocumentStore } from './documentStore';
 
 const doc = () => useDocumentStore.getState();
 
-/** A document shaped exactly as a `.tess` load hands it back. */
+/**
+ * A document shaped exactly as a `.tess` load hands it back.
+ *
+ * Deliberately omits `tags` (cast at the end) — a `.tess` saved before tags
+ * existed has no such field on the wire, and `replaceDocument` must default
+ * it rather than hand back `undefined` for the Timeline panel to trip over.
+ */
 function loaded(): Sprite {
   return {
     width: 4,
@@ -39,7 +45,7 @@ function loaded(): Sprite {
       { id: 'c1', layerId: 'l1', frameId: 'f1', x: 0, y: 0, width: 4, height: 4 },
       { id: 'c2', layerId: 'l2', frameId: 'f1', x: 0, y: 0, width: 4, height: 4 },
     ],
-  };
+  } as unknown as Sprite;
 }
 
 describe('replaceDocument', () => {
@@ -90,6 +96,11 @@ describe('replaceDocument', () => {
 
     const ids = [...doc().sprite.layers.map((l) => l.id), ...doc().sprite.cels.map((c) => c.id)];
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('defaults tags to an empty array when the loaded sprite has none', () => {
+    doc().replaceDocument(loaded(), new Map());
+    expect(doc().sprite.tags).toEqual([]);
   });
 
   it('tracks the project path so Save can write back without asking', () => {
