@@ -377,7 +377,52 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       screen location showing the translucent "after" ghost, confirming the
       stroke landed only on the active frame's own cel while the ghosted
       frame's cel was completely untouched.
-- [ ] Tags with preset names (idle/walk/run/attack/hurt/death)
+- [x] Tags with preset names (idle/walk/run/attack/hurt/death) — `Tag`
+      (`docs/03-data-model.md` §2.3) added to `Sprite`: name, inclusive
+      `from`/`to` frame indices, `direction` (forward/reverse/pingpong),
+      optional `repeat`, `color`, plus a stable `id` the doc's own sketch
+      omits (flagged there and in `model/types.ts` — every other collection
+      here, Layer/Frame/Cel, is addressed by id, which is what makes
+      rename-in-place and undo unambiguous). `model/tags.ts` holds the pure
+      logic: preset-name/color helpers, range clamping, and — the one
+      genuinely tricky part — `shiftTagRangeForInsert`/
+      `shiftTagRangeForRemove`, which keep a tag's index-based range
+      meaningful across frame add/delete elsewhere in the timeline (verified
+      as exact inverses of each other at the same index; wired into
+      `documentStore.ts::insertFrame`/`removeFrameMetadata` so every existing
+      frame-lifecycle command carries tags along for free, undo included).
+      `history/tagCommands.ts` mirrors `frameCommands.ts`'s vocabulary one
+      axis over (add/delete existence pair, a coalescible `UpdateTagCommand`
+      patch for range/name/direction edits). Rust mirrors `Tag`/`TagDirection`
+      in `model::document` and round-trips it through `.tess`,
+      `#[serde(default)]` so a save from before tags existed still opens.
+      `panels/TimelinePanel.tsx` gets a tags row inside the existing
+      `.timeline-grid` (same column template as the frame-head/cel rows, so
+      a span always lines up with the frames it covers) — "+ Tag" opens an
+      inline form (the six presets plus a "Custom…" free-text option, and a
+      from/to range); clicking a tag's span opens a second inline row to
+      rename it, edit its range/direction, play back scoped to just its own
+      frames, or delete it. Scoped playback reuses `panels/timeline.ts::
+      startPlayback` completely unchanged — `model/tags.ts::tagFrameSequence`
+      pre-orders the tag's frames for its direction and the scheduler just
+      treats that as an ordered, looping list, the same trick whole-sprite
+      playback already relied on; only one playback (whole-sprite or one
+      tag) runs at a time. New tests: `model/tags.test.ts` (18 cases),
+      `history/tagCommands.test.ts` (17 cases: add/delete/rename/range/
+      direction, undo/redo, and frame-lifecycle interaction), 6 Rust
+      round-trip tests in
+      `model::document`/`commands::project`, and 8 new `TimelinePanel.test.tsx`
+      cases. Verified live over Chrome DevTools Protocol against the running
+      Vite dev bundle (desktop `tauri dev` not attempted, consistent with
+      this container's documented WebView flakiness): added three frames,
+      created a "walk" tag over frames 2–3 through the real form UI, confirmed
+      its colored span and name rendered in the grid, opened its editor and
+      renamed it to "run" (undo restored "walk"), played it back and watched
+      the active frame loop strictly between its own two frames — never
+      touching frame 1 or 4 — paused it, deleted the tag through the editor
+      (undo restored it, complete with its original id and range), and
+      inserted a new frame before the tag's range to confirm it shifted from
+      `[1,2]` to `[2,3]` live, matching the unit-tested shift logic exactly.
 - [ ] Export: spritesheet (+ metadata JSON), animated GIF
 - [ ] Performance: sustain target fps; **decide on WebGL2** here if Canvas2D falls short
 
