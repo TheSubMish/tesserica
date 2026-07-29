@@ -281,6 +281,12 @@ fn read_archive(path: &str, staging: &Staging) -> Result<LoadResult, AppError> {
     let mut warnings = Vec::new();
 
     for cel in &sprite.cels {
+        // A linked cel (`docs/03-data-model.md` §2.2) shares another cel's
+        // pixels and never had its own `cels/<id>.png` written — nothing to
+        // load, and no warning either, since that is the expected shape.
+        if cel.linked_to.is_some() {
+            continue;
+        }
         let name = cel_path(&cel.id);
         let mut png = Vec::new();
         match archive.by_name(&name) {
@@ -376,6 +382,7 @@ mod tests {
                 y: 0,
                 width: 2,
                 height: 2,
+                linked_to: None,
             }],
             palette: None,
         }
@@ -578,6 +585,68 @@ mod tests {
         assert_eq!(img.dimensions(), (256, 256));
         // Square source fills the frame, so the top-left is the red pixel.
         assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0, 255]);
+    }
+
+    /// A linked cel (`docs/03-data-model.md` §2.2) shares another cel's
+    /// pixels: it must not get its own `cels/<id>.png` on save, and loading it
+    /// back must neither warn about a missing file nor try to stage one.
+    #[test]
+    fn a_linked_cel_needs_no_png_of_its_own_and_loads_without_warning() {
+        let path = temp_path("linked-cel.tess");
+        let staging = Staging::default();
+
+        let mut doc = sprite();
+        doc.frames.push(Frame {
+            id: "f2".into(),
+            duration_ms: 100,
+        });
+        doc.cels.push(Cel {
+            id: "c2".into(),
+            layer_id: "l1".into(),
+            frame_id: "f2".into(),
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+            linked_to: Some("c1".into()),
+        });
+
+        let stage_id = staging.put(pixels());
+        let request = SaveProjectRequest {
+            path: path.to_string_lossy().into_owned(),
+            sprite: doc,
+            cels: vec![CelUpload {
+                cel_id: "c1".into(),
+                stage_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+
+        let names = entry_names(&path);
+        assert!(names.contains(&"cels/c1.png".to_string()));
+        assert!(!names.contains(&"cels/c2.png".to_string()));
+
+        let loaded = read_archive(&path.to_string_lossy(), &staging).unwrap();
+        assert!(loaded.warnings.is_empty());
+        assert_eq!(loaded.cels.len(), 1);
+        assert_eq!(loaded.cels[0].cel_id, "c1");
+        assert_eq!(
+            loaded
+                .sprite
+                .cels
+                .iter()
+                .find(|c| c.id == "c2")
+                .unwrap()
+                .linked_to
+                .as_deref(),
+            Some("c1")
+        );
+
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

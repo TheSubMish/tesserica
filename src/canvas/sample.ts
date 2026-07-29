@@ -13,7 +13,14 @@
 
 import { getBuffer } from '../model/pixelBuffers';
 import { childrenOf } from '../model/layerTree';
-import type { BlendMode, Cel, LayerId, RGBA, Sprite } from '../model/types';
+import {
+  celBufferId,
+  type BlendMode,
+  type Cel,
+  type LayerId,
+  type RGBA,
+  type Sprite,
+} from '../model/types';
 import { blendFunction } from './blend';
 
 /**
@@ -65,7 +72,7 @@ function sampleCel(cel: Cel, x: number, y: number): RGBA | null {
   const ly = y - cel.y;
   if (lx < 0 || ly < 0 || lx >= cel.width || ly >= cel.height) return null;
 
-  const buf = getBuffer(cel.id);
+  const buf = getBuffer(celBufferId(cel));
   if (!buf) return null;
 
   const i = (ly * cel.width + lx) * 4;

@@ -11,7 +11,14 @@
  *   4. cursor cell preview
  */
 
-import type { Cel, CelId, Layer, LayerId, Sprite } from '../model/types';
+import {
+  celBufferId,
+  type Cel,
+  type CelId,
+  type Layer,
+  type LayerId,
+  type Sprite,
+} from '../model/types';
 import { celRevision, getBuffer } from '../model/pixelBuffers';
 import { childrenOf } from '../model/layerTree';
 import { canvasCompositeOp } from './blend';
@@ -91,7 +98,7 @@ function signatureOf(sprite: Sprite, frameId: string): string {
       parts.push(
         `${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.blendMode}:` +
           `${layer.clippingMask ? 1 : 0}:` +
-          `${layer.kind === 'group' ? 'G' : cel ? `${cel.id}@${cel.x},${cel.y}#${celRevision(cel.id)}` : '-'}`,
+          `${layer.kind === 'group' ? 'G' : cel ? `${cel.id}@${cel.x},${cel.y}#${celRevision(celBufferId(cel))}` : '-'}`,
       );
       if (layer.kind === 'group') walk(layer.id);
     }
@@ -100,12 +107,21 @@ function signatureOf(sprite: Sprite, frameId: string): string {
   return parts.join('|');
 }
 
-/** The cel's pixels on their own canvas, re-uploaded only when they changed. */
+/**
+ * The cel's pixels on their own canvas, re-uploaded only when they changed.
+ *
+ * A linked cel (`docs/03-data-model.md` §2.2) has no buffer of its own, so
+ * both the pixels and the revision used to decide "did this change" are read
+ * through `celBufferId` — the cache entry itself stays keyed by the cel's own
+ * id, since two linked cels are still two distinct display slots that happen
+ * to show the same content.
+ */
 function celCanvas(cel: Cel): HTMLCanvasElement | null {
-  const buf = getBuffer(cel.id);
+  const bufferId = celBufferId(cel);
+  const buf = getBuffer(bufferId);
   if (!buf) return null;
 
-  const revision = celRevision(cel.id);
+  const revision = celRevision(bufferId);
   const cached = celCache.get(cel.id);
   if (cached && cached.revision === revision) return cached.canvas;
 

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getBuffer } from '../model/pixelBuffers';
 import { isEffectivelyLocked, isEffectivelyVisible } from '../model/layerTree';
+import { celBufferId } from '../model/types';
 import {
   beginStroke,
   finishStroke,
@@ -188,13 +189,17 @@ export function CanvasView() {
 
       const cel = doc.activeCel();
       if (!cel) return;
-      const buffer = getBuffer(cel.id);
+      // A linked cel (`docs/03-data-model.md` §2.2) has no buffer of its
+      // own — drawing on it must edit the buffer it shares, so every frame
+      // linked to it sees the stroke too.
+      const bufferId = celBufferId(cel);
+      const buffer = getBuffer(bufferId);
       if (!buffer) return;
 
       if (phase === 'down' && !tool.readOnly) {
         // One copy per gesture. The dirty rect is diffed out of it on release
         // (docs/03-data-model.md §6).
-        stroke.current = beginStroke(cel.id, buffer, cel.width, cel.height);
+        stroke.current = beginStroke(bufferId, buffer, cel.width, cel.height);
         strokeLabel.current = tool.label;
         strokeState.current = {};
       }
@@ -236,7 +241,7 @@ export function CanvasView() {
       else if (phase === 'move') tool.onPointerMove(ctx, x, y, prevX, prevY);
       else tool.onPointerUp?.(ctx, x, y);
 
-      if (!tool.readOnly) doc.touch(cel.id);
+      if (!tool.readOnly) doc.touch(bufferId);
     },
     [],
   );

@@ -247,7 +247,38 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
 
 **Goal:** W3 works.
 
-- [ ] Frames, cels, linked cels (`03` §2.2)
+- [ ] Frames, cels, linked cels (`03` §2.2) — the data model and its commands
+      landed in this pass, verified by unit test, not by real UI. `Sprite`
+      genuinely holds multiple frames now — `createLayer`/`insertLayer`
+      already built one cel per frame correctly, and the new symmetric half,
+      `createFrame`/`insertFrame`/`removeFrameMetadata`/`swapFrames`, builds
+      one cel per non-group layer. **Linked cels**: `Cel.linkedTo?: CelId`
+      (`model/types.ts`) marks a cel as sharing another cel's buffer instead
+      of owning one, always another cel on the same layer at a different
+      frame, never chained (a link always names an unlinked, "canonical"
+      cel). `celBufferId(cel)` resolves the id a cel's pixels actually live
+      under in `model/pixelBuffers.ts`, and every reader was audited and
+      updated to go through it — the renderer's cel cache and composite
+      signature, `flatten.ts`, `sample.ts`, `CanvasView`'s drawing dispatch,
+      `.tess` save/load. `history/frameCommands.ts` adds undoable
+      add/delete/duplicate/reorder frame and link/unlink cel, mirroring
+      `layerCommands.ts`'s command-pattern vocabulary one axis over; deleting
+      a frame whose cel is a link's target checks the *surviving* cels before
+      releasing its buffer, since (unlike deleting a whole layer) the frames
+      that still link to it do not die in the same batch. The Rust `Cel`
+      mirrors `linkedTo` (`src-tauri/src/model/document.rs`) and `.tess`
+      round-trips it: a linked cel gets no `cels/<id>.png` of its own on save
+      and is skipped (not warned about) on load
+      (`src-tauri/src/commands/project.rs`). **Left unchecked deliberately**:
+      nothing in the shipped UI can create a second frame yet — no button
+      anywhere calls `addFrame`. Verified live instead by driving the running
+      Vite dev bundle over Chrome DevTools Protocol — dynamically importing
+      the store and `frameCommands` modules and calling `addFrame`/`linkCel`
+      directly — and confirming the canvas correctly rendered a pixel painted
+      on one frame's cel while the *other*, linked frame was the one on
+      screen, proving the shared-buffer resolution actually reaches the
+      renderer and not just the unit tests. The next item, the Timeline
+      panel, is what will make this reachable by a human.
 - [ ] Timeline **panel inside Edit** (D7 — not a third mode): layer×frame grid,
       durations, playback; hidden by default, toggleable
 - [ ] Onion skinning with tint and configurable range

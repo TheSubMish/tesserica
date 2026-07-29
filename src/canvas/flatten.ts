@@ -13,7 +13,7 @@
  * the eyedropper reports and what export writes cannot drift apart.
  */
 
-import type { Cel, Layer, LayerId, Sprite } from '../model/types';
+import { celBufferId, type Cel, type Layer, type LayerId, type Sprite } from '../model/types';
 import { getBuffer } from '../model/pixelBuffers';
 import { childrenOf } from '../model/layerTree';
 import { compositeOver } from './sample';
@@ -128,7 +128,7 @@ function flattenScope(
       own = flattenScope(sprite, frameId, layer.id);
     } else {
       const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-      const buf = cel && getBuffer(cel.id);
+      const buf = cel && getBuffer(celBufferId(cel));
       own = buf && cel ? placeCel(buf, cel, width, height) : null;
     }
     if (!own) continue;

@@ -98,4 +98,28 @@ describe('replaceDocument', () => {
     doc().setProjectPath(null);
     expect(doc().projectPath).toBeNull();
   });
+
+  it('loads a linked cel without allocating a buffer of its own', () => {
+    // Exactly what Rust hands back for a `.tess` with two frames on one
+    // layer where the second links to the first (`docs/03-data-model.md`
+    // §2.2): only the canonical cel ("c1") comes with pixels.
+    const sprite: Sprite = {
+      ...loaded(),
+      frames: [...loaded().frames, { id: 'f2', durationMs: 100 }],
+      cels: [
+        ...loaded().cels,
+        { id: 'c3', layerId: 'l1', frameId: 'f2', x: 0, y: 0, width: 4, height: 4, linkedTo: 'c1' },
+      ],
+    };
+    const c1 = new Uint8ClampedArray(4 * 4 * 4);
+    c1.set([9, 8, 7, 255], 0);
+    const pixels = new Map<string, Uint8ClampedArray>([['c1', c1]]);
+
+    doc().replaceDocument(sprite, pixels);
+
+    expect(getBuffer('c3')).toBeUndefined();
+    // The link resolves through `c1`, which the renderer/tools do via
+    // `celBufferId` — asserted here at the buffer layer this store owns.
+    expect(getPixel(getBuffer('c1')!, 4, 4, 0, 0)).toEqual([9, 8, 7, 255]);
+  });
 });

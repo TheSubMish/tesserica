@@ -18,6 +18,7 @@ import type {
   CelId,
   ConversionSource,
   Frame,
+  FrameId,
   Layer,
   LayerBase,
   LayerId,
@@ -138,6 +139,33 @@ interface DocumentState {
   activeCel(): Cel | undefined;
   celFor(layerId: LayerId, frameId: string): Cel | undefined;
   celsForLayer(layerId: LayerId): Cel[];
+
+  // ---- frames & cels (`docs/03-data-model.md` §2.2, roadmap Phase 4) ----
+  // Mirrors the layer primitives above one axis over: a `Frame` is the other
+  // half of the layer×frame grid a `Cel` sits at the intersection of.
+  /** Build a detached frame plus one blank cel per non-group layer. */
+  createFrame(durationMs?: number): { frame: Frame; cels: Cel[] };
+  /** Insert a frame at `index` in time order. */
+  insertFrame(frame: Frame, cels: Cel[], index: number): void;
+  /**
+   * Drop a frame's metadata and its cels. Buffers are **not** released —
+   * mirrors `removeLayerMetadata`, so the caller decides what survives (a
+   * still-linked cel elsewhere must keep its shared buffer alive).
+   */
+  removeFrameMetadata(id: FrameId): void;
+  /** Exchange the time-order position of two frames. */
+  swapFrames(a: FrameId, b: FrameId): void;
+  /** Patch a frame's metadata (currently just `durationMs`). */
+  updateFrame(id: FrameId, patch: Partial<Frame>): void;
+  setActiveFrame(id: FrameId): void;
+  frameIndex(id: FrameId): number;
+  celsForFrame(frameId: FrameId): Cel[];
+  /**
+   * Point one cel at another's buffer, or clear the link when `linkedTo` is
+   * `undefined`. A pure metadata patch — callers own the buffer bookkeeping
+   * that makes a link or an unlink actually correct (`history/frameCommands.ts`).
+   */
+  setCelLink(celId: CelId, linkedTo: CelId | undefined): void;
 }
 
 function createInitialSprite(
@@ -200,6 +228,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     ]);
 
     for (const cel of sprite.cels) {
+      // A linked cel has no buffer of its own — it shares `linkedTo`'s, which
+      // this same loop populates from its own entry. Allocating one here
+      // would give it independent (blank) pixels, breaking the link on load.
+      if (cel.linkedTo) continue;
       const buf = pixels.get(cel.id);
       if (buf && buf.length === cel.width * cel.height * 4) setBuffer(cel.id, buf);
       else allocateBuffer(cel.id, cel.width, cel.height);
@@ -293,6 +325,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   insertLayer: (layer, cels, index) =>
     set((s) => {
       for (const cel of cels) {
+        if (cel.linkedTo) continue; // shares another cel's buffer; nothing to allocate
         if (!getBuffer(cel.id)) allocateBuffer(cel.id, cel.width, cel.height);
       }
       const layers = [...s.sprite.layers];
@@ -382,7 +415,12 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     for (const lid of ids) {
       get()
         .celsForLayer(lid)
-        .forEach((c) => releaseBuffer(c.id));
+        .forEach((c) => {
+          // A linked cel owns no buffer of its own — every cel it could ever
+          // link to also belongs to this same layer, so its target dies in
+          // this same cascade and does not need a separate release here.
+          if (!c.linkedTo) releaseBuffer(c.id);
+        });
       get().removeLayerMetadata(lid);
     }
   },
@@ -403,6 +441,90 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       (c) => c.layerId === s.activeLayerId && c.frameId === s.activeFrameId,
     );
   },
+
+  createFrame: (durationMs = 100) => {
+    const s = get();
+    const frame: Frame = { id: makeId('f'), durationMs };
+    // One cel per non-group layer — the frame axis's mirror of `createLayer`
+    // making one cel per existing frame. Groups have no pixels of their own,
+    // so they get no cel here either.
+    const cels: Cel[] = s.sprite.layers
+      .filter((l) => l.kind !== 'group')
+      .map((l) => ({
+        id: makeId('c'),
+        layerId: l.id,
+        frameId: frame.id,
+        x: 0,
+        y: 0,
+        width: s.sprite.width,
+        height: s.sprite.height,
+      }));
+    return { frame, cels };
+  },
+
+  insertFrame: (frame, cels, index) =>
+    set((s) => {
+      for (const cel of cels) {
+        if (cel.linkedTo) continue; // shares another cel's buffer
+        if (!getBuffer(cel.id)) allocateBuffer(cel.id, cel.width, cel.height);
+      }
+      const frames = [...s.sprite.frames];
+      frames.splice(Math.max(0, Math.min(index, frames.length)), 0, frame);
+      return {
+        sprite: { ...s.sprite, frames, cels: [...s.sprite.cels, ...cels] },
+        revision: s.revision + 1,
+      };
+    }),
+
+  removeFrameMetadata: (id) =>
+    set((s) => {
+      const frames = s.sprite.frames.filter((f) => f.id !== id);
+      if (frames.length === s.sprite.frames.length) return s;
+      return {
+        sprite: {
+          ...s.sprite,
+          frames,
+          cels: s.sprite.cels.filter((c) => c.frameId !== id),
+        },
+        activeFrameId:
+          s.activeFrameId === id ? (frames[0]?.id ?? s.activeFrameId) : s.activeFrameId,
+        revision: s.revision + 1,
+      };
+    }),
+
+  swapFrames: (a, b) =>
+    set((s) => {
+      const ia = s.sprite.frames.findIndex((f) => f.id === a);
+      const ib = s.sprite.frames.findIndex((f) => f.id === b);
+      if (ia < 0 || ib < 0 || ia === ib) return s;
+      const frames = [...s.sprite.frames];
+      [frames[ia], frames[ib]] = [frames[ib], frames[ia]];
+      return { sprite: { ...s.sprite, frames }, revision: s.revision + 1 };
+    }),
+
+  updateFrame: (id, patch) =>
+    set((s) => ({
+      sprite: {
+        ...s.sprite,
+        frames: s.sprite.frames.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+      },
+      revision: s.revision + 1,
+    })),
+
+  setActiveFrame: (id) => set({ activeFrameId: id }),
+
+  frameIndex: (id) => get().sprite.frames.findIndex((f) => f.id === id),
+
+  celsForFrame: (frameId) => get().sprite.cels.filter((c) => c.frameId === frameId),
+
+  setCelLink: (celId, linkedTo) =>
+    set((s) => ({
+      sprite: {
+        ...s.sprite,
+        cels: s.sprite.cels.map((c) => (c.id === celId ? { ...c, linkedTo } : c)),
+      },
+      revision: s.revision + 1,
+    })),
 }));
 
 export type { CelId };

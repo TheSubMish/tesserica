@@ -45,10 +45,18 @@ class LayerExistence {
     return n;
   }
 
-  /** Snapshot the pixels now, before the layer is removed. */
+  /**
+   * Snapshot the pixels now, before the layer is removed.
+   *
+   * A linked cel (`docs/03-data-model.md` §2.2) has no buffer of its own —
+   * `linkedTo` always names another cel *on this same layer*, so its target
+   * is captured here too and there is nothing extra to snapshot for the link
+   * itself.
+   */
   capture(): void {
     const saved = new Map<CelId, Uint8ClampedArray>();
     for (const cel of this.cels) {
+      if (cel.linkedTo) continue;
       const buf = getBuffer(cel.id);
       if (buf) saved.set(cel.id, buf);
     }
@@ -68,7 +76,12 @@ class LayerExistence {
   remove(doc: DocumentApi): void {
     this.capture();
     doc.removeLayerMetadata(this.layer.id);
-    for (const cel of this.cels) releaseBuffer(cel.id);
+    // Every cel a link on this layer could point to also belongs to this
+    // layer, so it dies in this same cascade — a linked cel never needs its
+    // target released separately, and never owned a buffer to release itself.
+    for (const cel of this.cels) {
+      if (!cel.linkedTo) releaseBuffer(cel.id);
+    }
     doc.touch();
   }
 }

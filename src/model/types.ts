@@ -111,6 +111,16 @@ export interface Frame {
  * Cels are bounded (x/y/width/height may be smaller than the sprite) in the
  * full model. Phase 0 always allocates them sprite-sized; the fields exist so
  * that bounding them later is not a schema change.
+ *
+ * **Linked cels** (`docs/03-data-model.md` §2.2): when `linkedTo` is set, this
+ * cel has no pixel buffer of its own in `model/pixelBuffers.ts` — it shares
+ * the buffer of the cel `linkedTo` points at, always another cel on the same
+ * `layerId` at a different `frameId`. Painting on either frame therefore
+ * edits the same bytes and both are updated, which is what makes "this layer
+ * doesn't change on these frames" cost one buffer instead of N. A link never
+ * chains: `linkedTo` always names a cel that is itself unlinked (the
+ * "canonical" cel), so resolving a buffer id never needs to follow more than
+ * one hop — see `celBufferId`.
  */
 export interface Cel {
   id: CelId;
@@ -120,6 +130,19 @@ export interface Cel {
   y: number;
   width: number;
   height: number;
+  linkedTo?: CelId;
+}
+
+/**
+ * The id under which a cel's pixels actually live in `model/pixelBuffers.ts`.
+ *
+ * Every reader of a cel's pixels — the renderer, the eyedropper, export,
+ * drawing tools — must resolve through this rather than using `cel.id`
+ * directly, or a linked cel would look blank instead of sharing its target's
+ * content.
+ */
+export function celBufferId(cel: Pick<Cel, 'id' | 'linkedTo'>): CelId {
+  return cel.linkedTo ?? cel.id;
 }
 
 /**

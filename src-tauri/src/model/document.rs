@@ -148,6 +148,13 @@ pub struct Frame {
 
 /// A cel is the content of one layer at one frame. Bounded — `x`/`y`/`width`/
 /// `height` may be smaller than the sprite.
+///
+/// `linked_to` (`docs/03-data-model.md` §2.2) marks this cel as sharing
+/// another cel's pixels rather than owning its own — always another cel on
+/// the same `layer_id`, at a different `frame_id`. Rust only has to round-trip
+/// the pointer: pixel buffers never cross IPC (`docs/02-architecture.md`
+/// §6.2), so nothing here resolves the link, and `commands::project` skips
+/// writing or reading a `cels/<id>.png` for a cel that has one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cel {
@@ -158,6 +165,8 @@ pub struct Cel {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_to: Option<CelId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,10 +241,46 @@ mod tests {
             y: 0,
             width: 4,
             height: 4,
+            linked_to: None,
         };
         let json = serde_json::to_value(&cel).unwrap();
         assert!(json.get("layerId").is_some());
         assert!(json.get("layer_id").is_none());
+    }
+
+    /// A cel without `linkedTo` at all (every `.tess` saved before Phase 4)
+    /// must still deserialize — `linked_to` defaults to `None`, i.e. "owns its
+    /// own pixels", exactly like the field being explicitly absent today.
+    #[test]
+    fn linked_to_defaults_to_none_when_absent() {
+        let json = serde_json::json!({
+            "id": "c1", "layerId": "l1", "frameId": "f1",
+            "x": 0, "y": 0, "width": 4, "height": 4
+        });
+        let cel: Cel = serde_json::from_value(json).unwrap();
+        assert_eq!(cel.linked_to, None);
+    }
+
+    /// A linked cel round-trips its target and is omitted from the wire form
+    /// when absent, matching `parent_id`'s "only present when it means
+    /// something" convention closely enough that a hand-written `.tess`
+    /// reader does not have to special-case an explicit `null`.
+    #[test]
+    fn linked_to_round_trips_when_present() {
+        let cel = Cel {
+            id: "c2".into(),
+            layer_id: "l1".into(),
+            frame_id: "f2".into(),
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 4,
+            linked_to: Some("c1".into()),
+        };
+        let json = serde_json::to_value(&cel).unwrap();
+        assert_eq!(json["linkedTo"], "c1");
+        let back: Cel = serde_json::from_value(json).unwrap();
+        assert_eq!(back.linked_to.as_deref(), Some("c1"));
     }
 
     /// The conversion layer has to survive a `.tess` round trip with its

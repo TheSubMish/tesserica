@@ -64,6 +64,11 @@ export async function saveCurrentProject(options: { saveAs: boolean }): Promise<
   try {
     const cels: CelUpload[] = [];
     for (const cel of doc.sprite.cels) {
+      // A linked cel (`docs/03-data-model.md` §2.2) shares another cel's
+      // buffer and therefore its PNG on disk — writing it again would be a
+      // needless duplicate at best, and Rust never has to know: `linkedTo`
+      // round-trips through `sprite.json` on its own.
+      if (cel.linkedTo) continue;
       const buf = getBuffer(cel.id);
       if (!buf) continue;
       const stageId = await stageBytes(asBytes(buf));

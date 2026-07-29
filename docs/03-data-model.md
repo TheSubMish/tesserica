@@ -126,6 +126,23 @@ a 16×16 blinking eye on a 256×256 sprite stores 1KB, not 256KB.
 
 **Linked cels** implement "this layer doesn't change on these frames."
 
+> **Implementation note (Phase 4).** Following the Phase 1 note above, `Cel` has
+> no `data`/`CelData` field in either implementation — pixels for a raster cel
+> already live externally, in `model/pixelBuffers.ts`'s `Map<CelId,
+> Uint8ClampedArray>`, addressed by id rather than inlined on the object. A
+> link is therefore not a `CelData` variant but a plain `linkedTo?: CelId` on
+> `Cel` itself: when set, this cel has no entry of its own in that map and
+> shares `linkedTo`'s instead. `linkedTo` always names another cel on the
+> *same layer* at a different frame, and always names an unlinked ("canonical")
+> cel — a link never chains, so resolving the id a cel's pixels actually live
+> under (`model/types.ts::celBufferId`) never needs more than one hop. Every
+> reader of a cel's pixels (the renderer's cel cache and dirty-composite
+> signature, `flatten.ts`, `sample.ts`, the drawing-tool dispatch in
+> `CanvasView`) resolves through `celBufferId` rather than using `cel.id`
+> directly. `.tess` mirrors this on the wire (`linked_to: Option<CelId>` on
+> the Rust `Cel`): a linked cel gets no `cels/<id>.png` of its own and is
+> skipped, not warned about, when the archive is read back.
+
 ### 2.3 Tags & Slices
 
 ```ts

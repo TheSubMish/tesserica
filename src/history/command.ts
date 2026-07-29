@@ -12,7 +12,7 @@
  * not an object graph to mutate in place.
  */
 
-import type { Cel, CelId, Layer, LayerId, Sprite } from '../model/types';
+import type { Cel, CelId, Frame, FrameId, Layer, LayerId, Sprite } from '../model/types';
 
 /**
  * The slice of `documentStore` that commands are allowed to touch. Keeping it
@@ -32,6 +32,18 @@ export interface DocumentApi {
   updateLayer(id: LayerId, patch: Partial<Layer>): void;
   setActiveLayer(id: LayerId): void;
   celsForLayer(layerId: LayerId): Cel[];
+
+  // ---- frame lifecycle (`docs/08-roadmap.md` Phase 4, "Frames, cels, linked
+  // cels") — the same command-pattern vocabulary as the layer primitives
+  // above, one level over on the other axis of the layer×frame grid.
+  insertFrame(frame: Frame, cels: Cel[], index: number): void;
+  removeFrameMetadata(id: FrameId): void;
+  swapFrames(a: FrameId, b: FrameId): void;
+  updateFrame(id: FrameId, patch: Partial<Frame>): void;
+  setActiveFrame(id: FrameId): void;
+  celsForFrame(frameId: FrameId): Cel[];
+  /** Point one cel at another's buffer (`undefined` clears the link). */
+  setCelLink(celId: CelId, linkedTo: CelId | undefined): void;
 }
 
 export interface Command {

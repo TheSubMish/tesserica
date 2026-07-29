@@ -16,7 +16,7 @@ import { convert } from '../pipeline/convert.ts';
 import { bufferFrom, type PixelBuffer } from '../pipeline/buffer.ts';
 import type { ConvertSettings } from '../pipeline/settings.ts';
 import { allocateBuffer, getBuffer } from '../model/pixelBuffers';
-import type { Cel, Frame, Layer, Sprite } from '../model/types';
+import { celBufferId, type Cel, type Frame, type Layer, type Sprite } from '../model/types';
 import { makeId, useDocumentStore } from '../state/documentStore';
 import { buildSettings, useConvertStore } from '../state/convertStore';
 import { useUIStore } from '../state/uiStore';
@@ -155,7 +155,8 @@ export function reconvertLayer(
   const cel = doc.sprite.cels.find((c) => c.layerId === layerId);
   if (!cel) throw new Error(`conversion layer ${layerId} has no cel`);
 
-  const buffer = getBuffer(cel.id) ?? allocateBuffer(cel.id, cel.width, cel.height);
+  const bufferId = celBufferId(cel);
+  const buffer = getBuffer(bufferId) ?? allocateBuffer(bufferId, cel.width, cel.height);
   buffer.set(result.image.data);
 
   doc.updateLayerSource(layerId, { sourceId: layer.source.sourceId, settings });
