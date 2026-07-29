@@ -177,6 +177,36 @@ pub struct Palette {
     pub colors: Vec<Rgba>,
 }
 
+/// `docs/03-data-model.md` §2.3 — a named, inclusive range of frame indices.
+/// Mirrors `src/model/types.ts::Tag` field for field, including the `id` that
+/// the doc's own sketch omits (see that file's comment: every other
+/// collection here is addressed by id, and this keeps rename/undo
+/// unambiguous even between two same-named tags).
+///
+/// Rust never schedules playback — it only has to round-trip a tag through
+/// `.tess` faithfully, the same division of labour as `BlendMode` and the
+/// `Group`/`Conversion` layer variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TagDirection {
+    Forward,
+    Reverse,
+    Pingpong,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub id: String,
+    pub name: String,
+    pub from: u32,
+    pub to: u32,
+    pub direction: TagDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<u32>,
+    pub color: String,
+}
+
 /// What `sprite.json` holds: everything except pixels.
 ///
 /// The TS `Sprite` inlines its layers, frames and cels rather than holding id
@@ -194,6 +224,11 @@ pub struct Sprite {
     pub cels: Vec<Cel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub palette: Option<Palette>,
+    /// `#[serde(default)]` — a `.tess` saved before tags existed has no such
+    /// field on the wire; it round-trips as an empty list rather than
+    /// refusing to load.
+    #[serde(default)]
+    pub tags: Vec<Tag>,
 }
 
 #[cfg(test)]
@@ -455,5 +490,94 @@ mod tests {
         let layer: Layer = serde_json::from_value(json).expect("deserializes");
         assert_eq!(layer.base().parent_id, None);
         assert!(!layer.base().clipping_mask);
+    }
+
+    /// Phase 4's "Tags with preset names" — a tag has to round-trip through
+    /// `.tess` with every field intact, camelCase on the wire like everything
+    /// else here.
+    #[test]
+    fn a_tag_round_trips_with_all_its_fields() {
+        let tag = Tag {
+            id: "t1".into(),
+            name: "walk".into(),
+            from: 1,
+            to: 4,
+            direction: TagDirection::Pingpong,
+            repeat: Some(3),
+            color: "#4d9de0".into(),
+        };
+        let json = serde_json::to_value(&tag).expect("serializes");
+        assert_eq!(json["name"], "walk");
+        assert_eq!(json["from"], 1);
+        assert_eq!(json["to"], 4);
+        assert_eq!(json["direction"], "pingpong");
+        assert_eq!(json["repeat"], 3);
+        assert_eq!(json["color"], "#4d9de0");
+
+        let back: Tag = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(back.id, "t1");
+        assert_eq!(back.direction, TagDirection::Pingpong);
+        assert_eq!(back.repeat, Some(3));
+    }
+
+    /// `repeat` is optional on the wire — a tag that never set one round-trips
+    /// without the key at all, matching `linked_to`'s "absent means unset"
+    /// convention.
+    #[test]
+    fn a_tag_without_repeat_omits_it_on_the_wire() {
+        let tag = Tag {
+            id: "t1".into(),
+            name: "idle".into(),
+            from: 0,
+            to: 0,
+            direction: TagDirection::Forward,
+            repeat: None,
+            color: "#e15554".into(),
+        };
+        let json = serde_json::to_value(&tag).expect("serializes");
+        assert!(json.get("repeat").is_none());
+
+        let back: Tag = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(back.repeat, None);
+    }
+
+    /// A `.tess` saved before tags existed has no `tags` field at all — the
+    /// sprite must still load, with an empty tag list, not fail.
+    #[test]
+    fn sprite_defaults_tags_to_empty_when_the_field_is_absent() {
+        let sprite: Sprite =
+            serde_json::from_str(r#"{"width":8,"height":8,"layers":[],"frames":[],"cels":[]}"#)
+                .unwrap();
+        assert!(sprite.tags.is_empty());
+    }
+
+    /// A sprite with tags round-trips them alongside everything else it holds.
+    #[test]
+    fn sprite_round_trips_its_tags() {
+        let sprite = Sprite {
+            width: 8,
+            height: 8,
+            color_mode: ColorMode::Rgba,
+            layers: vec![],
+            frames: vec![],
+            cels: vec![],
+            palette: None,
+            tags: vec![Tag {
+                id: "t1".into(),
+                name: "run".into(),
+                from: 0,
+                to: 2,
+                direction: TagDirection::Reverse,
+                repeat: None,
+                color: "#3bb273".into(),
+            }],
+        };
+        let json = serde_json::to_value(&sprite).expect("serializes");
+        assert_eq!(json["tags"][0]["name"], "run");
+        assert_eq!(json["tags"][0]["direction"], "reverse");
+
+        let back: Sprite = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(back.tags.len(), 1);
+        assert_eq!(back.tags[0].name, "run");
     }
 }

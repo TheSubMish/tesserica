@@ -385,6 +385,7 @@ mod tests {
                 linked_to: None,
             }],
             palette: None,
+            tags: vec![],
         }
     }
 
@@ -467,6 +468,74 @@ mod tests {
         // the second.
         let bytes = staging.take(loaded.cels[0].stage_id).unwrap();
         assert_eq!(bytes, pixels());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Phase 4's "Tags with preset names" — a tag round-trips through
+    /// `sprite.json` alongside layers/frames/cels, exactly like any other
+    /// piece of `Sprite` metadata.
+    #[test]
+    fn round_trips_tags_through_sprite_json() {
+        use crate::model::document::{Tag, TagDirection};
+
+        let path = temp_path("tags-roundtrip.tess");
+        let staging = Staging::default();
+        let stage_id = staging.put(pixels());
+        let thumb_id = staging.put(pixels());
+        let mut with_tag = sprite();
+        with_tag.tags = vec![Tag {
+            id: "t1".into(),
+            name: "walk".into(),
+            from: 0,
+            to: 1,
+            direction: TagDirection::Pingpong,
+            repeat: Some(2),
+            color: "#4d9de0".into(),
+        }];
+
+        let request = SaveProjectRequest {
+            path: path.to_string_lossy().into_owned(),
+            sprite: with_tag,
+            cels: vec![CelUpload {
+                cel_id: "c1".into(),
+                stage_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: Some(CelUpload {
+                cel_id: "thumb".into(),
+                stage_id: thumb_id,
+                width: 2,
+                height: 2,
+            }),
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+
+        let loaded = read_archive(&path.to_string_lossy(), &staging).unwrap();
+        assert_eq!(loaded.sprite.tags.len(), 1);
+        assert_eq!(loaded.sprite.tags[0].name, "walk");
+        assert_eq!(loaded.sprite.tags[0].from, 0);
+        assert_eq!(loaded.sprite.tags[0].to, 1);
+        assert_eq!(loaded.sprite.tags[0].direction, TagDirection::Pingpong);
+        assert_eq!(loaded.sprite.tags[0].repeat, Some(2));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A sprite saved with no tags at all opens with an empty tag list rather
+    /// than erroring — the archive-level counterpart to
+    /// `document::tests::sprite_defaults_tags_to_empty_when_the_field_is_absent`,
+    /// which checks the same default at the raw-JSON level.
+    #[test]
+    fn loads_a_pre_tags_tess_with_an_empty_tag_list() {
+        let path = temp_path("no-tags.tess");
+        let staging = Staging::default();
+        save_to(&path, &staging, None);
+
+        let loaded = read_archive(&path.to_string_lossy(), &staging).unwrap();
+        assert!(loaded.sprite.tags.is_empty());
 
         std::fs::remove_file(&path).ok();
     }
