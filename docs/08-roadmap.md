@@ -247,7 +247,7 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
 
 **Goal:** W3 works.
 
-- [ ] Frames, cels, linked cels (`03` §2.2) — the data model and its commands
+- [x] Frames, cels, linked cels (`03` §2.2) — the data model and its commands
       landed in this pass, verified by unit test, not by real UI. `Sprite`
       genuinely holds multiple frames now — `createLayer`/`insertLayer`
       already built one cel per frame correctly, and the new symmetric half,
@@ -278,9 +278,46 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       on one frame's cel while the *other*, linked frame was the one on
       screen, proving the shared-buffer resolution actually reaches the
       renderer and not just the unit tests. The next item, the Timeline
-      panel, is what will make this reachable by a human.
-- [ ] Timeline **panel inside Edit** (D7 — not a third mode): layer×frame grid,
-      durations, playback; hidden by default, toggleable
+      panel, is what will make this reachable by a human. **Correction from a
+      later pass**: the renderer's cel cache and composite signature keyed on
+      a cel's numeric pixel revision alone, not on which buffer produced it.
+      Two cels each edited exactly once both sit at revision 1, so linking one
+      to the other could leave the revision numbers coincidentally equal and
+      the canvas would silently keep showing the pre-link pixels. Both caches
+      (`canvas/renderer.ts`) now also key on `celBufferId(cel)`, which always
+      changes when a link does regardless of the revision numbers. Found by
+      the live CDP walkthrough for the Timeline panel below, not by the
+      simpler linked-cel check described above, which happened not to hit the
+      coincidence.
+- [x] Timeline **panel inside Edit** (D7 — not a third mode): layer×frame grid,
+      durations, playback; hidden by default, toggleable. `panels/TimelinePanel.tsx`
+      renders a single CSS grid — rows are `model/layerTree.ts`'s
+      `visibleLayerRows` (hoisted out of `LayerPanel` so both walk one
+      ordering function), columns are `sprite.frames` — with a filled dot for
+      an independent cel and a chain icon for a linked one. Per-frame duration
+      inputs are wired to `setFrameDuration`, coalescing one continuous edit
+      into one undo step the same way `LayerPanel`'s opacity slider does.
+      Play/pause/stop/step transport is `panels/timeline.ts`'s
+      `startPlayback`, a scheduler that re-reads the document through getters
+      on every tick (so a mid-playback frame add/delete/reorder is honoured)
+      and drives the existing `activeFrameId`-keyed canvas redraw — no new
+      rendering path. Frame lifecycle buttons call the Phase 4 commands
+      directly; a link/unlink gesture (click a cel to make it the active
+      target, then the link button on any other cel in that row) calls
+      `linkCel`/`unlinkCel`. Toggled via a title-bar button or the `T`
+      shortcut; hidden by default. Verified live over Chrome DevTools Protocol
+      against the running Vite dev bundle (Wayland container, Tauri's own
+      WebView unavailable): opened the panel, added a second frame, drew
+      distinct content on each and confirmed the grid showed both, hit play
+      and watched the canvas alternate and loop, stopped and confirmed it
+      returned to frame 1, linked a cel and confirmed the canvas immediately
+      showed the target's content (this is what caught the caching bug
+      above), confirmed edits to the canonical cel propagate live to the
+      linked one, unlinked and confirmed the copy decoupled, and confirmed
+      add/duplicate/move/delete-frame and duration edits are all undoable
+      with real `Ctrl+Z`/`Ctrl+Y` key dispatch. Unit tests cover grid
+      construction, playback timing/looping, and duration editing
+      (`panels/timeline.test.ts`, `panels/TimelinePanel.test.tsx`).
 - [ ] Onion skinning with tint and configurable range
 - [ ] Tags with preset names (idle/walk/run/attack/hurt/death)
 - [ ] Export: spritesheet (+ metadata JSON), animated GIF
