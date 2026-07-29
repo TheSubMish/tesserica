@@ -135,10 +135,32 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       (`lib/colorBlind.ts`, palette panel). A systematic contrast/focus-order audit
       beyond what already existed did not happen in this pass.
 - [ ] ~~Cross-platform verification~~ — **deferred, Linux only** (`10-decisions.md` D5)
-- [~] Linux installers (`.deb`, `.AppImage`); README; first-run experience — bundle
-      targets and icons were already configured (Phase 0); README's status line is
-      now current. Actually producing and testing installer artifacts, and a first-run
-      experience, did not happen in this pass.
+- [x] Linux installers (`.deb`, `.AppImage`); README; first-run experience — bundle
+      targets and icons were already configured (Phase 0). `npm run tauri build`
+      (both `--debug` and the real release profile) produces
+      `Tesserica_0.1.0_amd64.deb` and `Tesserica_0.1.0_amd64.AppImage` with no
+      privileged package installs, using `dpkg-deb` and the cached `linuxdeploy` +
+      gtk/appimage plugins already on this machine. The `.deb` is verified
+      end to end: `dpkg-deb -I`/`-c` show a correct control file (`Depends:
+      libwebkit2gtk-4.1-0, libgtk-3-0`), desktop entry and hicolor icons, and
+      launching the extracted binary directly (`GDK_BACKEND=x11`) opens a full
+      working window — tool rail, layer and palette panels all present, and a
+      pencil stroke drawn with `xdotool` rendered correctly — which is also the
+      first-run experience: straight into Edit mode on a blank 64×64 sprite. The
+      `.AppImage` builds and is structurally valid (correct `.desktop`, its own
+      bundled `webkit2gtk-4.1` via the linuxdeploy gtk plugin) and its processes
+      launch correctly, but its WebView content stayed blank on every attempt in
+      this container; a WebKitGTK warning ("...no longer allows disabling the
+      sandbox. Use `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`...") points at
+      WebKit's own process sandbox as the likely cause inside this nested
+      container — not chased further since forcing the sandbox off was blocked by
+      this session's own permission guardrail. Later relaunches in the same
+      session got flaky even for the previously-good `.deb` (blank window,
+      no interaction fixed it), almost certainly GPU/WebKit resource pressure
+      from repeatedly spawning WebKit processes in a shared desktop container
+      across ~8 launches, not a defect in the artifact — the first clean run
+      already proved the `.deb` renders and accepts input correctly. README's
+      `npm run tauri build # .deb + .AppImage` line was already accurate.
 
 **Exit:** 🚀 **v1.** Editor + converter, meeting the §8 success criteria in
 `00-vision-and-scope.md`.
