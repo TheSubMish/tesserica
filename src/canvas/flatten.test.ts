@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { allocateBuffer, clearAllBuffers, setPixel } from '../model/pixelBuffers';
 import type { Cel, Frame, Layer, LayerBase, Sprite } from '../model/types';
+import { useUIStore } from '../state/uiStore';
 import { flattenSprite } from './flatten';
 
 const W = 4;
@@ -173,6 +174,26 @@ describe('flattenSprite', () => {
       setPixel(allocateBuffer('cel-outerBase', W, H), W, H, 0, 0, [255, 0, 0, 255]);
       setPixel(allocateBuffer('cel-innerClip', W, H), W, H, 0, 0, [0, 0, 255, 255]);
       expect(px(flattenSprite(sprite, 'f1'), 0, 0)).toEqual([255, 0, 0, 255]);
+    });
+  });
+
+  describe('onion skinning is excluded from export', () => {
+    // Onion-skin ghosts are a `CanvasView`/`renderer.ts` display overlay only
+    // (`docs/08-roadmap.md` Phase 4). `flattenSprite` is the export path and
+    // has no import of `uiStore` at all — this test is the regression
+    // contract for that: whatever the onion-skin view state says, exporting
+    // the very same sprite/frame must produce identical bytes.
+    it('produces identical output regardless of onion-skin toggle or range', () => {
+      const sprite = makeSprite([layer('l1')]);
+      setPixel(allocateBuffer('cel-l1', W, H), W, H, 0, 0, [10, 20, 30, 255]);
+
+      useUIStore.setState({ onionSkinEnabled: false, onionSkinBefore: 1, onionSkinAfter: 1 });
+      const withoutOnionSkin = flattenSprite(sprite, 'f1');
+
+      useUIStore.setState({ onionSkinEnabled: true, onionSkinBefore: 4, onionSkinAfter: 4 });
+      const withOnionSkin = flattenSprite(sprite, 'f1');
+
+      expect(Array.from(withOnionSkin)).toEqual(Array.from(withoutOnionSkin));
     });
   });
 });
