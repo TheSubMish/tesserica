@@ -11,7 +11,14 @@
 
   --text: #e8e8ec;
   --text-muted: #9a9aa5;
-  --text-faint: #6a6a75;
+  /* Accessibility audit (`05-ui-design.md` §8, "Text contrast >=4.5:1"):
+     the original #6a6a75 measured 2.9:1 on --bg-panel and 2.6:1 on
+     --bg-elevated — a real AA failure, not a near-miss, on every place this
+     token is actually used (panel headers, status bar, hints, menu keys).
+     #898994 clears 4.5:1 against both real backgrounds it appears on
+     (--bg-panel and --bg-canvas) while staying visibly dimmer than
+     --text-muted, so the two-tier hierarchy survives. */
+  --text-faint: #898994;
 
   --accent: #6c9fff;
   --accent-muted: #3a5ba8;

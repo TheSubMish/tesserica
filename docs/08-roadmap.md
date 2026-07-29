@@ -151,9 +151,46 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       (`app/SliderField.tsx`, used by all nine sliders in the app) and `M`/`V` for
       Select/Move. Not done: a dedicated click-to-zoom `Z` tool (`Ctrl`+wheel already
       covers zoom-from-any-tool) and a preferences panel.
-- [~] Accessibility pass (`05` §8) — color-blindness simulation shipped
-      (`lib/colorBlind.ts`, palette panel). A systematic contrast/focus-order audit
-      beyond what already existed did not happen in this pass.
+- [x] Accessibility pass (`05` §8) — color-blindness simulation shipped
+      (`lib/colorBlind.ts`, palette panel) in an earlier pass; this one is the
+      systematic contrast/focus-order audit that hadn't happened yet. Computed
+      WCAG contrast for every token pair actually used in `styles/global.css`
+      against `styles/tokens.css` (`05` §6.2): `--text-faint` measured 2.9:1 on
+      `--bg-panel` and 2.6:1 on `--bg-elevated` — a real failure on panel
+      headers, the status bar, hints and menu-key hints, not a near-miss.
+      Retinted it to `#898994`, which clears 4.5:1 on every background it is
+      actually used against while staying visibly dimmer than `--text-muted`.
+      Target size: `.panel-head button` (18 layer/palette-panel icons) and
+      `.statusbar-btn` were 20×20 and 18×18 against the documented ≥24×24
+      floor; both are 24×24 now, confirmed via `getBoundingClientRect` in the
+      live app. `.statusbar-btn:focus-visible` set `outline: none` with only a
+      background swap to mark focus — not a visible ring on an 18–24px
+      control; it now matches every other focusable element (`2px solid
+      var(--accent)`). Checkbox/radio inputs were already deliberately
+      under-24px with a comment explaining the enclosing label carries the
+      target size — left alone. Focus order: walked the live DOM focus order
+      (title bar → mode tabs → tool rail → swatches → tool options → layer
+      panel → palette panel → status bar) and found it already logical with
+      no traps, but `ExportDialog` and `NewSpriteDialog` claimed
+      `aria-modal="true"` while doing nothing to back it up — no initial
+      focus, no focus trap, `Tab` could walk straight into the tool rail and
+      canvas behind the backdrop. Added `app/useModalFocusTrap.ts` (own test
+      file, 5 cases) and wired it into both dialogs: focus moves to the first
+      control on open, `Tab`/`Shift+Tab` wrap inside the dialog, `Escape`
+      closes it, and focus returns to whatever opened it. `prefers-reduced-motion`
+      and "never encode state in color alone" (active tool's bar, layer
+      visibility icons, palette-swatch outline) already held and needed no
+      change. Verified live against the real Vite bundle (the desktop
+      `tauri dev` WebView rendered blank across four fresh launches in this
+      container — the same GPU/resource-contention flakiness
+      `08-roadmap.md`'s Linux-installer note already hit, confirmed by ~30
+      unrelated Chrome/Brave renderer processes and <1.1 GB free RAM at the
+      time): drove the app over CDP, confirmed `--text-faint` computes to
+      `#898994` and both fixed controls measure exactly 24×24, and exercised
+      the real focus trap end to end (mount-focus, `Tab` wrap, `Shift+Tab`
+      wrap, `Escape`-close-with-restore) on both dialogs. Light theme itself
+      still doesn't exist (`styles/tokens.css`, "specified but not yet
+      implemented") so it is out of this audit's reach, not swept under it.
 - [ ] ~~Cross-platform verification~~ — **deferred, Linux only** (`10-decisions.md` D5)
 - [x] Linux installers (`.deb`, `.AppImage`); README; first-run experience — bundle
       targets and icons were already configured (Phase 0). `npm run tauri build`

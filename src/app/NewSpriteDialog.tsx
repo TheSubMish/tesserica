@@ -7,9 +7,10 @@
  * primitive `openProject` and `[ Edit → ]` use.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { usePaletteStore } from '../state/paletteStore';
 import { createNewSprite, MAX_SPRITE_SIZE, MIN_SPRITE_SIZE } from './newSprite';
+import { useModalFocusTrap } from './useModalFocusTrap';
 
 /** `docs/06-workflows.md` W2 step 1. */
 const PRESETS = [16, 32, 64, 128] as const;
@@ -17,6 +18,8 @@ const PRESETS = [16, 32, 64, 128] as const;
 export function NewSpriteDialog({ onClose }: { onClose: () => void }) {
   const palettes = usePaletteStore((s) => s.palettes);
   const activePaletteId = usePaletteStore((s) => s.activePaletteId);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalFocusTrap(modalRef, onClose);
 
   const [preset, setPreset] = useState<(typeof PRESETS)[number] | 'custom'>(32);
   const [width, setWidth] = useState(32);
@@ -45,6 +48,8 @@ export function NewSpriteDialog({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-label="New sprite"
+        tabIndex={-1}
+        ref={modalRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="panel-head">

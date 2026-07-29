@@ -209,8 +209,9 @@ body {
 }
 
 .panel-head button {
-  width: 20px;
-  height: 20px;
+  /* >=24x24 target size, docs/05-ui-design.md §8 — this used to be 20x20. */
+  width: 24px;
+  height: 24px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -528,8 +529,10 @@ select:focus-visible {
 }
 
 .statusbar-btn {
-  width: 18px;
-  height: 18px;
+  /* >=24x24 target size, docs/05-ui-design.md §8 — this used to be 18x18,
+     under the floor the doc sets even for "the dense tool rail". */
+  width: 24px;
+  height: 24px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -540,11 +543,19 @@ select:focus-visible {
   padding: 0;
 }
 
-.statusbar-btn:hover,
-.statusbar-btn:focus-visible {
+.statusbar-btn:hover {
   background: var(--bg-elevated);
   color: var(--text);
-  outline: none;
+}
+
+.statusbar-btn:focus-visible {
+  /* Was `outline: none` with only a background swap to signal focus — on an
+     18-24px control that is not a "visible focus ring" (§8). Match every
+     other focusable control in the app. */
+  background: var(--bg-elevated);
+  color: var(--text);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .placeholder {

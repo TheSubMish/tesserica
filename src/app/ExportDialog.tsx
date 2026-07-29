@@ -11,7 +11,7 @@
  * user ships.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { flattenSprite } from '../canvas/flatten';
 import {
@@ -23,10 +23,13 @@ import {
   type ExportScale,
 } from '../ipc/commands';
 import { useDocumentStore } from '../state/documentStore';
+import { useModalFocusTrap } from './useModalFocusTrap';
 
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const sprite = useDocumentStore((s) => s.sprite);
   const activeFrameId = useDocumentStore((s) => s.activeFrameId);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalFocusTrap(modalRef, onClose);
 
   const [scale, setScale] = useState<ExportScale>(1);
   const [busy, setBusy] = useState(false);
@@ -80,6 +83,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-label="Export PNG"
+        tabIndex={-1}
+        ref={modalRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="panel-head">
