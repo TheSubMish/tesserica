@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { addTag } from '../history/tagCommands';
 import { getBuffer, setPixel } from '../model/pixelBuffers';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
@@ -48,6 +49,12 @@ const button = (label: string) =>
 function setNativeInputValue(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
   setter.call(input, value);
+}
+
+/** Same tracker-bypass trick as `setNativeInputValue`, for `<select>`. */
+function setNativeSelectValue(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+  setter.call(select, value);
 }
 
 describe('grid construction', () => {
@@ -247,5 +254,162 @@ describe('onion skinning', () => {
     });
     expect(useUIStore.getState().onionSkinAfter).toBe(0);
     expect(useUIStore.getState().onionSkinBefore).toBe(3); // untouched by the other field
+  });
+});
+
+describe('tags', () => {
+  const tagSpans = () =>
+    container.querySelectorAll('.timeline-tag-cell:not(.timeline-tag-cell-empty)');
+  const formButton = (text: string) =>
+    [...container.querySelectorAll('.timeline-tag-form button')].find(
+      (b) => b.textContent === text,
+    ) as HTMLButtonElement;
+
+  /** 4 frames total, ready for a multi-frame tag range. */
+  function fourFrames(): void {
+    act(() => button('Add frame').click());
+    act(() => button('Add frame').click());
+    act(() => button('Add frame').click());
+    act(() => root.render(<TimelinePanel />));
+  }
+
+  it('opens a creation form offering the six preset names plus custom', () => {
+    fourFrames();
+    act(() => button('Add tag').click());
+
+    const select = container.querySelector(
+      'select[aria-label="Tag preset name"]',
+    ) as HTMLSelectElement;
+    const options = [...select.options].map((o) => o.value);
+    expect(options).toEqual(['idle', 'walk', 'run', 'attack', 'hurt', 'death', 'custom']);
+  });
+
+  it('creates a tag with the selected preset over the chosen frame range', () => {
+    fourFrames();
+    act(() => button('Add tag').click());
+    act(() => root.render(<TimelinePanel />));
+
+    const fromInput = container.querySelector(
+      'input[aria-label="Tag start frame"]',
+    ) as HTMLInputElement;
+    const toInput = container.querySelector(
+      'input[aria-label="Tag end frame"]',
+    ) as HTMLInputElement;
+    act(() => {
+      setNativeInputValue(fromInput, '2');
+      fromInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      setNativeInputValue(toInput, '3');
+      toInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => root.render(<TimelinePanel />));
+    act(() => formButton('Create').click());
+
+    expect(doc().sprite.tags).toHaveLength(1);
+    expect(doc().sprite.tags[0]).toMatchObject({ name: 'idle', from: 1, to: 2 });
+  });
+
+  it('reveals a custom-name field only when "custom" is selected, and uses it', () => {
+    fourFrames();
+    act(() => button('Add tag').click());
+    act(() => root.render(<TimelinePanel />));
+    expect(container.querySelector('input[aria-label="Custom tag name"]')).toBeNull();
+
+    const select = container.querySelector(
+      'select[aria-label="Tag preset name"]',
+    ) as HTMLSelectElement;
+    act(() => {
+      setNativeSelectValue(select, 'custom');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => root.render(<TimelinePanel />));
+
+    const customInput = container.querySelector(
+      'input[aria-label="Custom tag name"]',
+    ) as HTMLInputElement;
+    expect(customInput).not.toBeNull();
+    act(() => {
+      setNativeInputValue(customInput, 'boss intro');
+      customInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => root.render(<TimelinePanel />));
+    act(() => formButton('Create').click());
+
+    expect(doc().sprite.tags[0].name).toBe('boss intro');
+  });
+
+  it('shows the tag as a colored span over its frame range in the grid', () => {
+    fourFrames();
+    act(() => addTag('walk', 1, 2));
+    act(() => root.render(<TimelinePanel />));
+
+    expect(tagSpans()).toHaveLength(2); // frames 2 and 3 (0-indexed 1..2)
+    expect(container.querySelector('.timeline-tag-name')?.textContent).toBe('walk');
+  });
+
+  it('selecting a tag opens its editor with rename/range/direction/delete', () => {
+    fourFrames();
+    act(() => addTag('walk', 1, 2));
+    act(() => root.render(<TimelinePanel />));
+
+    act(() => (tagSpans()[0] as HTMLElement).click());
+    act(() => root.render(<TimelinePanel />));
+
+    expect(container.querySelector('input[aria-label="Tag name"]')).not.toBeNull();
+    expect(container.querySelector('select[aria-label="Tag playback direction"]')).not.toBeNull();
+  });
+
+  it('renames a tag through the editor', () => {
+    fourFrames();
+    act(() => addTag('walk', 1, 2));
+    act(() => root.render(<TimelinePanel />));
+    act(() => (tagSpans()[0] as HTMLElement).click());
+    act(() => root.render(<TimelinePanel />));
+
+    const nameInput = container.querySelector('input[aria-label="Tag name"]') as HTMLInputElement;
+    act(() => {
+      setNativeInputValue(nameInput, 'run');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(doc().sprite.tags[0].name).toBe('run');
+  });
+
+  it('deletes a tag through the editor and closes it', () => {
+    fourFrames();
+    act(() => addTag('walk', 1, 2));
+    act(() => root.render(<TimelinePanel />));
+    act(() => (tagSpans()[0] as HTMLElement).click());
+    act(() => root.render(<TimelinePanel />));
+
+    act(() => button('Delete tag walk').click());
+    act(() => root.render(<TimelinePanel />));
+
+    expect(doc().sprite.tags).toHaveLength(0);
+    expect(container.querySelector('input[aria-label="Tag name"]')).toBeNull();
+  });
+
+  it('plays back scoped to just the tag’s own frame range', () => {
+    vi.useFakeTimers();
+    fourFrames(); // frames 1..4, each defaulting to 100ms
+    act(() => addTag('walk', 1, 2)); // frames 2 and 3 (0-indexed 1,2)
+    act(() => root.render(<TimelinePanel />));
+    act(() => (tagSpans()[0] as HTMLElement).click());
+    act(() => root.render(<TimelinePanel />));
+
+    const [, f2, f3] = doc().sprite.frames;
+
+    act(() => button('Play walk').click());
+    // Playback jumps to the tag's first frame immediately.
+    expect(doc().activeFrameId).toBe(f2.id);
+
+    act(() => vi.advanceTimersByTime(100));
+    expect(doc().activeFrameId).toBe(f3.id);
+
+    act(() => vi.advanceTimersByTime(100));
+    expect(doc().activeFrameId).toBe(f2.id); // looped back within the tag's own range only
+
+    act(() => button('Pause walk').click());
   });
 });

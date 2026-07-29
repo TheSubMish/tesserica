@@ -34,8 +34,26 @@
  * The overlay itself is drawn by `CanvasView`/`canvas/renderer.ts::
  * drawOnionSkin` — this panel only owns the two numbers and the on/off
  * switch, all in `state/uiStore.ts` since they are view state, never
- * document state. Tags (`docs/08-roadmap.md` Phase 4, next bullet) are
- * deliberately not part of this panel yet.
+ * document state.
+ *
+ * **Tags** (`docs/03-data-model.md` §2.3) get their own row inside the same
+ * `.timeline-grid` — same column template as the frame-head/cel rows, so a
+ * tag's colored span always lines up with the frames it covers regardless of
+ * horizontal scroll, without duplicating the column math. `docs/05-ui-design.md`
+ * §5's prose calls these "colored spans above the frames"; its own ASCII
+ * mockup instead draws them as a flat list of chips in the toolbar, which
+ * would not stay aligned with anything — the prose is what a real grid can
+ * satisfy, so that is what this follows. The "+ Tag" button lives in that
+ * row's label column and opens a one-row inline form (name — the six presets
+ * from `model/tags.ts::TAG_PRESET_NAMES` plus a custom text field — and a
+ * from/to frame range); clicking an existing tag's span opens a second inline
+ * row to rename it, edit its range/direction, play back scoped to just its
+ * frames (`model/tags.ts::tagFrameSequence` feeds the same `startPlayback`
+ * scheduler whole-sprite playback uses below, pre-ordered for
+ * forward/reverse/pingpong so the scheduler itself needs no tag-specific
+ * branch), or delete it. Both inline rows span every column
+ * (`gridColumn: '1 / -1'`) rather than sitting in the label column alone,
+ * since their controls need more width than 140px.
  */
 
 import { Fragment, useEffect, useRef, useState, type RefObject } from 'react';
@@ -48,8 +66,10 @@ import {
   setFrameDuration,
   unlinkCel,
 } from '../history/frameCommands';
+import { addTag, deleteTag, renameTag, setTagDirection, setTagRange } from '../history/tagCommands';
 import { visibleLayerRows } from '../model/layerTree';
-import type { Cel, Frame, FrameId, Layer } from '../model/types';
+import { TAG_PRESET_NAMES, tagFrameSequence } from '../model/tags';
+import type { Cel, Frame, FrameId, Layer, Tag, TagDirection, TagId } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { MAX_ONION_SKIN_RANGE, useUIStore } from '../state/uiStore';
 import {
@@ -72,17 +92,33 @@ export function TimelinePanel() {
   const rows = visibleLayerRows(sprite.layers);
   const frames = sprite.frames;
 
-  const [playing, setPlaying] = useState(false);
+  // `'all'` is whole-sprite playback (the transport row); any other string is
+  // the id of the tag currently playing scoped to its own range. Only one
+  // playback can run at a time, sharing the single scheduler handle below —
+  // starting either kind stops the other first.
+  const [playingKind, setPlayingKind] = useState<'all' | TagId | null>(null);
   const playbackRef = useRef<PlaybackHandle | null>(null);
+  const wholePlaying = playingKind === 'all';
+  const anyPlaying = playingKind !== null;
   // One continuous edit of a duration field is one undo step; the map tracks
   // a session counter per frame the same way `LayerPanel`'s opacity slider
   // does with a single ref, just keyed by frame id since many can exist here.
   const durationSessions = useRef(new Map<FrameId, number>());
+  // Same coalescing trick, keyed by tag id, for the tag-range editor's
+  // from/to fields.
+  const tagRangeSessions = useRef(new Map<TagId, number>());
+
+  const [selectedTagId, setSelectedTagId] = useState<TagId | null>(null);
+  const [tagFormOpen, setTagFormOpen] = useState(false);
+  const [tagFormPreset, setTagFormPreset] = useState<string>(TAG_PRESET_NAMES[0]);
+  const [tagFormCustomName, setTagFormCustomName] = useState('');
+  const [tagFormFrom, setTagFormFrom] = useState(0);
+  const [tagFormTo, setTagFormTo] = useState(0);
 
   const stopPlayback = () => {
     playbackRef.current?.stop();
     playbackRef.current = null;
-    setPlaying(false);
+    setPlayingKind(null);
   };
 
   // Stop playback if the panel unmounts (e.g. it is hidden, or the app
@@ -90,23 +126,47 @@ export function TimelinePanel() {
   useEffect(() => stopPlayback, []);
 
   const togglePlay = () => {
-    if (playing) {
+    if (wholePlaying) {
       stopPlayback();
       return;
     }
     if (frames.length < 2) return;
+    stopPlayback(); // in case a tag was playing
     playbackRef.current = startPlayback(
       () => useDocumentStore.getState().sprite.frames,
       () => useDocumentStore.getState().activeFrameId,
       (frameId) => useDocumentStore.getState().setActiveFrame(frameId),
     );
-    setPlaying(true);
+    setPlayingKind('all');
   };
 
   const stop = () => {
     stopPlayback();
     const first = useDocumentStore.getState().sprite.frames[0];
     if (first) useDocumentStore.getState().setActiveFrame(first.id);
+  };
+
+  /** Playback bounded to one tag's own frame range, honouring its direction. */
+  const playTag = (tagId: TagId) => {
+    if (playingKind === tagId) {
+      stopPlayback();
+      return;
+    }
+    const getScopedFrames = () => {
+      const doc = useDocumentStore.getState();
+      const tag = doc.sprite.tags.find((t) => t.id === tagId);
+      return tag ? tagFrameSequence(doc.sprite.frames, tag) : [];
+    };
+    const first = getScopedFrames()[0];
+    if (!first) return;
+    stopPlayback(); // in case whole-sprite playback (or another tag) was running
+    useDocumentStore.getState().setActiveFrame(first.id);
+    playbackRef.current = startPlayback(
+      getScopedFrames,
+      () => useDocumentStore.getState().activeFrameId,
+      (frameId) => useDocumentStore.getState().setActiveFrame(frameId),
+    );
+    setPlayingKind(tagId);
   };
 
   const step = (delta: number) => {
@@ -135,6 +195,29 @@ export function TimelinePanel() {
     doc.setActiveFrame(frameId);
   };
 
+  const selectedTag = sprite.tags.find((t) => t.id === selectedTagId);
+
+  const openTagForm = () => {
+    if (tagFormOpen) {
+      setTagFormOpen(false);
+      return;
+    }
+    const idx = frames.findIndex((f) => f.id === activeFrameId);
+    const i = idx < 0 ? 0 : idx;
+    setTagFormFrom(i);
+    setTagFormTo(i);
+    setTagFormPreset(TAG_PRESET_NAMES[0]);
+    setTagFormCustomName('');
+    setTagFormOpen(true);
+  };
+
+  const submitTagForm = () => {
+    const name = tagFormPreset === 'custom' ? tagFormCustomName : tagFormPreset;
+    if (!name.trim()) return;
+    addTag(name, tagFormFrom, tagFormTo);
+    setTagFormOpen(false);
+  };
+
   return (
     <section className="panel timeline-panel">
       <div className="panel-head">
@@ -143,27 +226,27 @@ export function TimelinePanel() {
           <button
             title="Previous frame"
             aria-label="Previous frame"
-            disabled={playing || frames.length < 2}
+            disabled={anyPlaying || frames.length < 2}
             onClick={() => step(-1)}
           >
             ⏮
           </button>
           <button
-            title={playing ? 'Pause' : 'Play'}
-            aria-label={playing ? 'Pause' : 'Play'}
-            aria-pressed={playing}
+            title={wholePlaying ? 'Pause' : 'Play'}
+            aria-label={wholePlaying ? 'Pause' : 'Play'}
+            aria-pressed={wholePlaying}
             disabled={frames.length < 2}
             onClick={togglePlay}
           >
-            {playing ? '⏸' : '⏵'}
+            {wholePlaying ? '⏸' : '⏵'}
           </button>
-          <button title="Stop" aria-label="Stop" disabled={!playing} onClick={stop}>
+          <button title="Stop" aria-label="Stop" disabled={!anyPlaying} onClick={stop}>
             ⏹
           </button>
           <button
             title="Next frame"
             aria-label="Next frame"
-            disabled={playing || frames.length < 2}
+            disabled={anyPlaying || frames.length < 2}
             onClick={() => step(1)}
           >
             ⏭
@@ -265,6 +348,107 @@ export function TimelinePanel() {
               sessionRef={durationSessions}
             />
           ))}
+
+          <div className="timeline-tags-label">
+            <button
+              className="timeline-tag-add-btn"
+              title="Add tag"
+              aria-label="Add tag"
+              aria-pressed={tagFormOpen}
+              onClick={openTagForm}
+            >
+              + Tag
+            </button>
+          </div>
+          {frames.map((f, i) => {
+            const covering = sprite.tags.find((t) => i >= t.from && i <= t.to);
+            return (
+              <TagSpanCell
+                key={f.id}
+                index={i}
+                tag={covering}
+                selected={covering !== undefined && covering.id === selectedTagId}
+                onSelect={() =>
+                  covering && setSelectedTagId(covering.id === selectedTagId ? null : covering.id)
+                }
+              />
+            );
+          })}
+
+          {tagFormOpen && (
+            <div className="timeline-tag-form" style={{ gridColumn: '1 / -1' }}>
+              <label>
+                <span aria-hidden="true">Name</span>
+                <select
+                  aria-label="Tag preset name"
+                  value={tagFormPreset}
+                  onChange={(e) => setTagFormPreset(e.target.value)}
+                >
+                  {TAG_PRESET_NAMES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                  <option value="custom">Custom…</option>
+                </select>
+              </label>
+              {tagFormPreset === 'custom' && (
+                <input
+                  type="text"
+                  placeholder="Tag name"
+                  aria-label="Custom tag name"
+                  value={tagFormCustomName}
+                  onChange={(e) => setTagFormCustomName(e.target.value)}
+                />
+              )}
+              <label>
+                <span aria-hidden="true">From</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(frames.length, 1)}
+                  aria-label="Tag start frame"
+                  value={tagFormFrom + 1}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) setTagFormFrom(v - 1);
+                  }}
+                />
+              </label>
+              <label>
+                <span aria-hidden="true">To</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(frames.length, 1)}
+                  aria-label="Tag end frame"
+                  value={tagFormTo + 1}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) setTagFormTo(v - 1);
+                  }}
+                />
+              </label>
+              <button onClick={submitTagForm}>Create</button>
+              <button onClick={() => setTagFormOpen(false)}>Cancel</button>
+            </div>
+          )}
+
+          {selectedTag && (
+            <TagEditor
+              key={selectedTag.id}
+              tag={selectedTag}
+              frameCount={frames.length}
+              playing={playingKind === selectedTag.id}
+              sessionRef={tagRangeSessions}
+              onPlay={() => playTag(selectedTag.id)}
+              onDelete={() => {
+                deleteTag(selectedTag.id);
+                setSelectedTagId(null);
+              }}
+              onClose={() => setSelectedTagId(null)}
+            />
+          )}
 
           {rows.map(({ layer, depth }) => (
             <Fragment key={layer.id}>
@@ -417,6 +601,144 @@ function TimelineCell({
           ⇗
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * One frame-column's worth of a tag's colored span. Blank when no tag covers
+ * this index; the tag's name is only drawn in the leftmost cell of its span
+ * (`index === tag.from`) so it does not repeat once per frame the tag covers.
+ */
+function TagSpanCell({
+  index,
+  tag,
+  selected,
+  onSelect,
+}: {
+  index: number;
+  tag: Tag | undefined;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  if (!tag) {
+    return <div className="timeline-tag-cell timeline-tag-cell-empty" aria-hidden="true" />;
+  }
+  return (
+    <div
+      className={selected ? 'timeline-tag-cell timeline-tag-cell-selected' : 'timeline-tag-cell'}
+      style={{ background: tag.color }}
+      role="button"
+      tabIndex={0}
+      aria-selected={selected}
+      aria-label={`Tag ${tag.name}, frames ${tag.from + 1} to ${tag.to + 1}`}
+      title={`${tag.name} (frames ${tag.from + 1}–${tag.to + 1})`}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          onSelect();
+          e.preventDefault();
+        }
+      }}
+    >
+      {index === tag.from && <span className="timeline-tag-name">{tag.name}</span>}
+    </div>
+  );
+}
+
+/**
+ * Inline editor for the tag currently selected in the tags row — rename,
+ * edit its frame range and direction, play back scoped to just it, or delete
+ * it. Spans every grid column (`gridColumn: '1 / -1'`, set by the caller)
+ * since its controls need more room than the 140px label column.
+ */
+function TagEditor({
+  tag,
+  frameCount,
+  playing,
+  sessionRef,
+  onPlay,
+  onDelete,
+  onClose,
+}: {
+  tag: Tag;
+  frameCount: number;
+  playing: boolean;
+  sessionRef: RefObject<Map<TagId, number>>;
+  onPlay: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const bumpSession = () => {
+    const session = sessionRef.current;
+    session.set(tag.id, (session.get(tag.id) ?? 0) + 1);
+  };
+  const session = () => sessionRef.current.get(tag.id) ?? 0;
+
+  return (
+    <div className="timeline-tag-editor" style={{ gridColumn: '1 / -1' }}>
+      <input
+        type="text"
+        aria-label="Tag name"
+        value={tag.name}
+        onChange={(e) => renameTag(tag.id, e.target.value)}
+      />
+      <label>
+        <span aria-hidden="true">From</span>
+        <input
+          type="number"
+          min={1}
+          max={Math.max(frameCount, 1)}
+          aria-label="Edit tag start frame"
+          value={tag.from + 1}
+          onFocus={bumpSession}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setTagRange(tag.id, v - 1, tag.to, session());
+          }}
+        />
+      </label>
+      <label>
+        <span aria-hidden="true">To</span>
+        <input
+          type="number"
+          min={1}
+          max={Math.max(frameCount, 1)}
+          aria-label="Edit tag end frame"
+          value={tag.to + 1}
+          onFocus={bumpSession}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setTagRange(tag.id, tag.from, v - 1, session());
+          }}
+        />
+      </label>
+      <label>
+        <span aria-hidden="true">Direction</span>
+        <select
+          aria-label="Tag playback direction"
+          value={tag.direction}
+          onChange={(e) => setTagDirection(tag.id, e.target.value as TagDirection)}
+        >
+          <option value="forward">Forward</option>
+          <option value="reverse">Reverse</option>
+          <option value="pingpong">Ping-pong</option>
+        </select>
+      </label>
+      <button
+        aria-label={playing ? `Pause ${tag.name}` : `Play ${tag.name}`}
+        aria-pressed={playing}
+        disabled={frameCount < 2}
+        onClick={onPlay}
+      >
+        {playing ? '⏸' : '⏵'} tag
+      </button>
+      <button aria-label={`Delete tag ${tag.name}`} onClick={onDelete}>
+        🗑
+      </button>
+      <button aria-label="Close tag editor" onClick={onClose}>
+        ×
+      </button>
     </div>
   );
 }
