@@ -10,9 +10,12 @@ import type { Cel, Sprite } from '../model/types';
 import {
   drawCheckerboard,
   drawGrid,
+  drawOnionSkin,
   drawSelection,
   drawSprite,
   invalidateRenderCache,
+  ONION_TINT_FUTURE,
+  ONION_TINT_PAST,
 } from './renderer';
 
 /**
@@ -26,6 +29,12 @@ import {
 interface Call {
   fn: string;
   args: unknown[];
+  /** Snapshotted at call time — plain-property state (`fillStyle`,
+   *  `globalAlpha`) is not itself an argument, so tests that care which tint
+   *  or opacity was active for a given draw need it captured then, not read
+   *  off the context afterwards when only the last value would remain. */
+  fillStyle?: string;
+  globalAlpha?: number;
 }
 
 function stubContext() {
@@ -33,7 +42,11 @@ function stubContext() {
   const record =
     (fn: string) =>
     (...args: unknown[]) => {
-      calls.push({ fn, args });
+      // `ctx` is referenced, not yet assigned, at the moment each of these
+      // closures is *created* below — safe, because none of them run until
+      // a test calls them, by which point the `const ctx = {...}` assignment
+      // has long since completed.
+      calls.push({ fn, args, fillStyle: ctx.fillStyle, globalAlpha: ctx.globalAlpha });
     };
 
   const ctx = {
@@ -41,6 +54,7 @@ function stubContext() {
     imageSmoothingEnabled: true,
     globalAlpha: 1,
     fillStyle: '',
+    globalCompositeOperation: 'source-over',
     strokeStyle: '',
     lineWidth: 0,
     save: record('save'),
@@ -404,5 +418,154 @@ describe('drawGrid', () => {
 
     const verticals = ctx.calls.filter((c) => c.fn === 'moveTo').slice(0, 3);
     expect(verticals.map((c) => c.args[0])).toEqual([3.5, 13.5, 23.5]);
+  });
+});
+
+describe('drawOnionSkin', () => {
+  /** One independent cel per frame, all on a single layer. */
+  function makeAnimatedSprite(width: number, height: number, frameCount: number): Sprite {
+    const frames = Array.from({ length: frameCount }, (_, i) => ({
+      id: `f${i + 1}`,
+      durationMs: 100,
+    }));
+    const cels: Cel[] = frames.map((f, i) => {
+      const id = `cel${i + 1}`;
+      allocateBuffer(id, width, height);
+      return { id, layerId: 'l1', frameId: f.id, x: 0, y: 0, width, height };
+    });
+    return {
+      width,
+      height,
+      layers: [
+        {
+          id: 'l1',
+          kind: 'raster',
+          name: 'Layer 1',
+          visible: true,
+          locked: false,
+          opacity: 1,
+          blendMode: 'normal',
+          parentId: null,
+          clippingMask: false,
+        },
+      ],
+      frames,
+      cels,
+    };
+  }
+
+  it('draws nothing when there are no ghosts', () => {
+    stubCanvasFactory();
+    const sprite = makeAnimatedSprite(4, 4, 3);
+    const ctx = stubContext();
+
+    drawOnionSkin(
+      ctx as unknown as CanvasRenderingContext2D,
+      sprite,
+      { zoom: 4, panX: 0, panY: 0 },
+      [],
+    );
+
+    expect(ctx.calls).toHaveLength(0);
+  });
+
+  it('tints an earlier frame red and a later frame blue', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeAnimatedSprite(4, 4, 3);
+    const ctx = stubContext();
+
+    drawOnionSkin(
+      ctx as unknown as CanvasRenderingContext2D,
+      sprite,
+      { zoom: 4, panX: 0, panY: 0 },
+      [
+        { frameId: 'f1', distance: -1 },
+        { frameId: 'f3', distance: 1 },
+      ],
+    );
+
+    const tints = contexts
+      .flatMap((c) => c.calls)
+      .filter((c) => c.fn === 'fillRect')
+      .map((c) => c.fillStyle);
+    expect(tints).toEqual([ONION_TINT_PAST, ONION_TINT_FUTURE]);
+  });
+
+  it('recolours via source-atop, keeping the composite’s own alpha shape', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeAnimatedSprite(4, 4, 2);
+    const ctx = stubContext();
+
+    drawOnionSkin(
+      ctx as unknown as CanvasRenderingContext2D,
+      sprite,
+      { zoom: 4, panX: 0, panY: 0 },
+      [{ frameId: 'f2', distance: 1 }],
+    );
+
+    // The internal ghost canvas draws the frame's own composite first, then
+    // fills with the tint — `source-atop` on the fill call is what turns a
+    // full-rect fill into "only where the composite already had coverage".
+    const ghostContext = contexts.find((c) => c.calls.some((call) => call.fn === 'fillRect'))!;
+    const drawThenFill = ghostContext.calls.filter(
+      (c) => c.fn === 'drawImage' || c.fn === 'fillRect',
+    );
+    expect(drawThenFill.map((c) => c.fn)).toEqual(['drawImage', 'fillRect']);
+  });
+
+  it('fades opacity with distance from the active frame', () => {
+    stubCanvasFactory();
+    const sprite = makeAnimatedSprite(4, 4, 5);
+    const ctx = stubContext();
+
+    drawOnionSkin(
+      ctx as unknown as CanvasRenderingContext2D,
+      sprite,
+      { zoom: 4, panX: 0, panY: 0 },
+      [
+        { frameId: 'f2', distance: -1 },
+        { frameId: 'f1', distance: -2 },
+      ],
+    );
+
+    const blits = ctx.calls.filter((c) => c.fn === 'drawImage');
+    expect(blits).toHaveLength(2);
+    expect(blits[0].globalAlpha).toBeGreaterThan(blits[1].globalAlpha!);
+    expect(blits[0].globalAlpha).toBeGreaterThan(0);
+    expect(blits[1].globalAlpha).toBeGreaterThan(0);
+  });
+
+  it('resets globalAlpha to 1 once every ghost is drawn', () => {
+    stubCanvasFactory();
+    const sprite = makeAnimatedSprite(4, 4, 3);
+    const ctx = stubContext();
+
+    drawOnionSkin(
+      ctx as unknown as CanvasRenderingContext2D,
+      sprite,
+      { zoom: 4, panX: 0, panY: 0 },
+      [
+        { frameId: 'f1', distance: -1 },
+        { frameId: 'f3', distance: 1 },
+      ],
+    );
+
+    expect(ctx.globalAlpha).toBe(1);
+  });
+
+  it('blits each ghost at pan and integer zoom, like the active frame', () => {
+    stubCanvasFactory();
+    const sprite = makeAnimatedSprite(8, 6, 2);
+    const ctx = stubContext();
+
+    drawOnionSkin(
+      ctx as unknown as CanvasRenderingContext2D,
+      sprite,
+      { zoom: 5, panX: 12, panY: 9 },
+      [{ frameId: 'f2', distance: 1 }],
+    );
+
+    const blit = ctx.calls.find((c) => c.fn === 'drawImage')!;
+    expect(blit.args.slice(1)).toEqual([12, 9, 40, 30]);
   });
 });

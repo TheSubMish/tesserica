@@ -6,9 +6,10 @@
  *
  * Layer stack drawn here:
  *   1. checkerboard transparency background
- *   2. composited layers
- *   3. grid overlay
- *   4. cursor cell preview
+ *   2. onion-skin ghosts (nearby frames, tinted, underneath the active frame)
+ *   3. composited layers (the active frame)
+ *   4. grid overlay
+ *   5. cursor cell preview
  */
 
 import {
@@ -21,6 +22,7 @@ import {
 } from '../model/types';
 import { celRevision, getBuffer } from '../model/pixelBuffers';
 import { childrenOf } from '../model/layerTree';
+import type { OnionSkinGhost } from '../model/onionSkin';
 import { canvasCompositeOp } from './blend';
 import type { Viewport } from './coords';
 import { selectionEdges, type Selection } from '../model/selection';
@@ -363,6 +365,87 @@ export function drawSprite(
   // (docs/02-architecture.md §9).
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(composited, vp.panX, vp.panY, sprite.width * vp.zoom, sprite.height * vp.zoom);
+}
+
+// ---------------------------------------------------------------------------
+// Onion skinning (`docs/08-roadmap.md` Phase 4, `docs/06-workflows.md` W3
+// step 5, `docs/05-ui-design.md` §5) — tinted, translucent ghosts of nearby
+// frames drawn *underneath* the active frame's live content
+// (`CanvasView.tsx`), so an animator sees motion continuity without leaving
+// the frame being edited. Purely a rendering overlay: it never writes to a
+// cel buffer, is not part of the undo system, and `canvas/flatten.ts` (the
+// export path) has no dependency on any of this, so ghosts can never leak
+// into an exported PNG.
+//
+// Convention — asymmetric by design so direction reads without relying on
+// position alone (`docs/05-ui-design.md` §8 "never encode state in colour
+// alone" already rules out same-colour ghosts): earlier frames tint red,
+// later frames tint blue, the pairing Aseprite and Pixelorama both use.
+// Opacity falls off with distance so the immediate neighbours read clearly
+// while a further-out frame recedes rather than piling up into a solid
+// wash.
+// ---------------------------------------------------------------------------
+
+export const ONION_TINT_PAST = '#ff3b30';
+export const ONION_TINT_FUTURE = '#3aa0ff';
+
+const ONION_BASE_OPACITY = 0.5;
+/** Each step further from the active frame keeps this fraction of the last step's opacity. */
+const ONION_FALLOFF = 0.65;
+
+function onionOpacity(distance: number): number {
+  const steps = Math.abs(distance) - 1;
+  return ONION_BASE_OPACITY * Math.pow(ONION_FALLOFF, steps);
+}
+
+/**
+ * One ghost frame's composited pixels, recoloured to a flat tint while
+ * keeping the composite's own alpha shape — `source-atop` draws the fill
+ * only where the destination already has coverage, which is exactly a
+ * silhouette recolour and never touches transparent pixels.
+ *
+ * Deliberately bypasses `compositeSprite`'s single-slot cache: that cache is
+ * keyed to serve one frame (the active one) as fast as possible on every
+ * redraw, and onion skinning needs several *other* frames composited in the
+ * same pass. Reusing it here would just make the active frame's own draw
+ * immediately below invalidate and redo the work. Pooled by purpose only
+ * (not by frame or depth) because every ghost is fully drawn to the
+ * destination before the next one is composited — the same
+ * compute-then-immediately-consume pattern `compositeScope`'s own pooled
+ * canvases already rely on.
+ */
+function tintedGhostFrame(sprite: Sprite, frameId: string, tint: string): HTMLCanvasElement {
+  const composited = compositeScope(sprite, frameId, null, 0);
+  const gctx = pooled('onion-ghost', sprite.width, sprite.height);
+  gctx.drawImage(composited, 0, 0);
+  gctx.globalCompositeOperation = 'source-atop';
+  gctx.fillStyle = tint;
+  gctx.fillRect(0, 0, sprite.width, sprite.height);
+  gctx.globalCompositeOperation = 'source-over';
+  return gctx.canvas;
+}
+
+/**
+ * Draw every requested ghost frame, tinted and at reduced opacity, at
+ * document scale scaled up to screen space exactly like `drawSprite` does.
+ * Caller decides the ordering guarantee that matters (drawn before the
+ * active frame's own content so the ghosts sit underneath it).
+ */
+export function drawOnionSkin(
+  ctx: CanvasRenderingContext2D,
+  sprite: Sprite,
+  vp: Viewport,
+  ghosts: readonly OnionSkinGhost[],
+): void {
+  if (ghosts.length === 0) return;
+  ctx.imageSmoothingEnabled = false;
+  for (const ghost of ghosts) {
+    const tint = ghost.distance < 0 ? ONION_TINT_PAST : ONION_TINT_FUTURE;
+    const canvas = tintedGhostFrame(sprite, ghost.frameId, tint);
+    ctx.globalAlpha = onionOpacity(ghost.distance);
+    ctx.drawImage(canvas, vp.panX, vp.panY, sprite.width * vp.zoom, sprite.height * vp.zoom);
+  }
+  ctx.globalAlpha = 1;
 }
 
 export function drawGrid(ctx: CanvasRenderingContext2D, sprite: Sprite, vp: Viewport): void {
