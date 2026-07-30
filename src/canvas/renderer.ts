@@ -16,6 +16,7 @@ import {
   celBufferId,
   type Cel,
   type CelId,
+  type FrameId,
   type Layer,
   type LayerId,
   type Sprite,
@@ -80,6 +81,7 @@ export function invalidateRenderCache(): void {
   celCache.clear();
   compositeSignature = null;
   canvasPool.clear();
+  ghostCache.clear();
 }
 
 /**
@@ -399,6 +401,54 @@ function onionOpacity(distance: number): number {
 }
 
 /**
+ * Cache for tinted ghosts (`docs/08-roadmap.md` Phase 4 "Performance",
+ * `docs/10-decisions.md` D14).
+ *
+ * Measurement showed onion skinning at its maximum range (8 before/8 after,
+ * `state/uiStore.ts::MAX_ONION_SKIN_RANGE`) recomposited all 16 ghost frames
+ * on *every* redraw — including every pointer-move while painting, not just
+ * during animation playback — at ~112ms/tick on a 512×512, 12-raster-layer
+ * sprite (measured: `bench/animationPerf.ts`). Almost none of that work was
+ * ever necessary: a ghost frame's own pixels only change when *that* frame is
+ * actually edited, which happens on at most one frame at a time.
+ *
+ * Keyed on **frame id *and* tint**, not frame id alone. A single frame is
+ * ghosted as "before" (past, red) whenever the active frame sits just ahead
+ * of it and as "after" (future, blue) whenever the active frame sits just
+ * behind it — both happen for the *same* frame at different points in a
+ * loop, including the ordinary "1 before / 1 after" case
+ * (`docs/06-workflows.md` W3 step 5), which touches every neighbouring frame
+ * from both sides once per lap. An earlier version of this cache keyed on
+ * frame id only, so those two requests stomped on each other's entry and
+ * recomputed on effectively every touch — caught by benchmarking the 1/1
+ * case specifically, not just the 8/8 extreme, since the two happened to
+ * cost nearly the same before this fix. Two tint variants per frame is a
+ * small, fixed bound (at most 2× the frame count of small canvases), not
+ * unbounded growth.
+ */
+interface GhostCacheEntry {
+  canvas: HTMLCanvasElement;
+  signature: string;
+  frameId: FrameId;
+}
+
+const ghostCache = new Map<string, GhostCacheEntry>();
+
+function ghostCacheKey(frameId: FrameId, tint: string): string {
+  return `${frameId}|${tint}`;
+}
+
+/** Forget ghost entries for frames the document no longer contains. */
+function pruneGhostCache(sprite: Sprite): void {
+  // Up to two tint variants per live frame — see `ghostCache` above.
+  if (ghostCache.size <= sprite.frames.length * 2) return;
+  const live = new Set(sprite.frames.map((f) => f.id));
+  for (const [key, entry] of ghostCache) {
+    if (!live.has(entry.frameId)) ghostCache.delete(key);
+  }
+}
+
+/**
  * One ghost frame's composited pixels, recoloured to a flat tint while
  * keeping the composite's own alpha shape — `source-atop` draws the fill
  * only where the destination already has coverage, which is exactly a
@@ -407,22 +457,42 @@ function onionOpacity(distance: number): number {
  * Deliberately bypasses `compositeSprite`'s single-slot cache: that cache is
  * keyed to serve one frame (the active one) as fast as possible on every
  * redraw, and onion skinning needs several *other* frames composited in the
- * same pass. Reusing it here would just make the active frame's own draw
- * immediately below invalidate and redo the work. Pooled by purpose only
- * (not by frame or depth) because every ghost is fully drawn to the
- * destination before the next one is composited — the same
- * compute-then-immediately-consume pattern `compositeScope`'s own pooled
- * canvases already rely on.
+ * same pass — reusing the single slot would make the active frame's own draw
+ * immediately below invalidate and redo the work. Instead this keeps its own
+ * cache, one entry per (frame id, tint) pair, invalidated only when that
+ * frame's own composite signature actually changes — see `ghostCache` above.
+ *
+ * A cache miss composites through the same pooled scratch canvases
+ * `compositeScope` already uses, and copies the result into this cel's own
+ * *persistent* canvas before returning — the pooled canvas is still safe to
+ * recycle immediately afterwards, the same compute-then-immediately-consume
+ * pattern `compositeScope` itself relies on.
  */
-function tintedGhostFrame(sprite: Sprite, frameId: string, tint: string): HTMLCanvasElement {
+function tintedGhostFrame(sprite: Sprite, frameId: FrameId, tint: string): HTMLCanvasElement {
+  const signature = signatureOf(sprite, frameId);
+  const key = ghostCacheKey(frameId, tint);
+  const cached = ghostCache.get(key);
+  if (cached && cached.signature === signature) return cached.canvas;
+
+  const { width: w, height: h } = sprite;
   const composited = compositeScope(sprite, frameId, null, 0);
-  const gctx = pooled('onion-ghost', sprite.width, sprite.height);
+
+  const canvas = cached?.canvas ?? document.createElement('canvas');
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  const gctx = canvas.getContext('2d');
+  if (!gctx) return canvas;
+  gctx.clearRect(0, 0, w, h);
   gctx.drawImage(composited, 0, 0);
   gctx.globalCompositeOperation = 'source-atop';
   gctx.fillStyle = tint;
-  gctx.fillRect(0, 0, sprite.width, sprite.height);
+  gctx.fillRect(0, 0, w, h);
   gctx.globalCompositeOperation = 'source-over';
-  return gctx.canvas;
+
+  ghostCache.set(key, { canvas, signature, frameId });
+  return canvas;
 }
 
 /**
@@ -446,6 +516,7 @@ export function drawOnionSkin(
     ctx.drawImage(canvas, vp.panX, vp.panY, sprite.width * vp.zoom, sprite.height * vp.zoom);
   }
   ctx.globalAlpha = 1;
+  pruneGhostCache(sprite);
 }
 
 export function drawGrid(ctx: CanvasRenderingContext2D, sprite: Sprite, vp: Viewport): void {

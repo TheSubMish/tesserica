@@ -570,4 +570,68 @@ describe('drawOnionSkin', () => {
     const blit = ctx.calls.find((c) => c.fn === 'drawImage')!;
     expect(blit.args.slice(1)).toEqual([12, 9, 40, 30]);
   });
+
+  // Phase 4 "Performance" (`docs/08-roadmap.md`, `docs/10-decisions.md` D14):
+  // a per-(frame, tint) cache so a ghost frame is only ever recomposited when
+  // its own pixels actually change, not on every redraw.
+  describe('ghost caching', () => {
+    /** One `fillRect` (the tint fill) per genuine recompute. */
+    const tintFills = (contexts: StubContext[]) =>
+      contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'fillRect');
+
+    it('does not recompute a ghost frame whose content is unchanged between redraws', () => {
+      const contexts = stubCanvasFactory();
+      const sprite = makeAnimatedSprite(4, 4, 3);
+      const ctx = stubContext();
+      const ghosts = [{ frameId: 'f1', distance: -1 }];
+      const vp = { zoom: 4, panX: 0, panY: 0 };
+
+      drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, ghosts);
+      drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, ghosts);
+
+      expect(tintFills(contexts)).toHaveLength(1);
+    });
+
+    it('caches both tint directions for the same frame independently', () => {
+      // Regression: an earlier version keyed the cache on frame id alone. A
+      // single frame is ghosted as "before" (past) and "after" (future) at
+      // different points in an ordinary loop — the common "1 before / 1
+      // after" case (`docs/06-workflows.md` W3 step 5) touches every
+      // neighbour from both sides once per lap — so keying on frame id alone
+      // made each direction evict the other's entry and recompute on
+      // effectively every touch. Caught by benchmarking the realistic 1/1
+      // range, not just the 8/8 extreme (`bench/animationPerf.ts`).
+      const contexts = stubCanvasFactory();
+      const sprite = makeAnimatedSprite(4, 4, 3);
+      const ctx = stubContext();
+      const vp = { zoom: 4, panX: 0, panY: 0 };
+
+      drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, [
+        { frameId: 'f2', distance: -1 }, // f2 ghosted "before" — past tint
+      ]);
+      drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, [
+        { frameId: 'f2', distance: 1 }, // f2 ghosted "after" — future tint
+      ]);
+      drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, [
+        { frameId: 'f2', distance: -1 }, // back to "before" — must still hit
+      ]);
+
+      // Exactly one recompute per tint direction, ever — not three.
+      expect(tintFills(contexts)).toHaveLength(2);
+    });
+
+    it('recomputes a ghost once its own frame content changes', () => {
+      const contexts = stubCanvasFactory();
+      const sprite = makeAnimatedSprite(4, 4, 3);
+      const ctx = stubContext();
+      const ghosts = [{ frameId: 'f1', distance: -1 }];
+      const vp = { zoom: 4, panX: 0, panY: 0 };
+
+      drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, ghosts);
+      bumpCelRevision('cel1'); // f1's cel, per `makeAnimatedSprite`
+      drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, ghosts);
+
+      expect(tintFills(contexts)).toHaveLength(2);
+    });
+  });
 });
