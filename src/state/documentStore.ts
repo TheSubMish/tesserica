@@ -214,7 +214,15 @@ function createInitialSprite(
   allocateBuffer(cel.id, width, height);
 
   return {
-    sprite: { width, height, layers: [layer], frames: [frame], cels: [cel], tags: [] },
+    sprite: {
+      width,
+      height,
+      layers: [layer],
+      frames: [frame],
+      cels: [cel],
+      tags: [],
+      tilesets: [],
+    },
     activeLayerId: layer.id,
     activeFrameId: frame.id,
   };
@@ -291,6 +299,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       frames: [frame],
       cels: [cel],
       tags: [],
+      tilesets: [],
     };
     get().replaceDocument(sprite, new Map());
   },

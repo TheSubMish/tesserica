@@ -75,6 +75,7 @@ export function conversionDocument(
     frames: [frame],
     cels: [cel],
     tags: [],
+    tilesets: [],
   };
 
   return {

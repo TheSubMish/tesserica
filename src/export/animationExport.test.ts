@@ -45,7 +45,7 @@ function makeSprite(frameCount: number, tags: Tag[] = []): Sprite {
     // Each frame gets a distinct, recognizable color at (0,0): 10, 20, 30...
     setPixel(buf, W, H, 0, 0, [(i + 1) * 10, 0, 0, 255]);
   }
-  return { width: W, height: H, layers: [layer('a')], frames, cels, tags };
+  return { width: W, height: H, layers: [layer('a')], frames, cels, tags, tilesets: [] };
 }
 
 const px = (buf: Uint8ClampedArray, frameIndex: number, x = 0, y = 0) => {

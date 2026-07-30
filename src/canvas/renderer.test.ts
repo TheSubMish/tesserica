@@ -121,6 +121,7 @@ function makeSprite(width: number, height: number): Sprite {
     frames: [{ id: 'f1', durationMs: 100 }],
     cels: [{ id: 'cel', layerId: 'l1', frameId: 'f1', x: 0, y: 0, width, height }],
     tags: [],
+    tilesets: [],
   };
 }
 
@@ -453,6 +454,7 @@ describe('drawOnionSkin', () => {
       frames,
       cels,
       tags: [],
+      tilesets: [],
     };
   }
 

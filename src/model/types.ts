@@ -86,6 +86,55 @@ export interface ConversionSource {
   settings: ConvertSettings;
 }
 
+export type TilesetId = string;
+export type TileEntryId = string;
+
+/**
+ * `docs/03-data-model.md` §4.
+ *
+ * One entry in a `Tileset`'s tile list. The doc's own sketch does not specify
+ * what a `TileEntry` holds beyond "index 0 is always the empty tile" — this
+ * is the smallest reasonable shape consistent with `docs/02-architecture.md`
+ * §4's "pixel data stays out of React state": `TileEntry` is metadata only
+ * (an id), and its actual RGBA pixels live in `model/tileBuffers.ts`, addressed
+ * by that id, exactly the way `Cel` holds no pixels itself and
+ * `model/pixelBuffers.ts` does. Index 0's id still resolves to a real,
+ * fully-transparent buffer (`tileWidth`×`tileHeight`), so "the empty tile" is
+ * a real, drawable (no-op) tile rather than a special-cased absence.
+ */
+export interface TileEntry {
+  id: TileEntryId;
+}
+
+/**
+ * `docs/03-data-model.md` §4. A reusable set of tile images shared by one or
+ * more tilemap layers.
+ */
+export interface Tileset {
+  id: TilesetId;
+  name: string;
+  tileWidth: number;
+  tileHeight: number;
+  /** Index 0 is always the empty tile — see `model/tilesets.ts::createTileset`. */
+  tiles: TileEntry[];
+}
+
+/**
+ * `docs/03-data-model.md` §4 — v1 ships `rect` only. `isometric`/`hexagonal`
+ * are in the type from day one (D9-style extension, not migration) but
+ * nothing renders or edits them (roadmap Phase 6, Phase 7 "Isometric and
+ * hexagonal tile grids").
+ */
+export type GridShape = 'rect' | 'isometric' | 'hexagonal';
+
+export interface GridSpec {
+  shape: GridShape;
+  tileWidth: number;
+  tileHeight: number;
+  offsetX: number;
+  offsetY: number;
+}
+
 /**
  * `docs/03-data-model.md` §2.1.
  *
@@ -94,10 +143,18 @@ export interface ConversionSource {
  * editor rather than a PNG dump. `group` has no pixels of its own: its
  * members are every other layer whose `parentId` points at it, and it
  * composites as a unit (`canvas/layerTree.ts`).
+ *
+ * A `tilemap` layer's cels (one per frame, exactly like `raster`) hold no
+ * pixel buffer in `model/pixelBuffers.ts` — instead, each cel's *grid*
+ * content (which tile sits in which cell, `model/tileGridBuffers.ts`) is
+ * resolved against this layer's `tileset`/`grid` at composite time
+ * (`model/tilemapRender.ts`), the same "different buffer, same `Cel`
+ * shape" divergence `conversion` already established for re-rendered pixels.
  */
 export type Layer =
   | (LayerBase & { kind: 'raster' })
   | (LayerBase & { kind: 'group'; collapsed: boolean })
+  | (LayerBase & { kind: 'tilemap'; tilesetId: TilesetId; grid: GridSpec })
   | (LayerBase & { kind: 'conversion'; source: ConversionSource });
 
 export interface Frame {
@@ -198,6 +255,8 @@ export interface Sprite {
   frames: Frame[];
   cels: Cel[];
   tags: Tag[];
+  /** `docs/03-data-model.md` §4, roadmap Phase 6. Empty until a tileset exists. */
+  tilesets: Tileset[];
 }
 
 export const celKey = (layerId: LayerId, frameId: FrameId): string => `${layerId}:${frameId}`;

@@ -141,6 +141,7 @@ describe('reconvertLayer — live re-editing', () => {
         frames: [{ id: 'f1', durationMs: 100 }],
         cels: [{ id: 'c1', layerId: 'raster1', frameId: 'f1', x: 0, y: 0, width: 2, height: 2 }],
         tags: [],
+        tilesets: [],
       },
       new Map([['c1', new Uint8ClampedArray(16)]]),
     );

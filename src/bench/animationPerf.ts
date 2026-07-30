@@ -157,7 +157,15 @@ export function buildBenchSprite(shape: SpriteShape): { sprite: Sprite; bufferId
     }
   }
 
-  const sprite: Sprite = { width: size, height: size, layers, frames, cels, tags: [] };
+  const sprite: Sprite = {
+    width: size,
+    height: size,
+    layers,
+    frames,
+    cels,
+    tags: [],
+    tilesets: [],
+  };
   return { sprite, bufferIds };
 }
 

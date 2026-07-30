@@ -25,6 +25,7 @@ describe('celAt', () => {
     ],
     cels: [{ id: 'c1', layerId: 'l1', frameId: 'f1', x: 0, y: 0, width: 4, height: 4 }],
     tags: [],
+    tilesets: [],
   };
 
   it('finds the cel a layer has at a frame', () => {

@@ -52,7 +52,7 @@ function sprite(layers: Layer[], size = 4): { sprite: Sprite; frameId: string } 
     }));
   cels.forEach((c) => allocateBuffer(c.id, size, size));
   return {
-    sprite: { width: size, height: size, layers, frames: [frame], cels, tags: [] },
+    sprite: { width: size, height: size, layers, frames: [frame], cels, tags: [], tilesets: [] },
     frameId: frame.id,
   };
 }
