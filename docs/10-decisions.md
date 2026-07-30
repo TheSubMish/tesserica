@@ -454,8 +454,8 @@ module talks to `segment::Segmenter`, never to `ort`.
 set includes `download-binaries`, which fetches a prebuilt ONNX Runtime binary from the
 network *at build time* and links against it — a compile-time network dependency for a
 crate this project wants to isolate, and a poor fit for a Linux-only app that will
-eventually offer the runtime as an explicit, user-consented download (`07` §6, still open
-as Q9). `Cargo.toml` instead sets `default-features = false` with `["std", "ndarray",
+eventually offer the runtime as an explicit, user-consented download (`07` §6, resolved
+by D16). `Cargo.toml` instead sets `default-features = false` with `["std", "ndarray",
 "load-dynamic"]`: `ort` compiles with zero system or network dependencies, and the actual
 `libonnxruntime.so` is `dlopen`ed only when `Segmenter::load` is called with a real path —
 which is also exactly the shape "no model bundled yet, degrade cleanly" needs, since a
@@ -483,13 +483,143 @@ duplicate it).
 
 ---
 
+## D16 · ONNX Runtime size: **download on first use** (option 1), now actually built
+
+**Locked 2026-07-30.** Resolves `07-tech-stack.md` §6 / Q9, by measurement, in Phase 5 as
+scheduled. Follows from D15.
+
+**The mechanism was already mostly built without anyone deciding to build it.** D15's
+`load-dynamic` choice means `ort` never links against a system or bundled ONNX Runtime at
+compile time — the real `libonnxruntime.so` is `dlopen`ed only when `Segmenter::load` gets
+a real path. That is structurally *exactly* what option 1 ("download the runtime on first
+use") requires on the loading side. What was actually missing — checked rather than
+assumed, since `src/segment/modelDownload.ts` and `commands::segment` turned out to cover
+only the *model* download, never the runtime — was anything that **fetches** the runtime
+library itself. That is what this decision locks in and this change builds.
+
+**Real installer, measured, not estimated.** `npm run tauri build` (release profile,
+`lto`, `opt-level = "s"`, `strip = true`, matching this repo's own `[profile.release]`)
+produces the real Linux artifacts:
+
+| Artifact | Real, measured 2026-07-30 |
+|---|---|
+| `.deb` | **2.1 MB** |
+| `.AppImage` | 75 MB — see below |
+| Stripped release binary alone | 4.9 MB |
+
+Neither `u2netp.onnx` nor an ONNX Runtime library is present anywhere in either bundle
+today (`tauri.conf.json`'s `bundle` has no `resources` entry) — confirmed by listing both
+bundle trees, not assumed from the config alone. **The `.deb` is therefore the real,
+already-shipping installer size under the current architecture: 2.1 MB against a 20 MB
+budget, a 9.5× margin**, not a projection of what a future build might do. The `.AppImage`
+being 75 MB is not a budget violation of this project's own making: an AppImage bundles
+`webkit2gtk`/`gtk` itself for portability (confirmed by inspecting `Tesserica.AppDir` —
+real `libwebkit2gtk`, `libgtk-3`, `libgdk_pixbuf`, etc. sit inside it), which is a property
+of that packaging format on every Tauri/Electron/GTK app, not something this project adds
+weight to; `00-vision-and-scope.md` §8's own budget line and this table both describe "the
+Tauri binary + WebView glue," which the `.deb` (relying on the system's already-installed
+`libwebkit2gtk-4.1-0`/`libgtk-3-0`, per `08-roadmap.md`'s own Phase 3 installer item) is
+the artifact that actually measures.
+
+`07-tech-stack.md` §6's own component-estimate table previously guessed "Tauri binary +
+WebView glue ~8 MB" — the real stripped binary is 4.9 MB, half that guess.
+
+**Real current ONNX Runtime release, not the doc's ~10–15 MB guess.** Checked against the
+actual `microsoft/onnxruntime` GitHub Releases API (2026-07-30), not estimated: the latest
+tag is `v1.28.0`, and its Linux x64 CPU asset is `onnxruntime-linux-x64-1.28.0.tgz`,
+**9,125,960 bytes (8.7 MB)** as published (`Content-Length`/asset `size` from the release
+API, matched by an independent local `sha256sum` after downloading it). Extracted, the one
+file this project actually needs — `lib/libonnxruntime.so.1.28.0`, the real ELF shared
+object; the archive's other two `.so` entries alongside it are symlinks to that same file,
+plus a small `libonnxruntime_providers_shared.so` this project's CPU-only usage does not
+need — is **24,268,848 bytes (24.3 MB)**. So the *download* the user pays for the runtime
+(8.7 MB) is smaller than `07-tech-stack.md` §6's old estimate, and the *on-disk* cost once
+extracted (24.3 MB) is larger than the low end of that estimate but landing squarely
+inside the ~10–15 MB → mid-20s MB range that estimate was gesturing at; either way, since
+option 1 means neither figure is ever added to the shipped installer, both numbers matter
+only for what the confirm dialog states honestly to the user, not for the 20 MB budget
+itself.
+
+**Decision: option 1, download-on-first-use, for both the model and the runtime — and it
+is now actually implemented, not just structurally possible.** `commands::onnx_runtime`
+(`src-tauri/src/commands/onnx_runtime.rs`) extends the exact mechanism `commands::segment`
+already used for the larger model — a static info command (no network, safe on mount), a
+local status check (no network), and a save command gated on an explicit confirm click —
+rather than building a second, parallel one:
+
+- **Info/status**: `onnx_runtime_info` returns the hardcoded URL, sizes, version (`1.28.0`)
+  and license (`MIT`, re-verified against the real GitHub API repository license field);
+  `onnx_runtime_status` checks whether the extracted library already exists in the app-data
+  directory. Neither touches the network.
+- **The frontend fetch is still a plain `fetch()`**, unchanged from the model download —
+  Rust makes no network call of its own. `src/segment/modelDownload.ts`'s single
+  `downloadConsentedFile` function (generalized with two type parameters so it is no
+  longer named or shaped only for the segmentation model) is reused by both
+  `SegmentModelSection.tsx` and the new `OnnxRuntimeSection.tsx`, per this decision's own
+  "reuse it, don't build a parallel one" bar — there are still zero new frontend network
+  code paths, only a second confirm-gated caller of the one that already existed.
+- **The one genuine new piece: archive extraction.** Unlike the model (a single file),
+  upstream ships the runtime as a `.tar.gz` containing several entries. `save_downloaded_
+  onnx_runtime` verifies a sha256 of the *whole archive* first — computed against a real
+  download in this environment, since GitHub Releases does not itself publish a checksum
+  for this project to trust, the same "this project's own verification is the checksum"
+  posture D15's MD5 constant already established for the model — then decompresses
+  (`flate2`, already resolved transitively via `zip`'s `deflate-flate2` feature, now also a
+  direct dependency) and extracts (`tar`, genuinely new, small, MIT/Apache-2.0,
+  `alexcrichton/tar-rs`) only the one real regular-file entry, writing *that* under a fixed
+  name via temp-file-then-rename — the symlinks in the archive are never needed, since
+  `Segmenter::load` takes an explicit path rather than depending on the dynamic linker's
+  own conventional-name search.
+- **Every failure mode degrades, never blocks.** A checksum mismatch, an archive missing
+  the expected entry, an offline `fetch()`, or the user simply declining the confirm
+  dialog all leave background removal exactly where it already was — the flood-fill
+  fallback (`04` §8.5) — matching the "degrade rather than disappear" posture this project
+  uses everywhere else this pattern appears (D15's own note about `ort`'s pre-release
+  status; `commands::segment`'s `NoModelLoaded`, not an error).
+
+**Verified for real, not assumed:** 6 new Rust unit tests build small in-memory fixture
+`.tar.gz` archives (via `tar::Builder` + `flate2::write::GzEncoder`) to exercise checksum
+rejection, missing-entry rejection, successful extraction, overwrite of a stale prior
+download, and directory creation, without needing the real ~9 MB archive for ordinary
+`cargo test` runs. Separately, a manually-run `#[ignore]`d smoke test
+(`smoke_test_the_real_archive_passes_checksum_and_extracts`) was pointed at the *actual*
+`onnxruntime-linux-x64-1.28.0.tgz` fetched via a real `curl` against the real GitHub
+Releases URL this session, and it passed: the real sha256 matched, and extraction produced
+exactly 24,268,848 bytes — the same figure the table above states, proving the production
+constants are correct against a real download, not just internally consistent. 5 new
+frontend component tests (`OnnxRuntimeSection.test.tsx`) mirror
+`SegmentModelSection.test.tsx`'s own coverage: never downloads on mount, never downloads
+after the initial click (only the confirm step shows), cancelling the confirm never
+downloads, the save function only runs after the explicit "Download" click, and a failure
+shows an inline, retryable error. `cargo test`, `cargo clippy --all-targets -- -D
+warnings`, `npx tsc --noEmit`, `npm run lint`, `npm run test`, `npm run build`, and `npm
+run test:golden` all pass with this change (no pipeline files touched, so the golden run is
+a sanity check, not new coverage).
+
+**Pipeline wiring remains explicitly out of scope**, exactly as D15 and `commands::
+segment`'s own doc comments already disclosed for the model: nothing here calls
+`Segmenter::load` with the extracted library. This decision's contract ends at "the runtime
+library is on disk and its checksum is verified," matching the model download's own
+contract boundary.
+
+Rejected: shipping two builds, lite and full (option 2) — doubles the release-artifact
+matrix and CI surface for a cost (one optional ~24 MB library) the measured `.deb` shows
+was never actually threatening the budget; raising the budget to ~40 MB (option 3) — moot
+once the real number is 2.1 MB, and raising a budget that is not being pressured invites
+scope creep elsewhere; bundling the runtime unconditionally — would turn every install into
+an ~26 MB+ download regardless of whether the user ever touches AI background removal,
+contradicting `00-vision-and-scope.md` §7's "no image ever leaves the machine unless asked"
+posture extended to "no unrequested weight either," which is exactly why the vision
+document's own budget line already excludes the model from the count.
+
+---
+
 ## Still open — deferred, not decided
 
 These genuinely need measurement rather than a preference, and each is scheduled:
 
 | # | Question | Decide at |
 |---|---|---|
-| Q9 | ONNX Runtime size vs installer budget | **Phase 5** — leaning "download on first use" |
 | Q10 | Which segmentation model ships (`u2netp` 4.7 MB vs `isnet-general-use` 170 MB) | **Phase 5** — benchmark at 64×64 output first; the small one may be indistinguishable |
 | Q13 | Plugin / scripting API | Post-v2. Keep the effect system data-driven so it stays a natural extension point |
 
@@ -514,3 +644,4 @@ These genuinely need measurement rather than a preference, and each is scheduled
 | D13 | Editor layers cross IPC on the **raw invoke body** |
 | D14 | **Canvas2D holds** at target sizes; no WebGL2 renderer |
 | D15 | Segmentation: direct **`ort`** (not `rembg-rs`), loaded via `load-dynamic` |
+| D16 | ONNX Runtime: **download on first use**, real installer measured at 2.1 MB |

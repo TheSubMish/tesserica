@@ -329,3 +329,52 @@ export async function saveDownloadedSegmentationModel(
 ): Promise<SavedSegmentationModel> {
   return invoke<SavedSegmentationModel>('save_downloaded_segmentation_model', bytes);
 }
+
+// ---------------------------------------------------------------------------
+// On-demand ONNX Runtime native library download (`docs/10-decisions.md`
+// D16, `src/segment/OnnxRuntimeSection.tsx`). Same shape as the segmentation
+// model wrappers above, and reusing the same generic
+// `src/segment/modelDownload.ts::downloadConsentedFile` — the size question
+// `07-tech-stack.md` §6 raised was "download the runtime on first use", and
+// this is the "fetch" half of that; `segment::Segmenter` still needs a
+// caller to actually load the extracted library (separate, later work).
+// ---------------------------------------------------------------------------
+
+export interface OnnxRuntimeInfo {
+  version: string;
+  filename: string;
+  sourceUrl: string;
+  approxBytes: number;
+  extractedApproxBytes: number;
+  license: string;
+}
+
+/** Static metadata for the confirm dialog. Not a network call. */
+export async function onnxRuntimeInfo(): Promise<OnnxRuntimeInfo> {
+  return invoke<OnnxRuntimeInfo>('onnx_runtime_info');
+}
+
+export interface OnnxRuntimeStatus {
+  present: boolean;
+  path: string;
+}
+
+/** A local file-existence check only — not a network call. */
+export async function onnxRuntimeStatus(): Promise<OnnxRuntimeStatus> {
+  return invoke<OnnxRuntimeStatus>('onnx_runtime_status');
+}
+
+export interface SavedOnnxRuntime {
+  path: string;
+  bytes: number;
+}
+
+/**
+ * Hand an already-downloaded `.tar.gz` archive's bytes to Rust for checksum
+ * verification, extraction of the single shared-object entry it needs, and
+ * persistence. Call only after the frontend's own `fetch()` has succeeded —
+ * this function itself makes no network call.
+ */
+export async function saveDownloadedOnnxRuntime(bytes: ArrayBuffer): Promise<SavedOnnxRuntime> {
+  return invoke<SavedOnnxRuntime>('save_downloaded_onnx_runtime', bytes);
+}

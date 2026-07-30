@@ -4,16 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as commands from '../ipc/commands.ts';
 import * as modelDownload from './modelDownload.ts';
-import { SegmentModelSection } from './SegmentModelSection.tsx';
+import { OnnxRuntimeSection } from './OnnxRuntimeSection.tsx';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const INFO = {
-  id: 'isnet-general-use',
-  filename: 'isnet-general-use.onnx',
-  sourceUrl: 'https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx',
-  approxBytes: 178_648_008,
-  license: 'Apache-2.0',
+  version: '1.28.0',
+  filename: 'libonnxruntime.so',
+  sourceUrl:
+    'https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-linux-x64-1.28.0.tgz',
+  approxBytes: 9_125_960,
+  extractedApproxBytes: 24_268_848,
+  license: 'MIT',
 };
 
 let container: HTMLDivElement;
@@ -21,8 +23,8 @@ let root: Root;
 
 beforeEach(() => {
   vi.spyOn(commands, 'hasBackend').mockReturnValue(true);
-  vi.spyOn(commands, 'segmentationModelInfo').mockResolvedValue(INFO);
-  vi.spyOn(commands, 'segmentationModelStatus').mockResolvedValue({ present: false, path: '' });
+  vi.spyOn(commands, 'onnxRuntimeInfo').mockResolvedValue(INFO);
+  vi.spyOn(commands, 'onnxRuntimeStatus').mockResolvedValue({ present: false, path: '' });
 
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -46,11 +48,11 @@ const button = (label: string) =>
   Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label) as
     HTMLButtonElement | undefined;
 
-describe('SegmentModelSection', () => {
+describe('OnnxRuntimeSection', () => {
   it('never calls the download function on mount', async () => {
     const spy = vi.spyOn(modelDownload, 'downloadConsentedFile');
 
-    act(() => root.render(<SegmentModelSection />));
+    act(() => root.render(<OnnxRuntimeSection />));
     await flush();
 
     expect(spy).not.toHaveBeenCalled();
@@ -59,41 +61,41 @@ describe('SegmentModelSection', () => {
   it('only shows the confirm step, not a download, after the initial button click', async () => {
     const spy = vi.spyOn(modelDownload, 'downloadConsentedFile');
 
-    act(() => root.render(<SegmentModelSection />));
+    act(() => root.render(<OnnxRuntimeSection />));
     await flush();
 
-    act(() => button('Download larger model for better quality')?.click());
+    act(() => button('Download AI background-removal engine')?.click());
     await flush();
 
     expect(spy).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('170.4 MB');
+    expect(container.textContent).toContain('8.7 MB');
     expect(container.textContent).toContain('github.com');
   });
 
   it('cancelling the confirm step never triggers a download', async () => {
     const spy = vi.spyOn(modelDownload, 'downloadConsentedFile');
 
-    act(() => root.render(<SegmentModelSection />));
+    act(() => root.render(<OnnxRuntimeSection />));
     await flush();
-    act(() => button('Download larger model for better quality')?.click());
+    act(() => button('Download AI background-removal engine')?.click());
     await flush();
     act(() => button('Cancel')?.click());
     await flush();
 
     expect(spy).not.toHaveBeenCalled();
-    expect(button('Download larger model for better quality')).toBeTruthy();
+    expect(button('Download AI background-removal engine')).toBeTruthy();
   });
 
   it('only calls the download function once the confirm dialog is explicitly accepted', async () => {
     const spy = vi.spyOn(modelDownload, 'downloadConsentedFile').mockResolvedValue({
       kind: 'success',
-      path: '/data/models/isnet-general-use.onnx',
-      bytes: 3,
+      path: '/data/onnxruntime/libonnxruntime.so',
+      bytes: 24_268_848,
     });
 
-    act(() => root.render(<SegmentModelSection />));
+    act(() => root.render(<OnnxRuntimeSection />));
     await flush();
-    act(() => button('Download larger model for better quality')?.click());
+    act(() => button('Download AI background-removal engine')?.click());
     await flush();
 
     expect(spy).not.toHaveBeenCalled();
@@ -111,9 +113,9 @@ describe('SegmentModelSection', () => {
       message: 'could not reach github.com — check your network connection.',
     });
 
-    act(() => root.render(<SegmentModelSection />));
+    act(() => root.render(<OnnxRuntimeSection />));
     await flush();
-    act(() => button('Download larger model for better quality')?.click());
+    act(() => button('Download AI background-removal engine')?.click());
     await flush();
     act(() => button('Download')?.click());
     await flush();

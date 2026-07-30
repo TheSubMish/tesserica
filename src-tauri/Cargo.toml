@@ -64,6 +64,26 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "
 # the one new dependency that download needs, not an HTTP client.
 md5 = "0.8.1"
 
+# Checksum verification for the on-demand ONNX Runtime *native library*
+# download (`commands::onnx_runtime`, `docs/10-decisions.md` D16). The archive
+# published for `libonnxruntime.so` is signed with a per-release sha256, not
+# md5, so this is a second small hashing crate rather than reusing `md5`
+# above — `sha2` was already resolved transitively (via `zip`'s own
+# dependency tree) before this addition, so this adds no new entry to
+# `Cargo.lock`, only a direct `[dependencies]` line so this crate's own code
+# may call it.
+sha2 = "0.10.9"
+
+# Extracting the single `libonnxruntime.so` file this project actually needs
+# out of the `.tar.gz` release asset upstream publishes (`docs/10-decisions.md`
+# D16) — `flate2` (gzip) was already resolved transitively via `zip`'s
+# `deflate-flate2` feature; `tar` is genuinely new but small, well-established
+# (`alexcrichton/tar-rs`), MIT/Apache-2.0, and does not itself perform
+# decompression, matching the "small, isolated, no surprise transitive tree"
+# bar the rest of this section holds new dependencies to.
+flate2 = "1"
+tar = "0.4.46"
+
 [profile.release]
 codegen-units = 1
 lto = true

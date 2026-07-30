@@ -761,9 +761,65 @@ holds; D14) rather than a deferred question.
       field via a genuine DOM `click`, not a store call. `npm run test:golden` re-run
       clean (no pipeline files touched) at the existing **3,101 cases / 920,064 pixels**,
       zero differing indices, zero differing RGBA bytes.
-- [ ] Resolve the ONNX Runtime size question (`07` §6)
+- [x] Resolve the ONNX Runtime size question (`07` §6) — checked whether this was already
+      substantially decided rather than assuming: D15's `load-dynamic` build makes
+      "download the runtime on first use" structurally possible (no runtime linked or
+      bundled at build time), but neither `src/segment/modelDownload.ts` nor
+      `commands::segment` had ever fetched the *runtime* — only the *model* — so that
+      fetch was the real remaining gap. Built it as an extension of the existing
+      mechanism, not a parallel one: `commands::onnx_runtime`
+      (`src-tauri/src/commands/onnx_runtime.rs`) mirrors `commands::segment`'s info/status/
+      save-with-checksum shape, and `src/segment/modelDownload.ts`'s single download
+      function was generalized (two type parameters, renamed `downloadConsentedFile`) so
+      `OnnxRuntimeSection.tsx` reuses it rather than duplicating it, exactly like
+      `SegmentModelSection.tsx` already did. The one genuinely new piece: upstream ships
+      the runtime as a `.tar.gz` of several files, not one, so the save command verifies a
+      sha256 of the whole archive first, then extracts (via the new, small, MIT/Apache-2.0
+      `tar` crate plus `flate2`, already transitively present via `zip`) only the one real
+      `libonnxruntime.so.<ver>` entry it needs, skipping the two symlinks and the unneeded
+      `libonnxruntime_providers_shared.so` alongside it. **Measured for real, not
+      estimated**: a real `npm run tauri build` release bundle was built and its actual
+      artifacts inspected — `.deb` **2.1 MB**, `.AppImage` 75 MB (dominated by its own
+      bundled `webkit2gtk`/`gtk`, a property of that packaging format, not this project's
+      weight — confirmed by listing `Tesserica.AppDir`), stripped binary alone 4.9 MB
+      (half `07-tech-stack.md`'s old ~8 MB guess) — and neither `u2netp.onnx` nor any ONNX
+      Runtime library is present in either bundle today, so the 2.1 MB `.deb` is the real,
+      already-shipping installer size, **9.5× under the 20 MB budget**, not a projection.
+      The real current ONNX Runtime release was also checked against the actual GitHub
+      Releases API rather than the doc's old ~10–15 MB guess: `v1.28.0`'s Linux x64 CPU
+      asset is 9,125,960 bytes (8.7 MB) as downloaded, extracting to 24,268,848 bytes
+      (24.3 MB) for the one file this project needs — independently confirmed with a real
+      `curl` + `sha256sum` this session. **Decision: option 1 (download on first use),
+      locked as `10-decisions.md` D16** — the mechanism is now real, not just structurally
+      possible, and options 2 (lite/full builds) and 3 (raise the budget) are both moot
+      once the measured number is 2.1 MB. Verified: 6 new Rust unit tests build small
+      in-memory fixture `.tar.gz` archives (checksum rejection, missing-entry rejection,
+      successful extraction, overwrite, directory creation) so ordinary `cargo test` never
+      needs the real ~9 MB archive; a manually-run `#[ignore]`d smoke test
+      (`smoke_test_the_real_archive_passes_checksum_and_extracts`) was pointed at the real
+      downloaded archive and passed, extracting exactly 24,268,848 bytes — proof the
+      production constants are correct against a real download, not just internally
+      consistent. 5 new frontend component tests (`OnnxRuntimeSection.test.tsx`) mirror
+      `SegmentModelSection.test.tsx`'s own coverage: never downloads on mount or after the
+      initial click, cancelling never downloads, the save function only runs after an
+      explicit "Download" click, and a failure shows an inline, retryable error.
+      `cargo test` (189 passed), `cargo clippy --all-targets -- -D warnings` (clean),
+      `npx tsc --noEmit` (clean), `npm run lint` (clean), `npm run test` (649 passed),
+      `npm run build` (clean), and `npm run test:golden` (17 passed, no pipeline files
+      touched — a sanity check) all pass. **Pipeline wiring remains explicitly out of
+      scope**, exactly as already disclosed for the model download: nothing calls
+      `Segmenter::load` with the extracted library yet.
 
-**Exit:** ✅ **W1 complete.** The flagship workflow works without leaving the app.
+**Exit:** ✅ **W1 complete.** All six Phase 5 items landed: flood-fill background removal,
+the `segment` module (direct `ort` via `load-dynamic`, D15), bundled `u2netp` plus
+consent-gated on-demand download of a larger model, mask post-processing (threshold/close/
+feather), a UI for fit-to-subject cropping, and — closing the phase — the ONNX Runtime size
+question resolved by a real measured build rather than a guess (download on first use,
+D16). The flagship workflow works without leaving the app. Two things are explicitly
+carried forward, not hidden by this exit: neither segmentation model is actually wired into
+background removal yet (the flood-fill fallback is what runs today), and bundling
+`u2netp.onnx` itself into the shipped installer (`tauri.conf.json` resources) was never
+done — both are real gaps, stated plainly rather than implied closed.
 
 ---
 

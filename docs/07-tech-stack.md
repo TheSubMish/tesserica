@@ -96,9 +96,11 @@ Mitigations, now implemented (`src-tauri/src/segment/`):
   `segment::Segmenter`, never to `ort`.
 - **Built with `load-dynamic`, not the default `download-binaries`.** The crate compiles
   with zero system or network dependencies; the real ONNX Runtime shared library is
-  `dlopen`ed only when `Segmenter::load` is actually called with a path, which is not yet
-  wired to any bundled or downloaded runtime (that is Q9/the next Phase 5 roadmap item) —
-  a missing dylib is a plain, gracefully-reported error, never a build failure or a panic.
+  `dlopen`ed only when `Segmenter::load` is actually called with a path. `commands::
+  onnx_runtime` (D16) now downloads and extracts that library on explicit consent, but
+  nothing yet calls `Segmenter::load` with the result — pipeline wiring remains later
+  Phase 5 work — so a missing dylib is still a plain, gracefully-reported error, never a
+  build failure or a panic.
 - **Verified working in this container**, not just compiling: a manually-run smoke test
   (`#[ignore]`d, not part of ordinary `cargo test`) `dlopen`ed a real ONNX Runtime 1.28.0
   and committed a real inference session against a real (if oversized, non-`u2netp`)
@@ -172,26 +174,32 @@ goal but are not verified or built.
 | Windows | `.msi`, `.exe` (NSIS) | deferred — WebView2 auto-installed when we get there |
 | macOS | `.dmg`, `.app` | deferred — needs Apple Developer account (~$99/yr) to sign |
 
-**Size budget** (`00-vision-and-scope.md` §8): under 20 MB.
+**Size budget** (`00-vision-and-scope.md` §8): under 20 MB, "excluding the optional
+background-removal model, which is downloaded on first use."
 
-| Component | Est. |
+**Locked (`10-decisions.md` D16): option 1, download-on-first-use, for *both* the model
+and the ONNX Runtime native library** — not a separate estimate table any more, because
+the real installer was built and measured rather than estimated:
+
+| Component | Real, measured 2026-07-30 |
 |---|---|
-| Tauri binary + WebView glue | ~8 MB |
-| Frontend bundle | ~1 MB |
-| Built-in palettes | <100 KB |
-| `u2netp.onnx` | ~4.7 MB |
-| ONNX Runtime native lib | ~10–15 MB ⚠️ |
+| `.deb` (what ships; system `webkit2gtk`/`gtk` are dependencies, not bundled) | **2.1 MB** |
+| `.AppImage` (bundles `webkit2gtk`/`gtk` itself for portability — a property of that packaging format, not this project's own weight) | 75 MB |
+| Stripped release binary alone | 4.9 MB |
+| Frontend bundle (`dist/`) | ~0.4 MB gzipped |
+| `u2netp.onnx` (build-time fetched into gitignored `assets/models/`, **not yet a `tauri.conf.json` bundle resource** — a separate, still-open gap this decision does not close) | 4.6 MB |
+| ONNX Runtime `libonnxruntime.so.1.28.0`, extracted | 24.3 MB |
+| ONNX Runtime `onnxruntime-linux-x64-1.28.0.tgz`, as downloaded | 8.7 MB |
 
-⚠️ **ONNX Runtime's native library likely breaks the 20 MB budget on its own.** Options,
-to decide before v2:
-
-1. **Download the runtime on first use** along with the model — keeps the base installer
-   small, costs a first-run network prompt.
-2. **Ship two builds** — lite and full.
-3. **Raise the budget** to ~40 MB. Still far under Electron's ~150 MB.
-
-Leaning toward (1): it keeps the promise that the app does nothing over the network
-unless asked, and background removal is inherently an opt-in feature.
+Neither the model nor the runtime is in the `.deb` today — `tauri.conf.json`'s `bundle`
+section has no `resources` entry — so the 2.1 MB figure is the real, already-shipping
+installer size with the current architecture, **9.5× under budget**, not a projection.
+`docs/10-decisions.md` D16 has the full measurement writeup, the real ONNX Runtime release
+size (superseding the ~10–15 MB estimate this section previously carried), and the
+consent-gated download mechanism that now actually fetches the runtime (`commands::
+onnx_runtime`, `src/segment/OnnxRuntimeSection.tsx`) — extending the same one
+`downloadConsentedFile` (`src/segment/modelDownload.ts`) the model download already used,
+rather than a parallel mechanism.
 
 macOS signing needs an Apple Developer account (~$99/yr). Not needed for local
 development or Linux/Windows distribution — flagged so it is not a surprise.

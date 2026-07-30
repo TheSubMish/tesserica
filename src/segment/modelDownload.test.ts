@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { SegmentationModelInfo } from '../ipc/commands.ts';
 import {
-  downloadLargerSegmentationModel,
+  downloadConsentedFile,
   formatBytes,
   sourceHost,
   type DownloadFetchImpl,
@@ -21,7 +21,7 @@ function okFetch(bytes: ArrayBuffer): DownloadFetchImpl {
   return vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => bytes }));
 }
 
-describe('downloadLargerSegmentationModel', () => {
+describe('downloadConsentedFile', () => {
   it('fetches the source URL and hands the bytes to save on success', async () => {
     const bytes = new Uint8Array([1, 2, 3]).buffer;
     const fetchImpl = okFetch(bytes);
@@ -30,7 +30,7 @@ describe('downloadLargerSegmentationModel', () => {
       bytes: 3,
     }));
 
-    const outcome = await downloadLargerSegmentationModel(INFO, { fetchImpl, save });
+    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
 
     expect(fetchImpl).toHaveBeenCalledWith(INFO.sourceUrl);
     expect(save).toHaveBeenCalledWith(bytes);
@@ -49,7 +49,7 @@ describe('downloadLargerSegmentationModel', () => {
     }));
     const save: SaveImpl = vi.fn();
 
-    const outcome = await downloadLargerSegmentationModel(INFO, { fetchImpl, save });
+    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
 
     expect(outcome.kind).toBe('error');
     expect(save).not.toHaveBeenCalled();
@@ -61,7 +61,7 @@ describe('downloadLargerSegmentationModel', () => {
     });
     const save: SaveImpl = vi.fn();
 
-    const outcome = await downloadLargerSegmentationModel(INFO, { fetchImpl, save });
+    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
 
     expect(outcome.kind).toBe('error');
     if (outcome.kind === 'error') {
@@ -77,7 +77,7 @@ describe('downloadLargerSegmentationModel', () => {
       throw new Error('downloaded model failed checksum verification');
     });
 
-    const outcome = await downloadLargerSegmentationModel(INFO, { fetchImpl, save });
+    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
 
     expect(outcome).toEqual({
       kind: 'error',

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { SliderField } from '../app/SliderField';
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
 import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
+import { OnnxRuntimeSection } from '../segment/OnnxRuntimeSection.tsx';
 import { SegmentModelSection } from '../segment/SegmentModelSection.tsx';
 import {
   MAX_BACKGROUND_REMOVAL_TOLERANCE,
@@ -241,6 +242,8 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
 
         <hr className="field-divider" />
         <SegmentModelSection />
+        <hr className="field-divider" />
+        <OnnxRuntimeSection />
       </Collapsible>
 
       <Collapsible title="Cleanup">

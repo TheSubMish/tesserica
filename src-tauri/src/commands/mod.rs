@@ -5,6 +5,7 @@
 
 pub mod animation_export;
 pub mod export;
+pub mod onnx_runtime;
 pub mod project;
 pub mod segment;
 pub mod source;

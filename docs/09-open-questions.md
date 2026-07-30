@@ -25,6 +25,7 @@
 | Q7 Editor layers over IPC | **Raw invoke body** | D13 |
 | — Color mode | **RGBA only in v1** | D9 |
 | Q8 Canvas2D or WebGL2 renderer | **Canvas2D holds** | D14 |
+| Q9 ONNX Runtime size vs installer budget | **Download on first use** | D16 |
 
 ---
 
@@ -32,19 +33,6 @@
 
 These are deliberately deferred. Each is scheduled against a phase where the
 information needed to decide will actually exist. **Do not resolve them by intuition.**
-
-### Q9 · ONNX Runtime size vs installer budget
-
-**Decide in Phase 5.**
-
-The native runtime (~10–15 MB) likely breaks the 20 MB budget on its own
-(`07-tech-stack.md` §6).
-
-Options: download runtime + model on first use · ship lite and full builds · raise the
-budget to ~40 MB.
-
-**Leaning:** download on first use — consistent with local-first (nothing over the
-network unless asked), and background removal is inherently opt-in.
 
 ### Q10 · Which segmentation model ships by default?
 

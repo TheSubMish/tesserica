@@ -1,41 +1,41 @@
 /**
- * "AI background removal" affordance in Convert mode's Background section
- * (`docs/08-roadmap.md` Phase 5 "on-demand download for larger models with
- * explicit consent"), next to the flood-fill toggle
- * (`src/convert/ConvertPanel.tsx`).
+ * "AI background removal" runtime affordance in Convert mode's Background
+ * section, next to `SegmentModelSection` (`docs/10-decisions.md` D16,
+ * `docs/07-tech-stack.md` §6). D15's `load-dynamic` build already made
+ * "download the runtime on first use" possible structurally; this component
+ * is the actual consent-gated fetch that D16 identifies as the remaining
+ * gap — mirroring `SegmentModelSection.tsx` almost exactly and reusing the
+ * same generic `downloadConsentedFile` (`modelDownload.ts`) rather than a
+ * parallel download mechanism.
  *
- * **Scope, stated honestly rather than implied:** this component manages the
- * segmentation *model* — showing which one is installed and offering an
- * explicit, consent-gated download of a larger one. It does **not** wire a
- * loaded model into the conversion pipeline yet (`segment::Segmenter` has no
- * caller in the pipeline); that is later Phase 5 work, tracked separately in
- * `docs/08-roadmap.md`. The copy below says so, so a user isn't led to
- * believe clicking "Download" changes what background removal actually does
- * today.
+ * **Scope, stated honestly rather than implied:** this component downloads
+ * and verifies the ONNX Runtime *native library* only. It does not wire the
+ * extracted library into `segment::Segmenter` or the conversion pipeline —
+ * that is separate, later work, exactly like `SegmentModelSection`'s own
+ * disclosed scope for the model file.
  *
  * **The download only ever fires from an explicit confirm click.** Mounting
- * this component calls `segmentationModelInfo`/`segmentationModelStatus`
- * (both local, no network — see `docs/02-architecture.md` §6.2 and
- * `CLAUDE.md` "No network calls in the core"), never the download itself.
+ * this component calls `onnxRuntimeInfo`/`onnxRuntimeStatus` (both local, no
+ * network), never the download itself.
  */
 
 import { useEffect, useState } from 'react';
 
 import {
   hasBackend,
-  segmentationModelInfo,
-  segmentationModelStatus,
-  saveDownloadedSegmentationModel,
-  type SegmentationModelInfo,
-  type SegmentationModelStatus,
+  onnxRuntimeInfo,
+  onnxRuntimeStatus,
+  saveDownloadedOnnxRuntime,
+  type OnnxRuntimeInfo,
+  type OnnxRuntimeStatus,
 } from '../ipc/commands.ts';
 import { downloadConsentedFile, formatBytes, sourceHost } from './modelDownload.ts';
 
 type Phase = 'idle' | 'confirming' | 'downloading' | 'success' | 'error';
 
-export function SegmentModelSection() {
-  const [info, setInfo] = useState<SegmentationModelInfo | undefined>();
-  const [status, setStatus] = useState<SegmentationModelStatus | undefined>();
+export function OnnxRuntimeSection() {
+  const [info, setInfo] = useState<OnnxRuntimeInfo | undefined>();
+  const [status, setStatus] = useState<OnnxRuntimeStatus | undefined>();
   const [phase, setPhase] = useState<Phase>('idle');
   const [message, setMessage] = useState<string | undefined>();
 
@@ -43,10 +43,10 @@ export function SegmentModelSection() {
     if (!hasBackend()) return;
     // Both calls below are local queries (static metadata, a filesystem
     // check) — not network activity, so it is fine to run them on mount.
-    segmentationModelInfo()
+    onnxRuntimeInfo()
       .then(setInfo)
       .catch(() => undefined);
-    segmentationModelStatus()
+    onnxRuntimeStatus()
       .then(setStatus)
       .catch(() => undefined);
   }, []);
@@ -63,7 +63,7 @@ export function SegmentModelSection() {
     setPhase('downloading');
     const outcome = await downloadConsentedFile(info, {
       fetchImpl: (url) => fetch(url),
-      save: saveDownloadedSegmentationModel,
+      save: saveDownloadedOnnxRuntime,
     });
     if (outcome.kind === 'success') {
       setPhase('success');
@@ -75,30 +75,32 @@ export function SegmentModelSection() {
   };
 
   return (
-    <div className="segment-model-section">
+    <div className="onnx-runtime-section">
       <p className="field-note">
-        <strong>AI background removal</strong> — uses the small bundled model by default. Model
-        management only in this build; it does not yet change what background removal does to your
-        image.
+        <strong>AI background removal engine</strong> — not bundled with the app, to keep the
+        installer small; download it once, on this machine, only if you want AI-based background
+        removal.
       </p>
 
       {status?.present && (
-        <p className="field-note" data-testid="segment-model-installed">
-          A larger model is already installed.
+        <p className="field-note" data-testid="onnx-runtime-installed">
+          The ONNX Runtime engine is already installed.
         </p>
       )}
 
       {phase === 'idle' && !status?.present && (
         <button type="button" onClick={startConfirm} disabled={!info}>
-          Download larger model for better quality
+          Download AI background-removal engine
         </button>
       )}
 
       {phase === 'confirming' && info && (
-        <div className="segment-model-confirm" role="group" aria-label="Confirm model download">
+        <div className="onnx-runtime-confirm" role="group" aria-label="Confirm engine download">
           <p className="field-note">
-            This will download <strong>{formatBytes(info.approxBytes)}</strong> from{' '}
-            <strong>{sourceHost(info.sourceUrl)}</strong> ({info.license}). Continue?
+            This will download <strong>{formatBytes(info.approxBytes)}</strong> (about{' '}
+            {formatBytes(info.extractedApproxBytes)} once installed) from{' '}
+            <strong>{sourceHost(info.sourceUrl)}</strong> ({info.license}, ONNX Runtime{' '}
+            {info.version}). Continue?
           </p>
           <div className="modal-actions">
             <button type="button" onClick={cancelConfirm}>
@@ -116,7 +118,7 @@ export function SegmentModelSection() {
       {phase === 'success' && <p className="field-note">Downloaded and verified successfully.</p>}
 
       {phase === 'error' && (
-        <div className="segment-model-error">
+        <div className="onnx-runtime-error">
           <p className="field-note" role="alert">
             {message}
           </p>
