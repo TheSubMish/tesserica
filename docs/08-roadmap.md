@@ -480,9 +480,58 @@ Two caveats worth carrying into Phase 3, neither of which blocks the exit:
       above, including the two wire-shape decode tests and the two that
       write real files and decode them back with `image`'s own GIF/PNG
       decoders — genuinely inspected output, not just "didn't crash."
-- [ ] Performance: sustain target fps; **decide on WebGL2** here if Canvas2D falls short
+- [x] Performance: sustain target fps; **decide on WebGL2** here if Canvas2D falls
+      short — resolves `09-open-questions.md` Q8 as `10-decisions.md` D14. Target
+      chosen: **24 fps** (`docs/06-workflows.md` W3's own "uniform 12 fps" example,
+      doubled — hand-drawn pixel-art animation is conventionally authored well under
+      video refresh rates, and no doc states a numeric target), 60 fps kept as an
+      aspiration for interactive redraws rather than a hard requirement. New harness
+      `bench/animationPerf.ts` times real `CanvasView`-shaped redraw ticks
+      (checkerboard → onion-skin ghosts → active-frame composite → grid → border)
+      against a real `<canvas>` 2D context with `performance.now()`, in a real
+      Chromium hitting the plain Vite dev server (no Tauri/IPC involved, so no
+      `TESSERICA_BENCH` env var needed) — jsdom has no native canvas backing, so this
+      could not be measured under Vitest. Worst-case sprite: a group with a clipping
+      mask (`canvas/renderer.ts::compositeScope`, the most expensive composite path),
+      12 raster cels, 24 independent frames. At the documented "typical" size
+      (`02-architecture.md` §7, ≤512×512), steady state: no onion skin ~160 fps mean;
+      onion skin at 1 before/1 after (W3's own value) ~155–165 fps mean; onion skin at
+      **8 before/8 after** (`state/uiStore.ts::MAX_ONION_SKIN_RANGE`, the actual worst
+      case) ~147–150 fps mean — all comfortably past both 24 fps and 60 fps. That last
+      number came from a real fix, not a clean bill of health on the first run: the
+      harness first measured the **uncached** 8/8 case at ~8.9 fps mean, because
+      `tintedGhostFrame` recomposited all 16 ghost frames from scratch on every redraw
+      (playback tick *or* pointer-move while painting with onion skin on). Added a
+      per-(frame id, tint) cache in `canvas/renderer.ts`, keyed on the same
+      `signatureOf` string `compositeSprite`'s own single-slot cache already trusts.
+      A frame-id-only first attempt looked like a win in isolation but was caught
+      thrashing by benchmarking the realistic 1/1 range specifically, not just the
+      8/8 extreme: a single frame is ghosted from *both* directions (past tint,
+      future tint) at different points in every ordinary loop, so keying on frame id
+      alone let the two directions evict each other's entry and recompute on
+      effectively every touch. Keying on `(frame id, tint)` — bounded at two cached
+      canvases per frame — fixed it for real; regression tests
+      (`canvas/renderer.test.ts`, "ghost caching") assert the cache survives
+      both-direction touches, not just a same-request repeat. Pushed past "typical" as
+      a stress point (not the target — `02-architecture.md` §7 reserves "2048²+" as
+      its own reassessment trigger): at 1024×1024 (4× the pixels), still clears 24 fps
+      on mean (~38–42 fps no onion, ~20–27 fps at 8/8) though the margin visibly
+      narrows, consistent with that trigger. A clean 2048×2048 number was not obtained
+      — this container's shared desktop carries dozens of long-lived Chrome processes
+      from unrelated sessions (the same contention `08-roadmap.md`'s Linux-installer
+      and accessibility-pass entries above already hit) and repeated attempts at that
+      size did not return inside a reasonable wall-clock budget — reported as
+      unmeasured rather than guessed; the 512→1024 trend is enough to ground the
+      decision without it. **Decision: Canvas2D holds, no WebGL2 renderer.** The
+      bottleneck the harness found was a missing cache in application code, not a
+      Canvas2D throughput ceiling, so a rewrite would have solved the wrong layer of
+      the problem; full numbers, the target-fps rationale, and the rejected
+      alternatives are in `10-decisions.md` D14.
 
-**Exit:** ✅ **W3 complete.**
+**Exit:** ✅ **W3 complete.** All six Phase 4 items landed: frames/cels/linked cels,
+the Timeline panel, onion skinning, tags, spritesheet/GIF export, and — closing the
+phase — a real playback-performance measurement with a locked decision (Canvas2D
+holds; D14) rather than a deferred question.
 
 ---
 
@@ -554,6 +603,10 @@ but it is what makes W7 Case A not-mush. Cheap once the pipeline exists.
 - Preview/export parity proves unachievable within tolerance → reconsider the hybrid
   split; possibly move all processing to Rust and accept slower previews.
 - Canvas2D cannot sustain animation playback → WebGL2 renderer, a significant addition.
+  **Measured in Phase 4 (`10-decisions.md` D14): holds at the app's documented typical
+  sprite size (≤512×512) even at onion skinning's maximum range, ~150 fps mean worst
+  case. Margin narrows by 1024×1024; re-measure if the app's target canvas size ever
+  grows past what `00-vision-and-scope.md`/`03-data-model.md` currently imply.**
 - IPC benchmarks show handle-passing is still too slow for editor-layer export → rethink
   where pixel data lives.
 - `ort` never stabilizes → ship flood-fill only, or bind ONNX Runtime C API directly.

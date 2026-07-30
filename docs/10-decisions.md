@@ -294,13 +294,125 @@ protocol.
 
 ---
 
+## D14 · Canvas2D holds; **no WebGL2 renderer**
+
+**Locked 2026-07-30.** Resolves `09-open-questions.md` Q8, by measurement, in Phase 4 as
+scheduled.
+
+Q8's own triggers were blend modes (already handled — `08-roadmap.md` Phase 3 uses native
+`globalCompositeOperation` plus hand-rolled formulas where that falls short) and
+"animation playback dropping frames." This decision is about the second one.
+
+**Target fps.** No document states a numeric playback target, so one had to be chosen.
+`docs/06-workflows.md` W3 step 7 uses "a uniform 12 fps" as its own walk-cycle example, and
+frame-by-frame pixel-art animation is conventionally authored well under video frame rates
+— 60 fps content would mean unique art on every single tick, which is not how any of the
+workflows in `06-workflows.md` work. **24 fps (a ~41.7 ms budget per tick) is the target**,
+chosen as the standard "reads as smooth, motion" threshold for hand-drawn animation rather
+than a video-refresh number that this app's content model never asks for. 60 fps is kept
+as an aspirational ceiling for interactive redraws (pointer-move while painting), not a
+hard requirement, since the timeline's own scheduler (`panels/timeline.ts::startPlayback`)
+retimes itself every tick against each frame's own `durationMs` rather than accumulating
+drift, so an occasional slow tick delays the next frame slightly and does not compound.
+
+**Harness.** `src/bench/animationPerf.ts` builds a synthetic worst-shaped sprite — a group
+containing a clipping-mask layer (`canvas/renderer.ts::compositeScope`, the most expensive
+composite path, per `02-architecture.md` §7's own prediction), 12 raster cels total, 24
+independent frames (no linked cels, the worst case for cel-cache warm-up) — and times full
+`CanvasView`-redraw-shaped ticks (checkerboard → onion-skin ghosts → active-frame composite
+→ grid → border) with real `performance.now()` deltas against a real `<canvas>` 2D context.
+Run inside a real Chromium (not Vitest/jsdom, which has no native canvas backing — see
+`canvas/renderer.test.ts`'s own comment on why it stubs the context) hitting the plain Vite
+dev server; no Tauri or IPC involved, so no `TESSERICA_BENCH` env var is needed. Reproduce:
+
+```bash
+npm run dev   # serves at http://localhost:1420, no Tauri required
+# from a devtools console or any CDP session on that origin:
+const m = await import('/src/bench/animationPerf.ts');
+console.log(await m.runAnimationPerf());
+```
+
+**What was measured**, at the documented "typical" sprite size (`02-architecture.md` §7:
+"typical sprite sizes (≤512×512)"), 512×512, steady state (per-cel canvases warm, so only
+the composite step differs per tick — cold first-paint cost is a different question), 240
+ticks:
+
+| Scenario | p50 | p95 | mean | mean fps |
+|---|---|---|---|---|
+| No onion skin | 6.0–6.3 ms | 7.1–7.9 ms | 6.2–6.3 ms | **~160** |
+| Onion skin, 1 before/1 after (W3's own example) | 6.1–6.6 ms | 6.5–7.1 ms | 6.1–6.7 ms | **~155–165** |
+| Onion skin, 8 before/8 after (`state/uiStore.ts::MAX_ONION_SKIN_RANGE`, the worst case) | 6.5–6.6 ms | 7.2–7.9 ms | 6.6–6.8 ms | **~147–150** |
+
+All three sit inside noise of each other, comfortably above both the 24 fps target and the
+60 fps aspiration, at the size the architecture doc already calls typical.
+
+**What the harness first found was a real bug, not just a slow path.** Before any fix,
+onion skin at 8/8 recomposited all 16 ghost frames from scratch on *every* redraw —
+including every pointer-move while painting with onion skin on, not only during playback —
+because `tintedGhostFrame` had no cache at all:
+
+| Scenario | mean | mean fps |
+|---|---|---|
+| Onion skin, 8/8, **uncached** | 111.9–112.0 ms | **~8.9** |
+
+Well below both the 24 fps target and even a generous floor. **The fix was a targeted
+cache, not a rewrite**: a per-(frame id, tint) cache in `canvas/renderer.ts`, keyed on the
+same `signatureOf` string `compositeSprite`'s own single-slot cache already trusts, so a
+ghost is only recomposited when the frame it names actually changes. The first version of
+that fix keyed on frame id alone and looked like a win in isolation (112 ms → ~18–20 ms),
+but benchmarking the *realistic* 1/1 range specifically — not just the 8/8 extreme —
+exposed that it was still thrashing: a single frame is ghosted as "before" (past tint) and
+"after" (future tint) at different points in every ordinary loop, so a cache keyed on frame
+id alone had the two directions evict each other's entry and recompute on effectively every
+touch. Keying on `(frame id, tint)` instead — bounded at 2 cached canvases per frame, not
+unbounded — fixed it for real, landing at the ~6.1–6.8 ms figures in the table above.
+Regression tests for exactly this (`canvas/renderer.test.ts`, "ghost caching") assert the
+cache survives both-direction touches without thrashing, not just a same-request repeat.
+
+**Pushed past "typical" as a stress point** (not the primary target, since
+`02-architecture.md` §7 explicitly calls ≤512×512 typical and reserves "very large
+canvases (2048²+)" as its own reassessment trigger), the same worst-case shape at 1024×1024
+(4× the pixels):
+
+| Scenario | p50 | p95 | mean | mean fps |
+|---|---|---|---|---|
+| No onion skin | 23.6–25.9 ms | 26.9–30.7 ms | 24.1–26.5 ms | **~38–42** |
+| Onion skin, 8/8 | 36.6–49.7 ms | 43.5–63.9 ms | 37.5–51.1 ms | **~20–27** |
+
+Still clears the 24 fps target on mean in every run, though the margin visibly narrows —
+consistent with `02-architecture.md` §7's own prediction that 2048²+ is where Canvas2D
+would need reassessing. A clean 2048×2048 data point was not obtained: this container's
+shared desktop already carries dozens of long-lived Chrome renderer processes from
+unrelated sessions (the same resource contention `08-roadmap.md`'s Linux-installer and
+accessibility-pass notes already hit), and repeated attempts at that size did not return
+inside a reasonable wall-clock budget. Reported honestly as unmeasured rather than guessed
+— the 512×512 → 1024×1024 trend is enough to ground this decision without it.
+
+**Decision: keep Canvas2D. No WebGL2 renderer.** At the sprite sizes this app actually
+targets, the worst realistic combination (grouped layers with a clipping mask, maximum
+onion-skin range) sustains ~150 fps mean after a bounded, well-tested cache fix — over 6×
+the 24 fps target and comfortably past the 60 fps aspiration too. The uncached
+~9 fps figure shows *something* needed fixing, but a full renderer rewrite would have been
+solving the wrong layer of the problem: the bottleneck was a missing cache in application
+code, not a Canvas2D throughput ceiling. `02-architecture.md` §7's own "reassess if very
+large canvases (2048²+)" trigger stands as written for a future phase if the app's target
+canvas size ever grows past what `00-vision-and-scope.md`/`03-data-model.md` currently
+imply; nothing measured here contradicts it.
+
+Rejected: building a WebGL2 renderer now (would have been solving for a bottleneck that
+turned out to be a missing cache, not a rendering-API ceiling — see D-style precedent of
+not reopening decisions on intuition); leaving the uncached onion-skin path as shipped
+(measured ~9 fps is a real, user-visible failure at the feature's own advertised range,
+not a hypothetical).
+
+---
+
 ## Still open — deferred, not decided
 
 These genuinely need measurement rather than a preference, and each is scheduled:
 
 | # | Question | Decide at |
 |---|---|---|
-| Q8 | Canvas2D vs WebGL2 renderer | **Phase 4** — measure animation playback first |
 | Q9 | ONNX Runtime size vs installer budget | **Phase 5** — leaning "download on first use" |
 | Q10 | Which segmentation model ships (`u2netp` 4.7 MB vs `isnet-general-use` 170 MB) | **Phase 5** — benchmark at 64×64 output first; the small one may be indistinguishable |
 | Q13 | Plugin / scripting API | Post-v2. Keep the effect system data-driven so it stays a natural extension point |
@@ -324,3 +436,4 @@ These genuinely need measurement rather than a preference, and each is scheduled
 | D11 | Aseprite **import only** |
 | D12 | Oklab is **`f64` both sides**; parity measured in **palette indices** |
 | D13 | Editor layers cross IPC on the **raw invoke body** |
+| D14 | **Canvas2D holds** at target sizes; no WebGL2 renderer |

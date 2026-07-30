@@ -24,23 +24,14 @@
 | Q12 Aseprite export | **Import only** | D11 |
 | Q7 Editor layers over IPC | **Raw invoke body** | D13 |
 | — Color mode | **RGBA only in v1** | D9 |
+| Q8 Canvas2D or WebGL2 renderer | **Canvas2D holds** | D14 |
 
 ---
 
 ## Still open — needs measurement, not preference
 
-These three are deliberately deferred. Each is scheduled against a phase where the
+These are deliberately deferred. Each is scheduled against a phase where the
 information needed to decide will actually exist. **Do not resolve them by intuition.**
-
-### Q8 · Canvas2D or WebGL2 renderer?
-
-**Decide in Phase 4.**
-
-Canvas2D is the starting point (`02-architecture.md` §7). Revisit with real measurements.
-
-**Likely triggers for switching:** blend modes (Canvas2D `globalCompositeOperation` does
-not cover all of them, and manual per-pixel blending in JS is slow) and animation playback
-dropping frames.
 
 ### Q9 · ONNX Runtime size vs installer budget
 
