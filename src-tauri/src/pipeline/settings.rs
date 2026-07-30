@@ -58,6 +58,20 @@ pub struct OutlineSettings {
     pub corners: bool,
 }
 
+/// Stage [1]'s non-ML fallback (`docs/04` §8.5) — flood-fill from the image's
+/// four corners. The ONNX segmentation model §8 otherwise describes is a later,
+/// Rust-only Phase 5 item; this one needs no model and runs identically on both
+/// sides.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundRemovalSettings {
+    /// Un-squared Oklab colour distance. A neighbour joins a corner's flood
+    /// when it is within this of that corner's own colour. 0 admits only exact
+    /// matches; higher values tolerate more variation (soft shadows, mild
+    /// gradients) before the flood stops at an edge.
+    pub tolerance: f64,
+}
+
 /// Where the palette comes from.
 ///
 /// `docs/04` §2.2 writes this as "a fixed palette, or `'auto'` with maxColors".
@@ -78,6 +92,10 @@ pub enum PaletteSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConvertSettings {
+    // [1] background removal — flood-fill fallback only; see BackgroundRemovalSettings
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_removal: Option<BackgroundRemovalSettings>,
+
     // [2] framing
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<CropRect>,
@@ -132,6 +150,7 @@ impl ConvertSettings {
     /// takes both rather than being a `Default` impl.
     pub fn new(target_width: u32, target_height: u32, palette: PaletteSpec) -> Self {
         Self {
+            background_removal: None,
             crop: None,
             fit_to_subject: false,
             brightness: 0.0,

@@ -35,6 +35,22 @@ export interface OutlineSettings {
 }
 
 /**
+ * Stage [1]'s non-ML fallback (`docs/04` §8.5) — flood-fill from the image's
+ * four corners. The ONNX segmentation model §8 otherwise describes is a later,
+ * Rust-only Phase 5 item; this one needs no model and runs identically on both
+ * sides.
+ */
+export interface BackgroundRemovalSettings {
+  /**
+   * Un-squared Oklab colour distance. A neighbour joins a corner's flood when
+   * it is within this of that corner's own colour. 0 admits only exact
+   * matches; higher values tolerate more variation (soft shadows, mild
+   * gradients) before the flood stops at an edge.
+   */
+  tolerance: number;
+}
+
+/**
  * Where the palette comes from.
  *
  * `docs/04` §2.2 writes this as "a fixed palette, or `'auto'` with maxColors".
@@ -45,6 +61,9 @@ export type PaletteSpec =
   { kind: 'fixed'; colors: readonly Rgba[] } | { kind: 'auto'; maxColors: number };
 
 export interface ConvertSettings {
+  // [1] background removal — flood-fill fallback only; see BackgroundRemovalSettings
+  backgroundRemoval?: BackgroundRemovalSettings;
+
   // [2] framing
   crop?: CropRect;
   /**

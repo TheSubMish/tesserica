@@ -14,6 +14,7 @@
 
 pub mod adjust;
 pub mod autopalette;
+pub mod background_removal;
 pub mod buffer;
 pub mod cleanup;
 pub mod convert;

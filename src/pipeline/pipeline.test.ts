@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { adjustOklab, applyAdjustments, type AdjustParams } from './adjust.ts';
+import { removeBackgroundFloodFill } from './backgroundRemoval.ts';
 import { bufferFrom, createBuffer, type PixelBuffer } from './buffer.ts';
 import { despeckle, nearestPaletteIndex, outline } from './cleanup.ts';
 import { convert } from './convert.ts';
@@ -406,7 +407,73 @@ describe('cleanup', () => {
   });
 });
 
+describe('backgroundRemoval', () => {
+  it('clears a uniform image entirely, leaving RGB untouched', () => {
+    const src = solid(4, 4, [200, 200, 200, 255]);
+    const out = removeBackgroundFloodFill(src, { tolerance: 0.02 });
+    expect([...out.data].filter((_, i) => i % 4 === 3).every((a) => a === 0)).toBe(true);
+    expect([...out.data.slice(0, 3)]).toEqual([200, 200, 200]);
+  });
+
+  it('leaves a disconnected interior patch of the background colour alone', () => {
+    // 5x5 white background; a black ring fully encloses a single white centre
+    // pixel, so the centre matches the corner seed's colour but is not
+    // *connected* to it.
+    const src = solid(5, 5, [255, 255, 255, 255]);
+    for (let y = 1; y < 4; y++) {
+      for (let x = 1; x < 4; x++) {
+        if (x === 2 && y === 2) continue;
+        src.data.set([0, 0, 0, 255], (y * 5 + x) * 4);
+      }
+    }
+    const out = removeBackgroundFloodFill(src, { tolerance: 0.02 });
+    expect(out.data[(2 * 5 + 2) * 4 + 3]).toBe(255);
+    expect(out.data[3]).toBe(0);
+  });
+
+  it('stops the flood at a neighbour outside tolerance', () => {
+    const src = solid(3, 3, [255, 255, 255, 255]);
+    src.data.set([0, 0, 200, 255], 1 * 4);
+    const out = removeBackgroundFloodFill(src, { tolerance: 0.02 });
+    expect(out.data[3]).toBe(0);
+    expect(out.data[1 * 4 + 3]).toBe(255);
+  });
+
+  it('at tolerance 0, clears only exact matches to the seed', () => {
+    const src = solid(3, 3, [10, 10, 10, 255]);
+    src.data.set([11, 10, 10, 255], 1 * 4);
+    const out = removeBackgroundFloodFill(src, { tolerance: 0 });
+    expect(out.data[3]).toBe(0);
+    expect(out.data[1 * 4 + 3]).toBe(255);
+  });
+
+  it('does not throw on coincident corners in a 1-pixel-tall image', () => {
+    const src = solid(4, 1, [128, 64, 32, 255]);
+    const out = removeBackgroundFloodFill(src, { tolerance: 0.02 });
+    expect([...out.data].filter((_, i) => i % 4 === 3).every((a) => a === 0)).toBe(true);
+  });
+});
+
 describe('convert', () => {
+  it('removes the background before crop / fit-to-subject run', () => {
+    // A 4x4 opaque white image with a 2x2 black square at its centre. Without
+    // background removal, fit-to-subject sees the whole image as opaque and
+    // does nothing; with it, the flood clears the white border first and
+    // fit-to-subject can crop down to just the black square.
+    const src = solid(4, 4, [255, 255, 255, 255]);
+    for (let y = 1; y <= 2; y++) {
+      for (let x = 1; x <= 2; x++) src.data.set([0, 0, 0, 255], (y * 4 + x) * 4);
+    }
+    const settings = {
+      ...defaultSettings(2, 2, BLACK_AND_WHITE),
+      downscaleMode: 'nearest' as const,
+      backgroundRemoval: { tolerance: 0.02 },
+      fitToSubject: true,
+    };
+    const out = convert(src, settings);
+    expect([...out.indices].every((i) => i === 0)).toBe(true);
+  });
+
   it('converts a white image to the white palette entry', () => {
     const out = convert(solid(8, 8, [255, 255, 255, 255]), defaultSettings(4, 4, BLACK_AND_WHITE));
     expect([out.image.width, out.image.height]).toEqual([4, 4]);

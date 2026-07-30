@@ -3,7 +3,8 @@
 //! Mirrors `src/pipeline/convert.ts`.
 //!
 //! ```text
-//!   [1] background removal   Rust only, Phase 5 — not yet in the chain
+//!   [1] background removal   flood-fill fallback, both languages (§8.5);
+//!                            ML segmentation is a later, Rust-only Phase 5 item
 //!   [2] crop / fit-to-subject
 //!   [3] colour adjustments   BEFORE quantization, deliberately (§2.1)
 //!   [4] downscale to grid
@@ -17,6 +18,7 @@
 
 use super::adjust::{self, AdjustParams};
 use super::autopalette::auto_palette;
+use super::background_removal::remove_background_flood_fill;
 use super::buffer::PixelBuffer;
 use super::cleanup;
 use super::crop;
@@ -122,6 +124,13 @@ pub fn quantize_with_dither(
 }
 
 pub fn convert(source: &PixelBuffer, settings: &ConvertSettings) -> Result<ConvertResult, String> {
+    // [1] background removal — flood-fill fallback only (§8.5)
+    let removed = settings
+        .background_removal
+        .as_ref()
+        .map(|bg| remove_background_flood_fill(source, bg));
+    let source = removed.as_ref().unwrap_or(source);
+
     // [2] framing
     let mut image = match settings.crop {
         Some(rect) => crop::crop(source, rect)?,
@@ -332,6 +341,29 @@ mod tests {
         assert_eq!(out.indices[4], 1, "subject untouched");
         assert!(out.indices.iter().all(|&i| i != TRANSPARENT_INDEX));
         assert_eq!(&out.image.data[0..4], &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn background_removal_runs_before_crop_and_fit_to_subject() {
+        // A 4x4 opaque white image with a 2x2 black square at its centre.
+        // Without background removal, fit-to-subject sees the whole image as
+        // opaque and does nothing; with it, the flood clears the white border
+        // first and fit-to-subject can crop down to just the black square.
+        let mut src = solid(4, 4, [255, 255, 255, 255]);
+        for y in 1..=2u32 {
+            for x in 1..=2u32 {
+                let o = src.offset(x, y);
+                src.data[o..o + 4].copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+        let mut settings = ConvertSettings::new(2, 2, two_colors());
+        settings.downscale_mode = DownscaleMode::Nearest;
+        settings.fit_to_subject = true;
+        settings.background_removal =
+            Some(crate::pipeline::settings::BackgroundRemovalSettings { tolerance: 0.02 });
+
+        let out = convert(&src, &settings).unwrap();
+        assert!(out.indices.iter().all(|&i| i == 0));
     }
 
     #[test]

@@ -4,7 +4,8 @@
  * Mirrors `src-tauri/src/pipeline/convert.rs`.
  *
  * ```
- *   [1] background removal   Rust only, Phase 5 — not yet in the chain
+ *   [1] background removal   flood-fill fallback, both languages (§8.5);
+ *                            ML segmentation is a later, Rust-only Phase 5 item
  *   [2] crop / fit-to-subject
  *   [3] colour adjustments   BEFORE quantization, deliberately (§2.1)
  *   [4] downscale to grid
@@ -19,6 +20,7 @@
 
 import { adjustParamsFrom, applyAdjustments } from './adjust.ts';
 import { autoPalette } from './autopalette.ts';
+import { removeBackgroundFloodFill } from './backgroundRemoval.ts';
 import type { PixelBuffer } from './buffer.ts';
 import { despeckle, outline } from './cleanup.ts';
 import { crop, fitToSubject } from './crop.ts';
@@ -108,8 +110,13 @@ export function quantizeWithDither(
 }
 
 export function convert(source: PixelBuffer, settings: ConvertSettings): ConvertResult {
-  // [2] framing
+  // [1] background removal — flood-fill fallback only (§8.5)
   let image = source;
+  if (settings.backgroundRemoval) {
+    image = removeBackgroundFloodFill(image, settings.backgroundRemoval);
+  }
+
+  // [2] framing
   if (settings.crop) image = crop(image, settings.crop);
   if (settings.fitToSubject) {
     image = fitToSubject(image, settings.alphaThreshold, FIT_TO_SUBJECT_PADDING);
