@@ -657,7 +657,76 @@ holds; D14) rather than a deferred question.
       above. **Pipeline integration is explicitly out of scope and not implemented**:
       neither model is wired into `segment::Segmenter` or into actual background
       removal — that remains later Phase 5 work, unaffected by this item.
-- [ ] Mask post-processing: threshold, morphological close, feather (`04` §8.3)
+- [x] Mask post-processing: threshold, morphological close, feather (`04` §8.3) —
+      built as `src/pipeline/maskPostProcess.ts` / `src-tauri/src/pipeline/
+      mask_post_process.rs`, run in the fixed order §8.3 step 5 lists (threshold →
+      close → feather) on whatever produced the mask so far — today only the
+      flood-fill fallback, wired in right after it in both `convert()` drivers.
+      All three are alpha-channel-only (straight alpha, never touching RGB or
+      going through Oklab, since a mask edge is not a colour-distance problem).
+      **Threshold**: binarizes at a 0..255 cutoff, "below" exclusive so a cutoff
+      of 0 still does something (any nonzero alpha snaps to opaque) rather than
+      being a silent no-op — matches the existing `alphaThreshold` convention in
+      `quantize.ts`/`.rs`. **Close**: grayscale dilate-then-erode by a pixel
+      radius, 4-connected (the same connectivity the flood and despeckle use);
+      erosion treats a missing (out-of-canvas) neighbour as opaque so closing
+      does not erode real content sitting at the image's own edge, the standard
+      boundary condition for the second half of a closing pass. **Feather**: a
+      separable box blur over the alpha channel, implemented with a running
+      prefix sum so cost is independent of radius (it runs at source resolution,
+      before downscale), edge-clamped by *shrinking* the averaging window near
+      a canvas border rather than replicating a padding value — a mask that
+      runs up to the canvas edge is not itself softened by that edge. `docs/04`
+      names no specific blur kernel; a box blur was the smallest reasonable
+      thing, plain integer/f64 arithmetic with no `libm` involved, so no
+      cross-language divergence risk the way Oklab has.
+      `BackgroundRemovalSettings` gained `threshold?`/`close`/`feather` fields,
+      all optional/0-off so every existing settings object literal kept
+      compiling unchanged. UI: three new controls in Convert mode's Background
+      section (`ConvertPanel.tsx`) — a re-threshold checkbox + cutoff slider,
+      a close-radius slider, a feather-radius slider — `state/convertStore.ts`
+      only includes a field in the built `BackgroundRemovalSettings` once it is
+      off its default, so a document that never touches these controls stores
+      the same flood-fill-only settings shape as before this change. Unit
+      tests in both languages: threshold's exact/inclusive boundary, close
+      filling a fully-enclosed single-pixel hole *and* leaving a large region's
+      outer boundary and far background untouched, feather producing a real
+      monotonic gradient over the configured radius and never softening a mask
+      that already reaches the canvas border, and the fixed threshold→close→
+      feather order end to end. A `convert()`-level integration test in both
+      languages builds a flood-fill "breach" (a thin, realistic gap in what
+      should be a closed boundary, not a deliberately isolated island) and
+      confirms `close` seals it before quantization while leaving unambiguous
+      background alone. Golden suite: 10 new edge cases (threshold, close,
+      feather, and all three stacked, alone and combined with fit-to-subject
+      and Floyd–Steinberg) — the corpus is now **3,101 cases over 920,064
+      pixels**, still zero differing palette indices and zero differing RGBA
+      bytes. Verified live: the desktop `tauri dev` WebView could not be reached
+      in this container (a port conflict from another long-lived dev server
+      sharing this environment, consistent with every prior phase's own note
+      about this container's WebView flakiness), so the fallback was the real
+      Vite dev bundle over Chrome DevTools Protocol — switched to Convert mode
+      via a real tab click, opened the real `▸ Background` section and
+      confirmed all three new controls render, injected a synthetic 40×40
+      source with a flood-fill "breach" directly into `previewRuntime`/
+      `convertStore` (same technique the flood-fill item's own verification
+      used), enabled background removal via a real checkbox click, and then
+      **dragged the real Close-radius `<input type=range>`** (a genuine native
+      `input` event, not a store call) to seal the breach in the live converted
+      preview — the interior pocket's alpha went from `0` to `255` — and back to
+      `0` restoring the breach when reset. Also drove the real re-threshold
+      checkbox and its slider and confirmed `buildSettings()` picked up the
+      value. Separately confirmed feather's effect is a genuine gradient by
+      calling the exact same `convert()` the app uses with `preserveAlpha: true`
+      (Convert mode's UI has no toggle for that — a pre-existing gap this task
+      did not introduce or hide): a hard cutoff (`[0,0,0,0,0,0,0,0,0,0,255]`)
+      versus a real transition band with feather on
+      (`[0,0,0,9,16,22,35,35,35,35,35]`). With the UI's actual default
+      (`preserveAlpha` off, `alphaThreshold` 128), that soft band gets snapped
+      back to a hard 0/255 boundary at quantize time exactly as `docs/04` §4.4
+      says pixel art normally wants — feather still visibly moves *where* that
+      boundary lands, just not as a translucent edge in the default export,
+      which is correct behaviour, not a shortfall of this item.
 - [ ] Fit-to-subject cropping (`04` §8.5)
 - [ ] Resolve the ONNX Runtime size question (`07` §6)
 
