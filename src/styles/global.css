@@ -835,6 +835,19 @@ select:focus-visible {
   color: var(--text-muted, #8b8f98);
 }
 
+.field-divider {
+  border: none;
+  border-top: 1px solid var(--border, #3a3a42);
+  margin: 0.6rem 0;
+}
+
+.segment-model-confirm,
+.segment-model-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
 .swatch-strip {
   display: flex;
   flex-wrap: wrap;

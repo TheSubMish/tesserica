@@ -54,6 +54,16 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 # this dispatch).
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic"] }
 
+# Checksum verification for the on-demand larger-model download
+# (`commands::segment`, `docs/08-roadmap.md` Phase 5 "on-demand download for
+# larger models with explicit consent"). Small, `std`-only, no transitive
+# dependencies of its own. The actual HTTP fetch happens in the frontend
+# (plain `fetch()`, since the model bytes still have to come from somewhere a
+# user explicitly triggered) — Rust's only job is to verify the bytes it is
+# handed over the raw invoke body and write them to disk, so this crate is
+# the one new dependency that download needs, not an HTTP client.
+md5 = "0.8.1"
+
 [profile.release]
 codegen-units = 1
 lto = true

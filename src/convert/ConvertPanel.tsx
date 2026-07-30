@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { SliderField } from '../app/SliderField';
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
 import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
+import { SegmentModelSection } from '../segment/SegmentModelSection.tsx';
 import {
   MAX_BACKGROUND_REMOVAL_TOLERANCE,
   MAX_PIXEL_SIZE,
@@ -180,6 +181,9 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
             state.setAdvanced({ backgroundRemovalTolerance })
           }
         />
+
+        <hr className="field-divider" />
+        <SegmentModelSection />
       </Collapsible>
 
       <Collapsible title="Cleanup">

@@ -40,6 +40,9 @@ macro_rules! all_commands {
             commands::source::release_source,
             commands::source::source_proxy,
             commands::source::export_conversion,
+            commands::segment::segmentation_model_info,
+            commands::segment::segmentation_model_status,
+            commands::segment::save_downloaded_segmentation_model,
             bench::bench_mode,
             bench::bench_json,
             bench::bench_raw,
@@ -66,6 +69,9 @@ macro_rules! all_commands {
             commands::source::release_source,
             commands::source::source_proxy,
             commands::source::export_conversion,
+            commands::segment::segmentation_model_info,
+            commands::segment::segmentation_model_status,
+            commands::segment::save_downloaded_segmentation_model,
         ]
     };
 }

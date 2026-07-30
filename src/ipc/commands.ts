@@ -278,3 +278,54 @@ export async function exportConversion(request: {
 }): Promise<ExportConversionResult> {
   return invoke<ExportConversionResult>('export_conversion', { request });
 }
+
+// ---------------------------------------------------------------------------
+// On-demand segmentation model download (`docs/08-roadmap.md` Phase 5
+// "on-demand download for larger models with explicit consent",
+// `src/segment/modelDownload.ts`).
+//
+// The actual network fetch happens in the frontend (plain `fetch()`, gated
+// on an explicit user confirmation — never here). These wrappers are what
+// gets the resulting bytes into Rust once that has happened: the same raw
+// invoke body `stageBytes` uses above, not a JSON argument, since a ~170 MB
+// model is even less appropriate there than a pixel buffer.
+// ---------------------------------------------------------------------------
+
+export interface SegmentationModelInfo {
+  id: string;
+  filename: string;
+  sourceUrl: string;
+  approxBytes: number;
+  license: string;
+}
+
+/** Static metadata for the confirm dialog. Not a network call. */
+export async function segmentationModelInfo(): Promise<SegmentationModelInfo> {
+  return invoke<SegmentationModelInfo>('segmentation_model_info');
+}
+
+export interface SegmentationModelStatus {
+  present: boolean;
+  path: string;
+}
+
+/** A local file-existence check only — not a network call. */
+export async function segmentationModelStatus(): Promise<SegmentationModelStatus> {
+  return invoke<SegmentationModelStatus>('segmentation_model_status');
+}
+
+export interface SavedSegmentationModel {
+  path: string;
+  bytes: number;
+}
+
+/**
+ * Hand already-downloaded model bytes to Rust for checksum verification and
+ * persistence. Call only after the frontend's own `fetch()` has succeeded —
+ * this function itself makes no network call.
+ */
+export async function saveDownloadedSegmentationModel(
+  bytes: ArrayBuffer,
+): Promise<SavedSegmentationModel> {
+  return invoke<SavedSegmentationModel>('save_downloaded_segmentation_model', bytes);
+}
