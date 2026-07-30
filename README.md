@@ -38,6 +38,13 @@ npm run tauri dev      # hot-reload frontend, rebuild Rust on change
 npm run tauri build    # .deb + .AppImage
 ```
 
+### Optional: background removal's bundled model
+
+`npm run models:fetch` downloads the small `u2netp.onnx` segmentation model
+(~4.7 MB, Apache-2.0) into the gitignored `assets/models/` — a one-time,
+network-requiring, developer-side step (see `assets/models/README.md`). AI
+background removal degrades cleanly to the flood-fill fallback without it.
+
 ## Checks
 
 ```bash

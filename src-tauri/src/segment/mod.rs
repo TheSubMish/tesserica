@@ -46,9 +46,29 @@ mod error;
 
 pub use error::SegmentError;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ort::session::Session;
+
+/// Where the build-time-fetched bundled `u2netp.onnx` lives in a checkout of
+/// this repository.
+///
+/// `scripts/fetch-model.ts` (`npm run models:fetch`) downloads it into
+/// `assets/models/u2netp.onnx` at the repository root — gitignored, fetched
+/// once per checkout, never committed (`docs/08-roadmap.md` Phase 5,
+/// `assets/models/README.md`). `CARGO_MANIFEST_DIR` is a compile-time
+/// constant pointing at `src-tauri/`, one level below the repository root, so
+/// this resolves the same way whether invoked via `cargo test`/`cargo run`
+/// directly or through `tauri dev`/`tauri build` (both of which shell out to
+/// `cargo` from the same directory).
+///
+/// **Dev-build resolution only.** How a *shipped* installer bundles this file
+/// (`tauri.conf.json` resources, alongside the ONNX Runtime `.so` itself) is
+/// the separate "Resolve the ONNX Runtime size question" roadmap item, not
+/// solved here.
+pub fn bundled_model_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/models/u2netp.onnx")
+}
 
 /// The result of an attempted segmentation pass.
 #[derive(Debug)]
@@ -229,6 +249,49 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, SegmentError::ModelNotFound(_)));
         assert!(!segmenter.is_available());
+    }
+
+    #[test]
+    fn bundled_model_path_points_at_assets_models_u2netp_onnx() {
+        let path = bundled_model_path();
+        assert!(path.ends_with("assets/models/u2netp.onnx"), "{path:?}");
+    }
+
+    /// A manually-run smoke test, not part of ordinary `cargo test` (no
+    /// ONNX Runtime `.so` is bundled or checked into this repo yet — that is
+    /// the separate "Resolve the ONNX Runtime size question" roadmap item).
+    /// Point `TESSERICA_TEST_ORT_LIB` at a real `libonnxruntime.so` to prove,
+    /// in this specific environment, that `ort` with the `load-dynamic`
+    /// feature actually `dlopen`s a real ONNX Runtime and commits a real
+    /// session against the *bundled* `u2netp.onnx` fetched by `npm run
+    /// models:fetch` (`bundled_model_path()`) — evidence the build-time fetch
+    /// script is actually wired to something `Segmenter::load` can use, not
+    /// just present on disk. Set `TESSERICA_TEST_ORT_MODEL` to override the
+    /// model path (e.g. to test against a different `.onnx` file); otherwise
+    /// defaults to the bundled path. Run with:
+    /// `TESSERICA_TEST_ORT_LIB=... cargo test segment -- --ignored --nocapture`
+    #[test]
+    #[ignore = "requires an external ONNX Runtime .so; the bundled model is fetched via `npm run models:fetch`"]
+    fn smoke_test_the_bundled_model_loads_with_a_real_onnx_runtime() {
+        let lib = std::env::var("TESSERICA_TEST_ORT_LIB").expect("set TESSERICA_TEST_ORT_LIB");
+        let model = std::env::var("TESSERICA_TEST_ORT_MODEL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| bundled_model_path());
+
+        assert!(
+            model.exists(),
+            "model not found at {model:?} — run `npm run models:fetch` first, or set \
+             TESSERICA_TEST_ORT_MODEL"
+        );
+
+        let mut segmenter = Segmenter::new();
+        segmenter
+            .load(Path::new(&lib), &model)
+            .expect("the bundled u2netp.onnx should load successfully with a real ONNX Runtime");
+        assert!(segmenter.is_available());
+        println!(
+            "loaded real ONNX Runtime from {lib} and bundled model from {model:?} successfully"
+        );
     }
 
     /// A manually-run smoke test, not part of ordinary `cargo test` (no
