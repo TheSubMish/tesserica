@@ -36,6 +36,24 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 # both languages from identical constants so golden-test parity is structural
 # (docs/10-decisions.md D10).
 
+# ONNX Runtime bindings for background-removal segmentation (`docs/04` §8,
+# `docs/07` §3.1). No stable release exists (re-verified 2026-07-30: latest is
+# `2.0.0-rc.13`, still an rc) — pinned to the *exact* version, no caret range,
+# and isolated entirely behind `src-tauri/src/segment/` per that section so
+# the rest of the app never touches `ort` directly. `rembg-rs` was evaluated
+# and rejected (see `docs/10-decisions.md` D15): it just wraps `ort` itself
+# (pinned to an older `^2.0.0-rc.10`) and drags in `imagequant`/`oxipng`, an
+# indexed-color quantization + PNG-recompression pipeline this project does
+# not want (D9 is RGBA-only; quantization already happens in `pipeline::
+# quantize`), for no isolation benefit over depending on `ort` directly.
+# `default-features = false` + `load-dynamic` (instead of `ort`'s default
+# `download-binaries`) means this crate never fetches a prebuilt ONNX Runtime
+# binary at build time; the real `libonnxruntime.so` is `dlopen`ed only at
+# runtime, when a caller actually points `segment::Segmenter::load` at one —
+# which has not happened yet (no runtime or model is bundled or downloaded in
+# this dispatch).
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

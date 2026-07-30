@@ -72,21 +72,40 @@ No blockers for Tauri v2 on this machine.
 | ~~`palette`~~ | ~~0.7.6~~ | ❌ **not used** — Oklab hand-rolled instead (D10, §3.2) |
 | `zip` | — | `.tess` archive |
 | `thiserror` | — | error types |
-| `ort` | **2.0.0-rc.12** | ⚠️ ONNX runtime — **no stable release** |
+| `ort` | **2.0.0-rc.13** | ⚠️ ONNX runtime — **no stable release**, direct dependency (D15) |
 
 ### 3.1 On `ort`
 
-`ort` has no stable 2.x release (verified 2026-07-26; latest is `2.0.0-rc.12`). This is
-the riskiest dependency in the stack.
+`ort` has no stable 2.x release (re-verified 2026-07-30; latest is `2.0.0-rc.13`, up from
+the `2.0.0-rc.12` this table previously recorded — actively maintained, not stalled: that
+release landed two days before this re-check). This is the riskiest dependency in the
+stack.
 
-Mitigations:
-- **Pin the exact rc version.** No caret ranges.
-- **Isolate behind `src-tauri/src/segment/`** so the entire ONNX surface is one module.
-- **Background removal is a v2 feature**, so there is time for a stable release.
-- Evaluate [`rembg-rs`](https://lib.rs/crates/rembg-rs) (ONNX Runtime + U2-Net) before
-  hand-rolling — it may absorb this risk.
-- Non-ML corner flood-fill fallback (`04` §8.5) means the feature degrades rather than
-  disappears if `ort` proves unworkable.
+**Decision (locked, `10-decisions.md` D15): depend on `ort` directly, not `rembg-rs`.**
+`rembg-rs` was evaluated as this section originally asked: real crates.io data shows it
+depends on `ort ^2.0.0-rc.10` itself (an older constraint, not a replacement for one), has
+747 total downloads across a ~9-month history, and pulls in `imagequant` (indexed-color
+quantization — conflicts with D9's RGBA-only v1) and `oxipng` (PNG recompression this
+project has no use for). It adds an extra dependency layer and an opinionated
+postprocessing pipeline without removing any of the actual risk. Full write-up in
+`10-decisions.md` D15.
+
+Mitigations, now implemented (`src-tauri/src/segment/`):
+- **Pin the exact rc version.** No caret ranges — `ort = "=2.0.0-rc.13"` in `Cargo.toml`.
+- **Isolate behind `src-tauri/src/segment/`.** Every other module talks to
+  `segment::Segmenter`, never to `ort`.
+- **Built with `load-dynamic`, not the default `download-binaries`.** The crate compiles
+  with zero system or network dependencies; the real ONNX Runtime shared library is
+  `dlopen`ed only when `Segmenter::load` is actually called with a path, which is not yet
+  wired to any bundled or downloaded runtime (that is Q9/the next Phase 5 roadmap item) —
+  a missing dylib is a plain, gracefully-reported error, never a build failure or a panic.
+- **Verified working in this container**, not just compiling: a manually-run smoke test
+  (`#[ignore]`d, not part of ordinary `cargo test`) `dlopen`ed a real ONNX Runtime 1.28.0
+  and committed a real inference session against a real (if oversized, non-`u2netp`)
+  `.onnx` file, in under a second. See D15 for exact reproduction.
+- **Background removal is a v2 feature**, so there is time for a stable `ort` release; the
+  non-ML corner flood-fill fallback (`04` §8.5) already shipped, so the feature degrades
+  rather than disappears if `ort` proves unworkable later.
 
 ### 3.2 On `palette`
 

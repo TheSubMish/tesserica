@@ -15,6 +15,7 @@ pub mod commands;
 pub mod error;
 pub mod model;
 pub mod pipeline;
+pub mod segment;
 pub mod staging;
 
 /// The command list.

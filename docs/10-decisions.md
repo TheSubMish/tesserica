@@ -407,6 +407,82 @@ not a hypothetical).
 
 ---
 
+## D15 · Segmentation runtime: direct **`ort`**, not `rembg-rs`; loaded via `load-dynamic`
+
+**Locked 2026-07-30.** Resolves the `07-tech-stack.md` §3.1 evaluation item
+(`08-roadmap.md` Phase 5, "`segment` module; evaluate `rembg-rs` vs direct `ort`") by
+re-checking both crates against crates.io rather than trusting the 2026-07-26 dependency
+note.
+
+**Re-verified state of `ort`.** Still no stable 2.x release: latest is `2.0.0-rc.13`
+(created 2026-07-28, two days before this decision — the crate is actively maintained, not
+stalled), up from the `2.0.0-rc.12` `07-tech-stack.md` recorded. License `MIT OR
+Apache-2.0` (both `ort` and its `ort-sys` companion) — MIT-compatible, no GPL surface.
+
+**`rembg-rs` evaluated, not assumed.** `07` §3.1 flagged it as worth checking before
+hand-rolling. Real crates.io data (2026-07-30):
+
+| | `rembg-rs` |
+|---|---|
+| Latest version | 0.1.4 |
+| First published | 2025-10-23 (~9 months old) |
+| Total downloads (all versions) | 747 |
+| License | MIT |
+| Its own `ort` dependency | `^2.0.0-rc.10` — an *older*, looser-pinned constraint than the one this project needs to hold exactly |
+| Other dependencies pulled in | `imagequant` (palette/indexed-color quantization), `oxipng` (PNG recompression), `derive_builder` |
+
+Two things make this a clear rejection, not a close call:
+
+1. **It does not remove `ort` as a dependency, it adds a second version constraint on top
+   of it.** `rembg-rs` depends on `ort ^2.0.0-rc.10`; this project would still need to
+   track `ort`'s own pre-release churn, just through an extra layer that itself has had 747
+   downloads total and a single maintainer.
+2. **Its bundled postprocessing actively conflicts with locked decisions.** `imagequant` is
+   an indexed-color quantizer — D9 ships RGBA only in v1, and quantization already happens
+   in `pipeline::quantize` in both languages, in Oklab, matching `04` §4. `oxipng`
+   recompresses PNGs after the fact, which this project has no use for since export already
+   goes through `image`'s own PNG encoder. Using `rembg-rs` would mean either fighting its
+   opinionated pipeline or carrying two unrelated dependency subtrees for no benefit over
+   calling `ort` directly, where `04` §8.3's own preprocess/inference/postprocess steps can
+   be implemented exactly as specified.
+
+**Decision: depend on `ort` directly**, pinned to the exact `2.0.0-rc.13` (no caret range,
+`src-tauri/Cargo.toml`), isolated entirely behind `src-tauri/src/segment/` — every other
+module talks to `segment::Segmenter`, never to `ort`.
+
+**Build-time isolation: `load-dynamic`, not `download-binaries`.** `ort`'s default feature
+set includes `download-binaries`, which fetches a prebuilt ONNX Runtime binary from the
+network *at build time* and links against it — a compile-time network dependency for a
+crate this project wants to isolate, and a poor fit for a Linux-only app that will
+eventually offer the runtime as an explicit, user-consented download (`07` §6, still open
+as Q9). `Cargo.toml` instead sets `default-features = false` with `["std", "ndarray",
+"load-dynamic"]`: `ort` compiles with zero system or network dependencies, and the actual
+`libonnxruntime.so` is `dlopen`ed only when `Segmenter::load` is called with a real path —
+which is also exactly the shape "no model bundled yet, degrade cleanly" needs, since a
+missing dylib becomes an ordinary `SegmentError`, never a build failure.
+
+**Verified in this container**, not assumed:
+
+- `cargo check` / `cargo clippy -- -D warnings` / `cargo test` all pass with `ort` added —
+  no system ONNX Runtime library was needed to get here, confirming `load-dynamic` really
+  does defer everything to runtime.
+- A real smoke test (`segment::tests::smoke_test_a_real_onnx_runtime_and_model_if_env_vars_point_at_them`,
+  `#[ignore]`d by default since neither file is bundled or checked in) was run against a
+  genuine ONNX Runtime 1.28.0 `libonnxruntime.so` (Linux x64, fetched transiently from
+  `microsoft/onnxruntime`'s GitHub releases for this evaluation only — not vendored) and a
+  real 176 MB `u2net.onnx` file already present on this machine from unrelated prior work.
+  `Segmenter::load` `dlopen`ed the runtime and committed a real inference session in under
+  a second. This is real evidence that `ort` + `load-dynamic` actually works end to end in
+  this container, not just that it compiles.
+
+Rejected: `rembg-rs` (above); linking ONNX Runtime at build time via `download-binaries`
+(reintroduces a build-time network dependency and coarser isolation, for no benefit since
+segmentation is never invoked from the build); hand-rolling ONNX Runtime C API bindings
+directly (`ort` already is that, maintained, MIT/Apache-2.0 — there is no reason to
+duplicate it).
+
+---
+
 ## Still open — deferred, not decided
 
 These genuinely need measurement rather than a preference, and each is scheduled:
@@ -437,3 +513,4 @@ These genuinely need measurement rather than a preference, and each is scheduled
 | D12 | Oklab is **`f64` both sides**; parity measured in **palette indices** |
 | D13 | Editor layers cross IPC on the **raw invoke body** |
 | D14 | **Canvas2D holds** at target sizes; no WebGL2 renderer |
+| D15 | Segmentation: direct **`ort`** (not `rembg-rs`), loaded via `load-dynamic` |
