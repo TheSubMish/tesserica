@@ -226,6 +226,20 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
         />
 
         <hr className="field-divider" />
+        <label className="field check">
+          <input
+            type="checkbox"
+            checked={state.fitToSubject}
+            onChange={(e) => state.setAdvanced({ fitToSubject: e.target.checked })}
+          />
+          Fit to subject
+        </label>
+        <p className="field-note">
+          Crops to the bounding box of whatever the mask above leaves opaque (or, with no mask
+          enabled, the source&apos;s own alpha). A no-op on a fully opaque source.
+        </p>
+
+        <hr className="field-divider" />
         <SegmentModelSection />
       </Collapsible>
 

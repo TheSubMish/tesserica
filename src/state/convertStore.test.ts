@@ -158,5 +158,12 @@ describe('convertStore', () => {
         feather: 5,
       });
     });
+
+    it('leaves fit-to-subject off by default and forwards it once enabled', () => {
+      withSource();
+      expect(buildSettings(useConvertStore.getState()).fitToSubject).toBe(false);
+      useConvertStore.getState().setAdvanced({ fitToSubject: true });
+      expect(buildSettings(useConvertStore.getState()).fitToSubject).toBe(true);
+    });
   });
 });

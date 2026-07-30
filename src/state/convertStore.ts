@@ -83,6 +83,14 @@ interface ConvertState {
   /** 0 = off. Pixel radius (`...::BackgroundRemovalSettings.feather`). */
   maskFeather: number;
 
+  /**
+   * Stage [2]'s framing flag (`docs/04` §8.5) — crop to the bounding box of
+   * whatever the mask above (or, absent one, the source's own alpha) leaves
+   * opaque. Off by default: like background removal, it is a one-way crop on
+   * a source most users have not asked to touch yet.
+   */
+  fitToSubject: boolean;
+
   // --- view ---
   viewMode: ViewMode;
   /** 0..1 position of the split handle. */
@@ -121,6 +129,7 @@ export type AdvancedSettings = Pick<
   | 'maskThreshold'
   | 'maskClose'
   | 'maskFeather'
+  | 'fitToSubject'
 >;
 
 /** Pixel size is a block edge in source pixels; 1 means no downscale at all. */
@@ -161,6 +170,8 @@ export const useConvertStore = create<ConvertState>((set) => ({
   maskThreshold: 128,
   maskClose: 0,
   maskFeather: 0,
+
+  fitToSubject: false,
 
   viewMode: 'split',
   splitAt: 0.5,
@@ -215,6 +226,7 @@ export function buildSettings(state: ConvertState): ConvertSettings {
           ...(state.maskFeather > 0 ? { feather: state.maskFeather } : {}),
         }
       : undefined,
+    fitToSubject: state.fitToSubject,
     downscaleMode: state.downscaleMode,
     dither: state.dither,
     ditherStrength: state.ditherStrength,

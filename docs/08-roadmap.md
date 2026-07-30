@@ -727,7 +727,40 @@ holds; D14) rather than a deferred question.
       says pixel art normally wants — feather still visibly moves *where* that
       boundary lands, just not as a translucent edge in the default export,
       which is correct behaviour, not a shortfall of this item.
-- [ ] Fit-to-subject cropping (`04` §8.5)
+- [x] Fit-to-subject cropping (`04` §8.5) — the pipeline mechanism (`opaqueBounds` +
+      `fitToSubject` in `src/pipeline/crop.ts` / `src-tauri/src/pipeline/crop.rs`, wired as
+      stage [2] in both `convert()` drivers) was **already built in Phase 2**
+      (`2954a79`), matching `04` §8.5 exactly: "compute the mask's bounding box, add
+      padding, crop." It runs after stage [1] (flood-fill background removal + this
+      phase's mask post-processing) in both languages, so it always sees whatever mask
+      that stage produced, post-threshold/close/feather — not the raw flood-fill output
+      — confirmed by reading the fixed `convert()` order rather than assumed, and already
+      covered by cross-language integration tests (`background_removal_runs_before_crop_
+      and_fit_to_subject`, its TS mirror) and golden-matrix cases combining it with mask
+      post-processing (`mask-feather-then-fit-to-subject`, `background-removal-then-fit-
+      to-subject`). What was actually missing, and is what this item built: **the feature
+      had no UI** — `fitToSubject` was reachable only by constructing `ConvertSettings`
+      directly, with no way for a user to turn it on. Added a "Fit to subject" checkbox to
+      Convert mode's existing `▸ Background` section (`ConvertPanel.tsx`), a
+      `fitToSubject` field on `convertStore.ts` (off by default, independent of the
+      background-removal toggle — it also works standing alone against a source that
+      already carries alpha, exactly as `settings.ts` already documented), and threaded it
+      into `buildSettings()`. One new unit test confirms the off-default and the
+      store→settings wiring. Verified live: `tauri dev`'s WebView was unreachable in this
+      container as in every prior phase, so the fallback was the real Vite dev bundle
+      over Chrome DevTools Protocol (headless Chrome, native Node `WebSocket` driving the
+      CDP wire protocol directly, no new dependency added) — switched to Convert mode via
+      the store the real tab click uses, injected a synthetic 40×40 RGBA source (fully
+      transparent except an opaque 6×6 coloured block off-center) directly into
+      `previewRuntime`/`convertStore`, and drove the real preview end to end: before
+      enabling fit-to-subject the converted result was 2.25% opaque with a transparent
+      center (the un-cropped canvas); after, it was 100% opaque with an opaque, coloured
+      center — the crop-then-nearest-upscale `04` §8.5 describes, running through the
+      actual Web Worker pipeline. Separately clicked the real "Fit to subject" checkbox
+      (after expanding the real `▸ Background` header) and confirmed it flips the store
+      field via a genuine DOM `click`, not a store call. `npm run test:golden` re-run
+      clean (no pipeline files touched) at the existing **3,101 cases / 920,064 pixels**,
+      zero differing indices, zero differing RGBA bytes.
 - [ ] Resolve the ONNX Runtime size question (`07` §6)
 
 **Exit:** ✅ **W1 complete.** The flagship workflow works without leaving the app.
