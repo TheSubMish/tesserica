@@ -62,6 +62,12 @@ pub struct OutlineSettings {
 /// four corners. The ONNX segmentation model §8 otherwise describes is a later,
 /// Rust-only Phase 5 item; this one needs no model and runs identically on both
 /// sides.
+///
+/// `threshold`/`close`/`feather` are the mask post-processing steps §8.3 step 5
+/// describes (`pipeline::mask_post_process`), run in that fixed order after the
+/// flood-fill produces its mask. All three are optional/"off by default" — the
+/// flood-fill's own output is already a clean binary mask, so none of them are
+/// needed until a real segmentation model's softer matte exists.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundRemovalSettings {
@@ -70,6 +76,33 @@ pub struct BackgroundRemovalSettings {
     /// matches; higher values tolerate more variation (soft shadows, mild
     /// gradients) before the flood stops at an edge.
     pub tolerance: f64,
+    /// 0..255. When set, re-binarizes the mask at this cutoff before close and
+    /// feather run: alpha below the cutoff goes fully transparent, at or above
+    /// goes fully opaque. `None` skips this step entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<u8>,
+    /// 0 = off. Structuring-element radius, in pixels, for a dilate-then-erode
+    /// closing pass that fills small holes/gaps without growing the mask's
+    /// outer boundary.
+    #[serde(default)]
+    pub close: u32,
+    /// 0 = off. Box-blur radius, in pixels, applied to the alpha channel only,
+    /// that softens the mask's edge instead of a hard aliased cutoff.
+    #[serde(default)]
+    pub feather: u32,
+}
+
+impl BackgroundRemovalSettings {
+    /// Just the flood-fill tolerance, with every post-processing step off —
+    /// the shape every call site before this change already assumed.
+    pub fn new(tolerance: f64) -> Self {
+        Self {
+            tolerance,
+            threshold: None,
+            close: 0,
+            feather: 0,
+        }
+    }
 }
 
 /// Where the palette comes from.

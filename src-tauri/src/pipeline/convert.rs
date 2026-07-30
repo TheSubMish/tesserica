@@ -24,6 +24,7 @@ use super::cleanup;
 use super::crop;
 use super::dither;
 use super::downscale::downscale;
+use super::mask_post_process::post_process_mask;
 use super::quantize::{
     self, AlphaPolicy, NearestCache, PreparedPalette, QuantizeResult, TRANSPARENT_INDEX,
 };
@@ -124,11 +125,12 @@ pub fn quantize_with_dither(
 }
 
 pub fn convert(source: &PixelBuffer, settings: &ConvertSettings) -> Result<ConvertResult, String> {
-    // [1] background removal — flood-fill fallback only (§8.5)
-    let removed = settings
-        .background_removal
-        .as_ref()
-        .map(|bg| remove_background_flood_fill(source, bg));
+    // [1] background removal — flood-fill fallback only (§8.5), then mask
+    // post-processing (§8.3 step 5: threshold, close, feather)
+    let removed = settings.background_removal.as_ref().map(|bg| {
+        let mask = remove_background_flood_fill(source, bg);
+        post_process_mask(&mask, bg)
+    });
     let source = removed.as_ref().unwrap_or(source);
 
     // [2] framing
@@ -359,11 +361,81 @@ mod tests {
         let mut settings = ConvertSettings::new(2, 2, two_colors());
         settings.downscale_mode = DownscaleMode::Nearest;
         settings.fit_to_subject = true;
-        settings.background_removal =
-            Some(crate::pipeline::settings::BackgroundRemovalSettings { tolerance: 0.02 });
+        settings.background_removal = Some(
+            crate::pipeline::settings::BackgroundRemovalSettings::new(0.02),
+        );
 
         let out = convert(&src, &settings).unwrap();
         assert!(out.indices.iter().all(|&i| i == 0));
+    }
+
+    #[test]
+    fn mask_post_processing_close_seals_a_flood_fill_breach_before_quantization() {
+        // A 6x6 image: white background, a black 4x4 "ring" (rows/cols 1..=4)
+        // enclosing a white 2x2 interior pocket at (2,2)-(3,3), connected to
+        // the true exterior background only through a single white 1px gap
+        // in the ring's otherwise-solid wall. The corner flood walks in
+        // through that one gap and clears the interior pocket to alpha 0 too
+        // — a realistic flood-fill artifact (a thin breach in what should be
+        // a closed boundary), not a deliberately isolated island.
+        //
+        // The ring sits with a 3px margin from every canvas edge — wider
+        // than the radius-2 close below reaches — so the "far background"
+        // check point is unaffected by the closing pass *or* by the corner
+        // boundary condition `morphological_close` uses (missing neighbours
+        // treated as opaque during erosion), which only matters within
+        // `radius` pixels of the canvas edge.
+        let mut src = solid(12, 12, [255, 255, 255, 255]);
+        for y in 3..=6u32 {
+            for x in 3..=6u32 {
+                let interior = (4..=5).contains(&x) && (4..=5).contains(&y);
+                let gap = x == 3 && y == 4;
+                if !interior && !gap {
+                    let o = src.offset(x, y);
+                    src.data[o..o + 4].copy_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+
+        let palette = PaletteSpec::Fixed {
+            colors: vec![[0, 0, 0, 255], [255, 255, 255, 255]],
+        };
+        let mut settings = ConvertSettings::new(12, 12, palette);
+        settings.downscale_mode = DownscaleMode::Nearest;
+
+        // Without any post-processing, the flood's breach reaches the
+        // pocket: it comes out transparent.
+        settings.background_removal = Some(
+            crate::pipeline::settings::BackgroundRemovalSettings::new(0.0),
+        );
+        let without_close = convert(&src, &settings).unwrap();
+        assert_eq!(
+            without_close.indices[12 * 4 + 4],
+            TRANSPARENT_INDEX,
+            "the interior pocket must start out transparent, or this test proves nothing"
+        );
+
+        // With a close radius wide enough to bridge the 1px breach, the
+        // pocket is sealed back up before quantization ever sees it.
+        settings.background_removal = Some(crate::pipeline::settings::BackgroundRemovalSettings {
+            tolerance: 0.0,
+            threshold: None,
+            close: 2,
+            feather: 0,
+        });
+        let with_close = convert(&src, &settings).unwrap();
+        assert_ne!(
+            with_close.indices[12 * 4 + 4],
+            TRANSPARENT_INDEX,
+            "close must have sealed the breach before quantization"
+        );
+
+        // A real, unambiguous background pixel far from the ring (the
+        // canvas corner, 6px away from the nearest ring cell) must still
+        // read transparent either way — closing must not have grown into
+        // it.
+        assert_eq!(without_close.indices[0], TRANSPARENT_INDEX);
+        assert_eq!(with_close.indices[0], TRANSPARENT_INDEX);
     }
 
     #[test]

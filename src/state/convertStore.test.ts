@@ -122,5 +122,41 @@ describe('convertStore', () => {
         tolerance: 0.12,
       });
     });
+
+    it('omits mask post-processing fields while they are at their off defaults', () => {
+      withSource();
+      useConvertStore.getState().setAdvanced({ backgroundRemovalEnabled: true });
+      expect(buildSettings(useConvertStore.getState()).backgroundRemoval).toEqual({
+        tolerance: 0.08,
+      });
+    });
+
+    it('includes threshold only once the re-threshold checkbox is on', () => {
+      withSource();
+      useConvertStore.getState().setAdvanced({
+        backgroundRemovalEnabled: true,
+        maskThreshold: 200,
+      });
+      expect(
+        buildSettings(useConvertStore.getState()).backgroundRemoval?.threshold,
+      ).toBeUndefined();
+
+      useConvertStore.getState().setAdvanced({ maskThresholdEnabled: true });
+      expect(buildSettings(useConvertStore.getState()).backgroundRemoval?.threshold).toBe(200);
+    });
+
+    it('includes close and feather once either radius is above zero', () => {
+      withSource();
+      useConvertStore.getState().setAdvanced({
+        backgroundRemovalEnabled: true,
+        maskClose: 3,
+        maskFeather: 5,
+      });
+      expect(buildSettings(useConvertStore.getState()).backgroundRemoval).toEqual({
+        tolerance: 0.08,
+        close: 3,
+        feather: 5,
+      });
+    });
   });
 });

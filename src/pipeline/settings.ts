@@ -39,6 +39,12 @@ export interface OutlineSettings {
  * four corners. The ONNX segmentation model §8 otherwise describes is a later,
  * Rust-only Phase 5 item; this one needs no model and runs identically on both
  * sides.
+ *
+ * `threshold`/`close`/`feather` are the mask post-processing steps §8.3 step 5
+ * describes (`pipeline/maskPostProcess.ts`), run in that fixed order after the
+ * flood-fill produces its mask. All three are optional/"off by default" — the
+ * flood-fill's own output is already a clean binary mask, so none of them are
+ * needed until a real segmentation model's softer matte exists.
  */
 export interface BackgroundRemovalSettings {
   /**
@@ -48,6 +54,23 @@ export interface BackgroundRemovalSettings {
    * gradients) before the flood stops at an edge.
    */
   tolerance: number;
+  /**
+   * 0..255. When set, re-binarizes the mask at this cutoff before close and
+   * feather run: alpha below the cutoff goes fully transparent, at or above
+   * goes fully opaque. Undefined skips this step entirely.
+   */
+  threshold?: number;
+  /**
+   * 0 = off. Structuring-element radius, in pixels, for a dilate-then-erode
+   * closing pass that fills small holes/gaps without growing the mask's outer
+   * boundary.
+   */
+  close?: number;
+  /**
+   * 0 = off. Box-blur radius, in pixels, applied to the alpha channel only,
+   * that softens the mask's edge instead of a hard aliased cutoff.
+   */
+  feather?: number;
 }
 
 /**

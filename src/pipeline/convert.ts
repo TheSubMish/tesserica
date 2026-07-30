@@ -26,6 +26,7 @@ import { despeckle, outline } from './cleanup.ts';
 import { crop, fitToSubject } from './crop.ts';
 import { ATKINSON, FLOYD_STEINBERG, quantizeErrorDiffusion, quantizeOrdered } from './dither.ts';
 import { downscale } from './downscale.ts';
+import { postProcessMask } from './maskPostProcess.ts';
 import {
   TRANSPARENT_INDEX,
   alphaPolicyFrom,
@@ -110,10 +111,12 @@ export function quantizeWithDither(
 }
 
 export function convert(source: PixelBuffer, settings: ConvertSettings): ConvertResult {
-  // [1] background removal — flood-fill fallback only (§8.5)
+  // [1] background removal — flood-fill fallback only (§8.5), then mask
+  // post-processing (§8.3 step 5: threshold, close, feather)
   let image = source;
   if (settings.backgroundRemoval) {
     image = removeBackgroundFloodFill(image, settings.backgroundRemoval);
+    image = postProcessMask(image, settings.backgroundRemoval);
   }
 
   // [2] framing

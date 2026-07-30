@@ -6,6 +6,9 @@ import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
 import { SegmentModelSection } from '../segment/SegmentModelSection.tsx';
 import {
   MAX_BACKGROUND_REMOVAL_TOLERANCE,
+  MAX_MASK_CLOSE,
+  MAX_MASK_FEATHER,
+  MAX_MASK_THRESHOLD,
   MAX_PIXEL_SIZE,
   MIN_BACKGROUND_REMOVAL_TOLERANCE,
   MIN_PIXEL_SIZE,
@@ -180,6 +183,46 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
           onChange={(backgroundRemovalTolerance) =>
             state.setAdvanced({ backgroundRemovalTolerance })
           }
+        />
+
+        <hr className="field-divider" />
+        <p className="field-note">
+          Mask post-processing: cleans up whatever produced the mask above — today only the
+          flood-fill, later a segmentation model too.
+        </p>
+
+        <label className="field check">
+          <input
+            type="checkbox"
+            checked={state.maskThresholdEnabled}
+            disabled={!state.backgroundRemovalEnabled}
+            onChange={(e) => state.setAdvanced({ maskThresholdEnabled: e.target.checked })}
+          />
+          Re-threshold mask
+        </label>
+        <SliderField
+          label="Threshold"
+          min={0}
+          max={MAX_MASK_THRESHOLD}
+          value={state.maskThreshold}
+          disabled={!state.backgroundRemovalEnabled || !state.maskThresholdEnabled}
+          onChange={(maskThreshold) => state.setAdvanced({ maskThreshold })}
+        />
+        <SliderField
+          label="Close radius"
+          min={0}
+          max={MAX_MASK_CLOSE}
+          value={state.maskClose}
+          disabled={!state.backgroundRemovalEnabled}
+          onChange={(maskClose) => state.setAdvanced({ maskClose })}
+        />
+        <SliderField
+          label="Feather radius"
+          min={0}
+          max={MAX_MASK_FEATHER}
+          value={state.maskFeather}
+          disabled={!state.backgroundRemovalEnabled}
+          onChange={(maskFeather) => state.setAdvanced({ maskFeather })}
         />
 
         <hr className="field-divider" />

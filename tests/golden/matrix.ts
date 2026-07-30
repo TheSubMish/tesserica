@@ -150,6 +150,33 @@ export function edgeCases(): MatrixCase[] {
     backgroundRemoval: { tolerance: 0.08 },
     dither: 'floyd-steinberg',
   });
+
+  // Mask post-processing (`docs/04` §8.3 step 5): threshold, morphological
+  // close, feather — run on the flood-fill's own mask, in that fixed order.
+  // `alpha`'s already-soft edge and `portrait`'s noisy corners are the two
+  // shapes most likely to expose a boundary-condition or rounding
+  // disagreement between the two implementations.
+  push(portrait, 'mask-threshold', { backgroundRemoval: { tolerance: 0.08, threshold: 200 } });
+  push(alpha, 'mask-threshold', { backgroundRemoval: { tolerance: 0.05, threshold: 40 } });
+  push(portrait, 'mask-close', { backgroundRemoval: { tolerance: 0.08, close: 2 } });
+  push(flatIllustration, 'mask-close', { backgroundRemoval: { tolerance: 0.05, close: 3 } });
+  push(portrait, 'mask-feather', { backgroundRemoval: { tolerance: 0.08, feather: 3 } });
+  push(gradient, 'mask-feather', { backgroundRemoval: { tolerance: 0.2, feather: 5 } });
+  push(portrait, 'mask-threshold-close-feather', {
+    backgroundRemoval: { tolerance: 0.08, threshold: 180, close: 2, feather: 2 },
+  });
+  push(alpha, 'mask-threshold-close-feather', {
+    backgroundRemoval: { tolerance: 0.05, threshold: 100, close: 1, feather: 4 },
+  });
+  push(portrait, 'mask-feather-then-fit-to-subject', {
+    backgroundRemoval: { tolerance: 0.08, feather: 2 },
+    fitToSubject: true,
+  });
+  push(portrait, 'mask-close-floyd-steinberg', {
+    backgroundRemoval: { tolerance: 0.08, close: 2 },
+    dither: 'floyd-steinberg',
+  });
+
   push(alpha, 'preserve-alpha', { preserveAlpha: true });
   push(alpha, 'low-alpha-threshold', { alphaThreshold: 8 });
   push(alpha, 'high-alpha-threshold', { alphaThreshold: 250 });

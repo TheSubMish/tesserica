@@ -474,6 +474,53 @@ describe('convert', () => {
     expect([...out.indices].every((i) => i === 0)).toBe(true);
   });
 
+  it('mask post-processing (close) seals a flood-fill breach before quantization', () => {
+    // A 12x12 image: white background, a black 4x4 "ring" (rows/cols 3..=6)
+    // enclosing a white 2x2 interior pocket at (4,4)-(5,5), connected to the
+    // true exterior background only through a single white 1px gap in the
+    // ring's otherwise-solid wall. The corner flood walks in through that
+    // one gap and clears the interior pocket to alpha 0 too — a realistic
+    // flood-fill artifact (a thin breach in what should be a closed
+    // boundary), not a deliberately isolated island.
+    //
+    // The ring sits with a 3px margin from every canvas edge — wider than
+    // the radius-2 close below reaches — so the "far background" check
+    // point is unaffected by the closing pass or by the corner boundary
+    // condition `morphologicalClose` uses (missing neighbours treated as
+    // opaque during erosion), which only matters within `radius` pixels of
+    // the canvas edge.
+    const src = solid(12, 12, [255, 255, 255, 255]);
+    for (let y = 3; y <= 6; y++) {
+      for (let x = 3; x <= 6; x++) {
+        const interior = x >= 4 && x <= 5 && y >= 4 && y <= 5;
+        const gap = x === 3 && y === 4;
+        if (!interior && !gap) src.data.set([0, 0, 0, 255], (y * 12 + x) * 4);
+      }
+    }
+
+    const baseSettings = {
+      ...defaultSettings(12, 12, BLACK_AND_WHITE),
+      downscaleMode: 'nearest' as const,
+    };
+
+    const withoutClose = convert(src, {
+      ...baseSettings,
+      backgroundRemoval: { tolerance: 0 },
+    });
+    expect(withoutClose.indices[12 * 4 + 4]).toBe(TRANSPARENT_INDEX);
+
+    const withClose = convert(src, {
+      ...baseSettings,
+      backgroundRemoval: { tolerance: 0, close: 2 },
+    });
+    expect(withClose.indices[12 * 4 + 4]).not.toBe(TRANSPARENT_INDEX);
+
+    // A real, unambiguous background pixel far from the ring (the canvas
+    // corner) must still read transparent either way.
+    expect(withoutClose.indices[0]).toBe(TRANSPARENT_INDEX);
+    expect(withClose.indices[0]).toBe(TRANSPARENT_INDEX);
+  });
+
   it('converts a white image to the white palette entry', () => {
     const out = convert(solid(8, 8, [255, 255, 255, 255]), defaultSettings(4, 4, BLACK_AND_WHITE));
     expect([out.image.width, out.image.height]).toEqual([4, 4]);

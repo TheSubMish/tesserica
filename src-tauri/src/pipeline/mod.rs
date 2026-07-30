@@ -21,6 +21,7 @@ pub mod convert;
 pub mod crop;
 pub mod dither;
 pub mod downscale;
+pub mod mask_post_process;
 pub mod oklab;
 pub mod quantize;
 pub mod settings;

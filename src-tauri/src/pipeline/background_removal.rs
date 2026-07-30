@@ -125,8 +125,7 @@ mod tests {
     #[test]
     fn a_uniform_image_is_entirely_cleared() {
         let src = solid(4, 4, [200, 200, 200, 255]);
-        let out =
-            remove_background_flood_fill(&src, &BackgroundRemovalSettings { tolerance: 0.02 });
+        let out = remove_background_flood_fill(&src, &BackgroundRemovalSettings::new(0.02));
         assert!(out.data.chunks_exact(4).all(|px| px[3] == 0));
         // RGB is left alone.
         assert_eq!(&out.data[0..3], &[200, 200, 200]);
@@ -147,8 +146,7 @@ mod tests {
                 src.data[o..o + 4].copy_from_slice(&[0, 0, 0, 255]);
             }
         }
-        let out =
-            remove_background_flood_fill(&src, &BackgroundRemovalSettings { tolerance: 0.02 });
+        let out = remove_background_flood_fill(&src, &BackgroundRemovalSettings::new(0.02));
         let centre = src.offset(2, 2);
         assert_eq!(out.data[centre + 3], 255, "enclosed patch must survive");
         assert_eq!(out.data[3], 0, "the actual background must be cleared");
@@ -162,8 +160,7 @@ mod tests {
         let o = src.offset(1, 0);
         src.data[o..o + 4].copy_from_slice(&[0, 0, 200, 255]);
 
-        let out =
-            remove_background_flood_fill(&src, &BackgroundRemovalSettings { tolerance: 0.02 });
+        let out = remove_background_flood_fill(&src, &BackgroundRemovalSettings::new(0.02));
         assert_eq!(out.data[3], 0, "corner cleared");
         assert_eq!(out.data[o + 3], 255, "distinct colour left alone");
     }
@@ -174,7 +171,7 @@ mod tests {
         let o = src.offset(1, 0);
         src.data[o..o + 4].copy_from_slice(&[11, 10, 10, 255]);
 
-        let out = remove_background_flood_fill(&src, &BackgroundRemovalSettings { tolerance: 0.0 });
+        let out = remove_background_flood_fill(&src, &BackgroundRemovalSettings::new(0.0));
         assert_eq!(out.data[3], 0, "exact match to the seed cleared");
         assert_eq!(out.data[o + 3], 255, "even a 1-unit-off neighbour is not");
     }
@@ -182,8 +179,7 @@ mod tests {
     #[test]
     fn a_one_pixel_tall_image_does_not_panic_on_coincident_corners() {
         let src = solid(4, 1, [128, 64, 32, 255]);
-        let out =
-            remove_background_flood_fill(&src, &BackgroundRemovalSettings { tolerance: 0.02 });
+        let out = remove_background_flood_fill(&src, &BackgroundRemovalSettings::new(0.02));
         assert!(out.data.chunks_exact(4).all(|px| px[3] == 0));
     }
 }

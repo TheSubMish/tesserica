@@ -69,6 +69,20 @@ interface ConvertState {
   /** Un-squared Oklab distance (`pipeline/settings.ts::BackgroundRemovalSettings`). */
   backgroundRemovalTolerance: number;
 
+  /**
+   * Mask post-processing on the flood-fill's own output (`docs/04` §8.3 step
+   * 5): threshold, morphological close, feather. All off by default — the
+   * flood-fill's mask is already clean binary output; these exist for the
+   * cases (a soft edge, a thin breach in the boundary) where it is not.
+   */
+  maskThresholdEnabled: boolean;
+  /** 0..255 cutoff (`pipeline/settings.ts::BackgroundRemovalSettings.threshold`). */
+  maskThreshold: number;
+  /** 0 = off. Pixel radius (`...::BackgroundRemovalSettings.close`). */
+  maskClose: number;
+  /** 0 = off. Pixel radius (`...::BackgroundRemovalSettings.feather`). */
+  maskFeather: number;
+
   // --- view ---
   viewMode: ViewMode;
   /** 0..1 position of the split handle. */
@@ -103,6 +117,10 @@ export type AdvancedSettings = Pick<
   | 'alphaThreshold'
   | 'backgroundRemovalEnabled'
   | 'backgroundRemovalTolerance'
+  | 'maskThresholdEnabled'
+  | 'maskThreshold'
+  | 'maskClose'
+  | 'maskFeather'
 >;
 
 /** Pixel size is a block edge in source pixels; 1 means no downscale at all. */
@@ -112,6 +130,11 @@ export const MAX_PIXEL_SIZE = 64;
 /** 0..1 Oklab distance range the tolerance slider exposes (`docs/04` §8.5). */
 export const MIN_BACKGROUND_REMOVAL_TOLERANCE = 0;
 export const MAX_BACKGROUND_REMOVAL_TOLERANCE = 0.3;
+
+/** Mask post-processing ranges (`docs/04` §8.3 step 5). */
+export const MAX_MASK_THRESHOLD = 255;
+export const MAX_MASK_CLOSE = 8;
+export const MAX_MASK_FEATHER = 16;
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
@@ -133,6 +156,11 @@ export const useConvertStore = create<ConvertState>((set) => ({
 
   backgroundRemovalEnabled: false,
   backgroundRemovalTolerance: 0.08,
+
+  maskThresholdEnabled: false,
+  maskThreshold: 128,
+  maskClose: 0,
+  maskFeather: 0,
 
   viewMode: 'split',
   splitAt: 0.5,
@@ -180,7 +208,12 @@ export function buildSettings(state: ConvertState): ConvertSettings {
   return {
     ...defaultSettings(Math.max(1, width), Math.max(1, height), palette),
     backgroundRemoval: state.backgroundRemovalEnabled
-      ? { tolerance: state.backgroundRemovalTolerance }
+      ? {
+          tolerance: state.backgroundRemovalTolerance,
+          ...(state.maskThresholdEnabled ? { threshold: state.maskThreshold } : {}),
+          ...(state.maskClose > 0 ? { close: state.maskClose } : {}),
+          ...(state.maskFeather > 0 ? { feather: state.maskFeather } : {}),
+        }
       : undefined,
     downscaleMode: state.downscaleMode,
     dither: state.dither,
