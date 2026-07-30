@@ -607,7 +607,56 @@ holds; D14) rather than a deferred question.
       from unrelated prior work, in under a second — real evidence the crate actually
       loads and runs something in this environment, not just that it compiles. Full
       write-up in `10-decisions.md` D15; `07-tech-stack.md` §3.1 updated to match.
-- [ ] Bundle `u2netp`; on-demand download for larger models with explicit consent
+- [x] Bundle `u2netp`; on-demand download for larger models with explicit consent —
+      two genuinely separate mechanisms, per `04` §8.1's own distinction. **Build-time
+      bundling**: `npm run models:fetch` (`scripts/fetch-model.ts`,
+      `scripts/lib/modelFetch.ts`) downloads `u2netp.onnx` into the gitignored
+      `assets/models/`, sourced from `rembg`'s own GitHub Releases (the same URL
+      `rembg`'s `U2netpSession.download_models` uses — checked against its source,
+      not guessed) and verified against the MD5 `rembg` itself publishes
+      (`8e83ca70e441ab06c318d82300c84806`); idempotent, fails with an actionable
+      message offline, writes via temp-file-then-rename. License re-verified against
+      the upstream `xuebinqin/U-2-Net` repository (Apache-2.0), confirming
+      `CLAUDE.md`'s existing claim rather than assuming it. `segment::bundled_model_path()`
+      resolves the fetched file for `Segmenter::load`; a real, `#[ignore]`d smoke test
+      loaded it with a real (externally supplied, not bundled) ONNX Runtime `.so` and
+      constructed a real inference session successfully — proof the wiring works, not
+      just that the file exists. **Runtime on-demand download** (Convert mode's
+      Background section, `src/segment/SegmentModelSection.tsx`): offers
+      `isnet-general-use` (~170 MB, `docs/04` §8.1's "recommended default", sourced from
+      the same `rembg` Releases, Apache-2.0 per the upstream `xuebinqin/DIS` repo) behind
+      an explicit confirm dialog stating the exact size and source domain; the download
+      function (`src/segment/modelDownload.ts`) is only ever reachable from that
+      confirm click — proven by component tests asserting it is never called on mount,
+      after the first click alone, or on cancel, only after the dialog's own "Download"
+      button (`SegmentModelSection.test.tsx`, 5 cases). The network fetch itself is a
+      plain frontend `fetch()` (CSP is unset; this app's WebView already has full
+      network access) rather than a new Rust HTTP client — Rust's only new dependency
+      is `md5` (small, no transitive deps) for checksum verification, not TLS; the
+      downloaded bytes cross into Rust over the same raw-invoke-body transport
+      `staging.rs` uses for editor layers (D13), landing in `commands::segment`, which
+      verifies the MD5 `rembg` publishes and writes to the app-data directory via
+      temp-file-then-rename, refusing to install anything that fails the checksum
+      (7 Rust unit tests against real temp directories: happy path, mismatch writes
+      nothing, directory creation, overwrite of a stale prior download). **What's
+      genuinely proven, in pieces, rather than as one continuous click-through**: a
+      real, complete 170 MB download of `isnet-general-use.onnx` was independently
+      fetched via `curl` and checksummed via `md5sum` this session, confirming the URL
+      and checksum are correct; a bounded (4 s, `AbortController`-cancelled) call
+      through the *actual* `downloadLargerSegmentationModel` function against the real
+      URL confirmed it opens a genuine connection and streams real bytes before
+      erroring cleanly on abort; and a manually-run Rust test fed that same real,
+      complete 170 MB file through the actual production `verify_and_persist` logic
+      with the real checksum constant, succeeding in ~2 s. Consistent with every
+      earlier phase's own note here (Phase 4's spritesheet/GIF export, Phase 3's
+      installers): **the full round trip through a live Tauri desktop shell was not
+      exercised** — this container's WebView has been unreachable across every prior
+      phase's live-verification attempt, so there was no `__TAURI_INTERNALS__` to drive
+      a real `invoke()` against; idle-waiting a full 170 MB transfer end-to-end was
+      also explicitly avoided (mid-session correction) in favour of the bounded proofs
+      above. **Pipeline integration is explicitly out of scope and not implemented**:
+      neither model is wired into `segment::Segmenter` or into actual background
+      removal — that remains later Phase 5 work, unaffected by this item.
 - [ ] Mask post-processing: threshold, morphological close, feather (`04` §8.3)
 - [ ] Fit-to-subject cropping (`04` §8.5)
 - [ ] Resolve the ONNX Runtime size question (`07` §6)
