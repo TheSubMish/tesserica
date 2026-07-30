@@ -20,7 +20,7 @@
  */
 
 import { bufferFrom, type PixelBuffer } from './buffer.ts';
-import { distanceSq, srgb8ToOklab } from './oklab.ts';
+import { NEAREST_EPSILON, distanceSq, srgb8ToOklab } from './oklab.ts';
 import type { BackgroundRemovalSettings } from './settings.ts';
 
 /**
@@ -44,6 +44,13 @@ import type { BackgroundRemovalSettings } from './settings.ts';
  * alpha (`docs/02-architecture.md` §9) never needs a transparent pixel's colour
  * to change, and doing so would throw away information a later "undo the
  * removal" gesture might want.
+ *
+ * The inclusion test carries the same `NEAREST_EPSILON` (D12, `docs/04` §4.2)
+ * the nearest-colour tie-break uses, for the same reason: Rust and JS Oklab
+ * agree to ~6.7e-16 but not bit-for-bit, so a pixel sitting almost exactly on
+ * the tolerance boundary could otherwise join the flood in one language and
+ * not the other — and because a flood's connectivity depends on every earlier
+ * decision, a single such flip can diverge a whole region, not just one pixel.
  */
 export function removeBackgroundFloodFill(
   src: PixelBuffer,
@@ -85,7 +92,7 @@ export function removeBackgroundFloodFill(
         if (q < 0 || visited[q]) continue;
         const qo = q * 4;
         const qColor = srgb8ToOklab(data[qo], data[qo + 1], data[qo + 2]);
-        if (distanceSq(qColor, seedColor) <= thresholdSq) {
+        if (distanceSq(qColor, seedColor) <= thresholdSq + NEAREST_EPSILON) {
           visited[q] = 1;
           stack.push(q);
         }

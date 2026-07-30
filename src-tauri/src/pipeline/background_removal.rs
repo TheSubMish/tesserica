@@ -17,7 +17,7 @@
 //! components — only the one reachable from an image corner is cleared.
 
 use super::buffer::PixelBuffer;
-use super::oklab;
+use super::oklab::{self, NEAREST_EPSILON};
 use super::settings::BackgroundRemovalSettings;
 
 /// Flood-fill background removal.
@@ -40,6 +40,13 @@ use super::settings::BackgroundRemovalSettings;
 /// alpha (`docs/02-architecture.md` §9) never needs a transparent pixel's colour
 /// to change, and doing so would throw away information a later "undo the
 /// removal" gesture might want.
+///
+/// The inclusion test carries the same `NEAREST_EPSILON` (D12, `docs/04` §4.2)
+/// the nearest-colour tie-break uses, for the same reason: Rust and JS Oklab
+/// agree to ~6.7e-16 but not bit-for-bit, so a pixel sitting almost exactly on
+/// the tolerance boundary could otherwise join the flood in one language and
+/// not the other — and because a flood's connectivity depends on every earlier
+/// decision, a single such flip can diverge a whole region, not just one pixel.
 pub fn remove_background_flood_fill(
     src: &PixelBuffer,
     settings: &BackgroundRemovalSettings,
@@ -75,7 +82,7 @@ pub fn remove_background_flood_fill(
                 let qo = q * 4;
                 let q_color =
                     oklab::srgb8_to_oklab(src.data[qo], src.data[qo + 1], src.data[qo + 2]);
-                if oklab::distance_sq(q_color, seed_color) <= threshold_sq {
+                if oklab::distance_sq(q_color, seed_color) <= threshold_sq + NEAREST_EPSILON {
                     visited[q] = true;
                     stack.push(q);
                 }

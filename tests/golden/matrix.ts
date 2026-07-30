@@ -107,6 +107,7 @@ export function edgeCases(): MatrixCase[] {
 
   const portrait = SOURCES[0];
   const landscape = SOURCES[1];
+  const flatIllustration = SOURCES[2];
   const pixelArt = SOURCES[3];
   const alpha = SOURCES[4];
   const contrast = SOURCES[5];
@@ -127,6 +128,28 @@ export function edgeCases(): MatrixCase[] {
 
   push(portrait, 'crop', { crop: { x: 10, y: 20, w: 60, h: 70 } });
   push(alpha, 'fit-to-subject', { fitToSubject: true });
+
+  // Stage [1], the flood-fill background-removal fallback (`docs/04` §8.5).
+  // `portrait`'s near-uniform, noisy vignette corners and `gradient`'s smooth
+  // ramp are the two shapes most likely to put a pixel right at the tolerance
+  // boundary — exactly where the cross-language epsilon (D12) has to hold for
+  // the flood's connectivity to agree pixel for pixel between languages.
+  // `alpha`'s already-transparent corners exercise the case where the seed and
+  // most of the image already agree at alpha 0.
+  push(portrait, 'background-removal-tight', { backgroundRemoval: { tolerance: 0.02 } });
+  push(portrait, 'background-removal-loose', { backgroundRemoval: { tolerance: 0.15 } });
+  push(gradient, 'background-removal-tight', { backgroundRemoval: { tolerance: 0.02 } });
+  push(gradient, 'background-removal-loose', { backgroundRemoval: { tolerance: 0.2 } });
+  push(alpha, 'background-removal', { backgroundRemoval: { tolerance: 0.05 } });
+  push(flatIllustration, 'background-removal', { backgroundRemoval: { tolerance: 0.05 } });
+  push(portrait, 'background-removal-then-fit-to-subject', {
+    backgroundRemoval: { tolerance: 0.08 },
+    fitToSubject: true,
+  });
+  push(portrait, 'background-removal-floyd-steinberg', {
+    backgroundRemoval: { tolerance: 0.08 },
+    dither: 'floyd-steinberg',
+  });
   push(alpha, 'preserve-alpha', { preserveAlpha: true });
   push(alpha, 'low-alpha-threshold', { alphaThreshold: 8 });
   push(alpha, 'high-alpha-threshold', { alphaThreshold: 250 });
