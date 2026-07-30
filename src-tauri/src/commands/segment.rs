@@ -219,6 +219,46 @@ mod tests {
         assert_eq!(digest, "900150983cd24fb0d6963f7d28e17f72");
     }
 
+    /// A manually-run, real end-to-end proof against the actual production
+    /// constants — not part of ordinary `cargo test` since it needs a real
+    /// ~170 MB file on disk, which this repo never bundles or checks in.
+    ///
+    /// Point `TESSERICA_TEST_LARGER_MODEL` at a real downloaded copy of
+    /// `isnet-general-use.onnx` (in this dispatch, one was fetched via a
+    /// real `curl` earlier in the session and independently checksummed
+    /// with `md5sum` before this test existed — see the dispatch report) to
+    /// confirm the exact code path a real runtime download would take
+    /// (`verify_and_persist` with `LARGER_MODEL_MD5`/`LARGER_MODEL_FILENAME`)
+    /// succeeds against the real payload, not just a small fixture. Run
+    /// with:
+    /// `TESSERICA_TEST_LARGER_MODEL=/path/to/isnet-general-use.onnx cargo test commands::segment -- --ignored --nocapture`
+    #[test]
+    #[ignore = "requires a real ~170 MB isnet-general-use.onnx on disk, never bundled or checked in"]
+    fn smoke_test_the_real_larger_model_passes_checksum_and_persists() {
+        let path = std::env::var("TESSERICA_TEST_LARGER_MODEL")
+            .expect("set TESSERICA_TEST_LARGER_MODEL to a real isnet-general-use.onnx path");
+        let bytes = std::fs::read(&path).expect("real model file should be readable");
+        assert_eq!(
+            bytes.len(),
+            LARGER_MODEL_APPROX_BYTES as usize,
+            "unexpected file size"
+        );
+
+        let dir = TempDir::new("real-larger-model");
+        let saved =
+            verify_and_persist(&bytes, LARGER_MODEL_MD5, LARGER_MODEL_FILENAME, &dir.0).unwrap();
+
+        assert_eq!(saved.bytes, bytes.len());
+        assert_eq!(
+            std::fs::read(dir.0.join(LARGER_MODEL_FILENAME)).unwrap(),
+            bytes
+        );
+        println!(
+            "verified checksum and persisted {} real bytes from {path} to {:?}",
+            saved.bytes, dir.0
+        );
+    }
+
     /// A fresh, unique temp directory per test, cleaned up on drop.
     struct TempDir(std::path::PathBuf);
     impl TempDir {
