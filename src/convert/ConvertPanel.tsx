@@ -4,7 +4,9 @@ import { SliderField } from '../app/SliderField';
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
 import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
 import {
+  MAX_BACKGROUND_REMOVAL_TOLERANCE,
   MAX_PIXEL_SIZE,
+  MIN_BACKGROUND_REMOVAL_TOLERANCE,
   MIN_PIXEL_SIZE,
   paletteColors,
   targetSize,
@@ -150,6 +152,33 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
           value={state.hueShift}
           format={(v) => `${v}°`}
           onChange={(hueShift) => state.setAdvanced({ hueShift })}
+        />
+      </Collapsible>
+
+      <Collapsible title="Background">
+        <label className="field check">
+          <input
+            type="checkbox"
+            checked={state.backgroundRemovalEnabled}
+            onChange={(e) => state.setAdvanced({ backgroundRemovalEnabled: e.target.checked })}
+          />
+          Remove background (flood-fill)
+        </label>
+        <p className="field-note">
+          Clears pixels connected to a corner within a colour tolerance — no model, instant. Works
+          on flat or studio backgrounds; a segmentation-based option arrives later.
+        </p>
+        <SliderField
+          label="Tolerance"
+          min={MIN_BACKGROUND_REMOVAL_TOLERANCE}
+          max={MAX_BACKGROUND_REMOVAL_TOLERANCE}
+          step={0.01}
+          value={state.backgroundRemovalTolerance}
+          disabled={!state.backgroundRemovalEnabled}
+          format={(v) => v.toFixed(2)}
+          onChange={(backgroundRemovalTolerance) =>
+            state.setAdvanced({ backgroundRemovalTolerance })
+          }
         />
       </Collapsible>
 

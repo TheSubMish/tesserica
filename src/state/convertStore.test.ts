@@ -106,5 +106,21 @@ describe('convertStore', () => {
       withSource();
       expect(buildSettings(useConvertStore.getState()).colorSpace).toBe('oklab');
     });
+
+    it('omits background removal from the pipeline settings until enabled', () => {
+      withSource();
+      expect(buildSettings(useConvertStore.getState()).backgroundRemoval).toBeUndefined();
+    });
+
+    it('turns the toggle and tolerance into a BackgroundRemovalSettings', () => {
+      withSource();
+      useConvertStore.getState().setAdvanced({
+        backgroundRemovalEnabled: true,
+        backgroundRemovalTolerance: 0.12,
+      });
+      expect(buildSettings(useConvertStore.getState()).backgroundRemoval).toEqual({
+        tolerance: 0.12,
+      });
+    });
   });
 });

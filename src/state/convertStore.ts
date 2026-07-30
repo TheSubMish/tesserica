@@ -60,6 +60,15 @@ interface ConvertState {
   despeckle: number;
   alphaThreshold: number;
 
+  /**
+   * Stage [1]'s non-ML fallback (`docs/04` §8.5) — flood-fill from the four
+   * image corners. Off by default: it is a lossy, one-way operation on a
+   * source most users have not asked to touch yet.
+   */
+  backgroundRemovalEnabled: boolean;
+  /** Un-squared Oklab distance (`pipeline/settings.ts::BackgroundRemovalSettings`). */
+  backgroundRemovalTolerance: number;
+
   // --- view ---
   viewMode: ViewMode;
   /** 0..1 position of the split handle. */
@@ -92,11 +101,17 @@ export type AdvancedSettings = Pick<
   | 'hueShift'
   | 'despeckle'
   | 'alphaThreshold'
+  | 'backgroundRemovalEnabled'
+  | 'backgroundRemovalTolerance'
 >;
 
 /** Pixel size is a block edge in source pixels; 1 means no downscale at all. */
 export const MIN_PIXEL_SIZE = 1;
 export const MAX_PIXEL_SIZE = 64;
+
+/** 0..1 Oklab distance range the tolerance slider exposes (`docs/04` §8.5). */
+export const MIN_BACKGROUND_REMOVAL_TOLERANCE = 0;
+export const MAX_BACKGROUND_REMOVAL_TOLERANCE = 0.3;
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
@@ -115,6 +130,9 @@ export const useConvertStore = create<ConvertState>((set) => ({
   hueShift: 0,
   despeckle: 0,
   alphaThreshold: 128,
+
+  backgroundRemovalEnabled: false,
+  backgroundRemovalTolerance: 0.08,
 
   viewMode: 'split',
   splitAt: 0.5,
@@ -161,6 +179,9 @@ export function buildSettings(state: ConvertState): ConvertSettings {
 
   return {
     ...defaultSettings(Math.max(1, width), Math.max(1, height), palette),
+    backgroundRemoval: state.backgroundRemovalEnabled
+      ? { tolerance: state.backgroundRemovalTolerance }
+      : undefined,
     downscaleMode: state.downscaleMode,
     dither: state.dither,
     ditherStrength: state.ditherStrength,
