@@ -539,7 +539,45 @@ holds; D14) rather than a deferred question.
 
 **Goal:** W1 complete end to end.
 
-- [ ] Non-ML flood-fill background removal first (instant, no dependency, ships value early)
+- [x] Non-ML flood-fill background removal first (instant, no dependency, ships value early) —
+      `04` §8.5's own fallback, built as stage [1] of the pipeline in **both** languages:
+      `src/pipeline/backgroundRemoval.ts` and `src-tauri/src/pipeline/background_removal.rs`.
+      Seeds are the image's four corners; each seed's 4-connected component (the same
+      connectivity `cleanup.ts::despeckle` uses) floods outward while a neighbour's colour
+      stays within a `tolerance` (plain Oklab distance) of *that seed's own* colour — a fixed
+      reference, not a running average, so the flood cannot drift across a gradient
+      background into the subject. This is what makes it more than a chroma key: a
+      disconnected patch that happens to share the background's colour but touches no
+      corner survives untouched (unit-tested explicitly in both languages). The inclusion
+      test carries D12's `NEAREST_EPSILON` alongside the tolerance, for the same reason the
+      nearest-colour tie-break does — Rust and JS Oklab agree to ~6.7e-16 but not
+      bit-for-bit, and because a flood's connectivity depends on every earlier decision, one
+      boundary-pixel flip could diverge a whole region rather than one pixel. Matched pixels
+      get alpha 0 with RGB left untouched (straight alpha, `02` §9). Wired into stage [1] of
+      both `convert()` drivers, ahead of crop/fit-to-subject, so `fitToSubject` (already
+      implemented since Phase 2) becomes "nearly free" against the flood's own alpha exactly
+      as `04` §8.5 describes. `ConvertSettings.backgroundRemoval?: { tolerance }` is optional
+      and `undefined` by default, so every existing case, matrix entry and `.tess` is
+      unaffected. UI: a `▸ Background` collapsed section in Convert mode (the slot
+      `05-ui-design.md` §3's own mockup already reserves) — an off-by-default checkbox plus a
+      0–0.3 tolerance slider, `state/convertStore.ts`. 9 new unit tests (5 Rust, 4 TS) cover
+      tolerance-zero exact-match, the tolerance boundary, the disconnected-patch case, and a
+      1-pixel-tall image's coincident corners; a `convert()`-level integration test in both
+      languages confirms background removal runs before crop/fit-to-subject. Golden suite
+      extended with 8 new cases (tight/loose tolerance × portrait/gradient/alpha/flat sources,
+      combined with fit-to-subject and Floyd–Steinberg) — the corpus is now **3,091 cases over
+      918,352 pixels**, still zero differing indices and zero differing RGBA bytes. Verified
+      live: `tauri dev`'s WebView was not reachable in this container (no `DISPLAY` compositor
+      access for the desktop shell's own window, consistent with every prior phase's note
+      here), so the fallback was the real Vite dev bundle over Chrome DevTools Protocol —
+      switched to Convert mode through an actual tab click, injected a synthetic 32×32 source
+      (solid orange with a blue ring enclosing a disconnected orange patch) directly into
+      `previewRuntime`/`convertStore` the same way Phase 4 verified frame/tag commands, opened
+      the real `▸ Background` section, and clicked the real checkbox: the corner went fully
+      transparent while the enclosed patch stayed opaque, confirmed disabling the checkbox
+      reverted the corner to opaque and dropped `backgroundRemoval` from `buildSettings()`
+      entirely. The preview/export leg of parity is what the golden suite above already
+      proves at far higher rigour than a manual click could.
 - [ ] `segment` module; evaluate `rembg-rs` vs direct `ort` (`07` §3.1)
 - [ ] Bundle `u2netp`; on-demand download for larger models with explicit consent
 - [ ] Mask post-processing: threshold, morphological close, feather (`04` §8.3)
