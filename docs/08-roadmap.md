@@ -578,7 +578,35 @@ holds; D14) rather than a deferred question.
       reverted the corner to opaque and dropped `backgroundRemoval` from `buildSettings()`
       entirely. The preview/export leg of parity is what the golden suite above already
       proves at far higher rigour than a manual click could.
-- [ ] `segment` module; evaluate `rembg-rs` vs direct `ort` (`07` §3.1)
+- [x] `segment` module; evaluate `rembg-rs` vs direct `ort` (`07` §3.1) — re-verified both
+      against crates.io rather than trusting the 2026-07-26 note: `ort` is at
+      `2.0.0-rc.13` (still no stable release, but the rc landed two days before this
+      check — actively maintained), MIT OR Apache-2.0. `rembg-rs` depends on `ort
+      ^2.0.0-rc.10` itself (an older constraint, not a way to avoid tracking `ort`'s own
+      churn), has 747 total downloads across a ~9-month history, and pulls in
+      `imagequant` (indexed-color quantization — conflicts with D9's RGBA-only v1) and
+      `oxipng` (PNG recompression this project has no use for). **Decision: depend on
+      `ort` directly** (locked, `10-decisions.md` D15), pinned to the exact
+      `2.0.0-rc.13` with no caret range. `src-tauri/src/segment/` scaffolds `Segmenter`:
+      constructing one is side-effect-free (no model bundled is the default, expected
+      state), `load()` reports a missing dylib or model file as a plain `SegmentError`
+      rather than panicking, and `segment()` returns `SegmentOutcome::NoModelLoaded` —
+      not an error — so callers fall back to the flood-fill background removal already
+      shipped. Built with `default-features = false` plus `load-dynamic` rather than
+      `ort`'s default `download-binaries`: the crate needs no network access or system
+      ONNX Runtime library just to compile, and the real `libonnxruntime.so` is
+      `dlopen`ed only at runtime, when a caller supplies a real path — not yet wired to
+      anything bundled or downloaded (the next two roadmap items). Verified in this
+      container, not assumed: `cargo check`/`clippy -D warnings`/`test` are all clean
+      with the dependency added (161 passing, 5 of them new), and a manually-run,
+      `#[ignore]`d smoke test (`segment::tests::
+      smoke_test_a_real_onnx_runtime_and_model_if_env_vars_point_at_them`) `dlopen`ed a
+      genuine ONNX Runtime 1.28.0 `.so` (fetched transiently from `microsoft/onnxruntime`'s
+      GitHub releases for this evaluation only, not vendored) and committed a real
+      inference session against a 176 MB `u2net.onnx` already present on this machine
+      from unrelated prior work, in under a second — real evidence the crate actually
+      loads and runs something in this environment, not just that it compiles. Full
+      write-up in `10-decisions.md` D15; `07-tech-stack.md` §3.1 updated to match.
 - [ ] Bundle `u2netp`; on-demand download for larger models with explicit consent
 - [ ] Mask post-processing: threshold, morphological close, feather (`04` §8.3)
 - [ ] Fit-to-subject cropping (`04` §8.5)
