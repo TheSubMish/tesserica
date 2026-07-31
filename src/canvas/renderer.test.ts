@@ -6,7 +6,10 @@ import {
   getBuffer,
   setPixel,
 } from '../model/pixelBuffers';
-import type { Cel, Sprite } from '../model/types';
+import { allocateGrid, bumpGridRevision, getGrid, setGridCell } from '../model/tileGridBuffers';
+import { clearAllTileBuffers, setTileBuffer } from '../model/tileBuffers';
+import { packTileId } from '../model/tileIds';
+import type { Cel, GridSpec, Layer, Sprite, Tileset } from '../model/types';
 import {
   drawCheckerboard,
   drawGrid,
@@ -634,6 +637,134 @@ describe('drawOnionSkin', () => {
       drawOnionSkin(ctx as unknown as CanvasRenderingContext2D, sprite, vp, ghosts);
 
       expect(tintFills(contexts)).toHaveLength(2);
+    });
+  });
+
+  describe('tilemap layers (roadmap Phase 6)', () => {
+    /** A 2x2 tile: TL red, TR green, BL blue, BR white — same fixture flatten/sample use. */
+    function cornerTilePixels(): Uint8ClampedArray {
+      return new Uint8ClampedArray([
+        255,
+        0,
+        0,
+        255,
+        0,
+        255,
+        0,
+        255, //
+        0,
+        0,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+      ]);
+    }
+
+    function makeTilemapSprite(): Sprite {
+      clearAllTileBuffers();
+      setTileBuffer('tile-corner', cornerTilePixels());
+      const tileset: Tileset = {
+        id: 'ts1',
+        name: 'Ground',
+        tileWidth: 2,
+        tileHeight: 2,
+        tiles: [{ id: 'empty' }, { id: 'tile-corner' }],
+      };
+      const grid: GridSpec = { shape: 'rect', tileWidth: 2, tileHeight: 2, offsetX: 0, offsetY: 0 };
+      const layer: Layer = {
+        id: 'tm',
+        kind: 'tilemap',
+        name: 'tiles',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: 'normal',
+        parentId: null,
+        clippingMask: false,
+        tilesetId: 'ts1',
+        grid,
+      };
+      const cel: Cel = {
+        id: 'cel-tm',
+        layerId: 'tm',
+        frameId: 'f1',
+        x: 0,
+        y: 0,
+        width: 2,
+        height: 2,
+      };
+      const gridBuf = allocateGrid(cel.id, 1, 1);
+      setGridCell(gridBuf, 1, 1, 0, 0, packTileId(1, { flipH: true }));
+      return {
+        width: 2,
+        height: 2,
+        layers: [layer],
+        frames: [{ id: 'f1', durationMs: 100 }],
+        cels: [cel],
+        tags: [],
+        tilesets: [tileset],
+      };
+    }
+
+    it('resolves the grid + tileset into the composite, pixel-exact including a flipped tile', () => {
+      const contexts = stubCanvasFactory();
+      const sprite = makeTilemapSprite();
+      const ctx = stubContext();
+
+      drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+        zoom: 4,
+        panX: 0,
+        panY: 0,
+      });
+
+      const put = contexts.flatMap((c) => c.calls).find((c) => c.fn === 'putImageData');
+      expect(put).toBeDefined();
+      const image = put!.args[0] as FakeImageData;
+      // flipH: TL becomes old TR (green), TR becomes old TL (red).
+      expect(Array.from(image.data.slice(0, 4))).toEqual([0, 255, 0, 255]);
+      expect(Array.from(image.data.slice(4, 8))).toEqual([255, 0, 0, 255]);
+    });
+
+    it('does not re-render when nothing changed, and does when a grid cell is repainted', () => {
+      const contexts = stubCanvasFactory();
+      const sprite = makeTilemapSprite();
+      const ctx = stubContext();
+      const vp = { zoom: 4, panX: 0, panY: 0 };
+
+      drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+      const afterFirst = contexts
+        .flatMap((c) => c.calls)
+        .filter((c) => c.fn === 'putImageData').length;
+
+      drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+      expect(contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData').length).toBe(
+        afterFirst,
+      );
+
+      const gridBuf = getGrid('cel-tm')!;
+      setGridCell(gridBuf, 1, 1, 0, 0, packTileId(1)); // unflipped now
+      bumpGridRevision('cel-tm');
+      drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+      expect(
+        contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData').length,
+      ).toBeGreaterThan(afterFirst);
+    });
+
+    it('renders fully transparent when the tileset is missing, rather than throwing', () => {
+      stubCanvasFactory();
+      const sprite = makeTilemapSprite();
+      sprite.tilesets = [];
+      const ctx = stubContext();
+      expect(() =>
+        drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+          zoom: 4,
+          panX: 0,
+          panY: 0,
+        }),
+      ).not.toThrow();
     });
   });
 });

@@ -12,11 +12,15 @@
  */
 
 import { getBuffer } from '../model/pixelBuffers';
+import { getGrid, getGridCell } from '../model/tileGridBuffers';
+import { resolveTilePixels } from '../model/tilemapRender';
+import { EMPTY_TILE_ID, tileGridDims } from '../model/tileIds';
 import { childrenOf } from '../model/layerTree';
 import {
   celBufferId,
   type BlendMode,
   type Cel,
+  type Layer,
   type LayerId,
   type RGBA,
   type Sprite,
@@ -80,6 +84,51 @@ function sampleCel(cel: Cel, x: number, y: number): RGBA | null {
 }
 
 /**
+ * A tilemap layer's resolved colour at one document coordinate — the
+ * eyedropper's equivalent of `sampleCel` above. Resolves the grid cell's
+ * packed tile id against the layer's tileset exactly the way
+ * `canvas/renderer.ts::tilemapCelCanvas` and `canvas/flatten.ts` do, so all
+ * three read the same pixel.
+ */
+function sampleTilemapCel(
+  sprite: Sprite,
+  layer: Layer & { kind: 'tilemap' },
+  cel: Cel,
+  x: number,
+  y: number,
+): RGBA | null {
+  const lx = x - cel.x;
+  const ly = y - cel.y;
+  if (lx < 0 || ly < 0 || lx >= cel.width || ly >= cel.height) return null;
+
+  const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
+  if (!tileset) return null;
+  const gridBuffer = getGrid(celBufferId(cel));
+  if (!gridBuffer) return null;
+
+  const { cols, rows } = tileGridDims(cel, layer.grid);
+  const tw = tileset.tileWidth;
+  const th = tileset.tileHeight;
+  if (tw <= 0 || th <= 0) return null;
+
+  const col = Math.floor(lx / tw);
+  const row = Math.floor(ly / th);
+  // Inside the cel but past the last whole tile column/row — never drawn
+  // (`renderTilemapCel` clips a partial trailing tile the same way).
+  if (col >= cols || row >= rows) return [0, 0, 0, 0];
+
+  const tileId = getGridCell(gridBuffer, cols, rows, col, row);
+  if (tileId === undefined || tileId === EMPTY_TILE_ID) return [0, 0, 0, 0];
+  const pixels = resolveTilePixels(tileset, tileId);
+  if (!pixels) return [0, 0, 0, 0];
+
+  const tx = lx - col * tw;
+  const ty = ly - row * th;
+  const i = (ty * tw + tx) * 4;
+  return [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]];
+}
+
+/**
  * Composite one document pixel through one scope — the top-level stack when
  * `parentId` is `null`, or one group's children otherwise
  * (`model/layerTree.ts`). A group recurses into this same function and its
@@ -110,7 +159,10 @@ function compositeScopePixel(
         ? compositeScopePixel(sprite, frameId, layer.id, x, y)
         : (() => {
             const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-            return cel ? sampleCel(cel, x, y) : null;
+            if (!cel) return null;
+            return layer.kind === 'tilemap'
+              ? sampleTilemapCel(sprite, layer, cel, x, y)
+              : sampleCel(cel, x, y);
           })();
     if (!own) continue;
 

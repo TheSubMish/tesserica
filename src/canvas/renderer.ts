@@ -22,6 +22,9 @@ import {
   type Sprite,
 } from '../model/types';
 import { celRevision, getBuffer } from '../model/pixelBuffers';
+import { getGrid, gridRevision } from '../model/tileGridBuffers';
+import { tileEntryRevision } from '../model/tileBuffers';
+import { renderTilemapCel } from '../model/tilemapRender';
 import { childrenOf } from '../model/layerTree';
 import type { OnionSkinGhost } from '../model/onionSkin';
 import { canvasCompositeOp } from './blend';
@@ -74,11 +77,21 @@ interface CelCacheEntry {
 }
 
 const celCache = new Map<CelId, CelCacheEntry>();
+
+interface TilemapCelCacheEntry {
+  canvas: HTMLCanvasElement;
+  signature: string;
+}
+
+/** Rendered tilemap cels (`docs/03-data-model.md` §4, roadmap Phase 6) — see `tilemapCelCanvas`. */
+const tilemapCelCache = new Map<CelId, TilemapCelCacheEntry>();
+
 let compositeSignature: string | null = null;
 
 /** Drop every cache. Called when the document is replaced wholesale. */
 export function invalidateRenderCache(): void {
   celCache.clear();
+  tilemapCelCache.clear();
   compositeSignature = null;
   canvasPool.clear();
   ghostCache.clear();
@@ -102,7 +115,26 @@ export function invalidateRenderCache(): void {
  * a different buffer" apart from "unchanged". Since the id string differs
  * whenever the buffer does, appending it is enough on its own to invalidate
  * correctly even when the revision numbers coincide.
+ *
+ * A `tilemap` layer's cel has no pixel buffer at all (`getBuffer`/`celRevision`
+ * would read nothing useful), so its contribution comes from
+ * `tilemapSignaturePart` instead — the grid's own revision plus every tile in
+ * its tileset's revision, so both painting a cell and editing a tile's pixels
+ * (not built by this phase, but the signature is ready for it) invalidate.
  */
+function tilemapSignaturePart(
+  sprite: Sprite,
+  layer: Layer & { kind: 'tilemap' },
+  cel: Cel,
+): string {
+  const bufferId = celBufferId(cel);
+  const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
+  const tilesetSig = tileset
+    ? `${tileset.id}(${tileset.tiles.map((e) => `${e.id}#${tileEntryRevision(e.id)}`).join(',')})`
+    : 'missing';
+  return `${cel.id}@${cel.x},${cel.y}~${bufferId}#${gridRevision(bufferId)}~${tilesetSig}`;
+}
+
 function signatureOf(sprite: Sprite, frameId: string): string {
   const parts: string[] = [`${sprite.width}x${sprite.height}@${frameId}`];
   const walk = (parentId: LayerId | null): void => {
@@ -112,10 +144,14 @@ function signatureOf(sprite: Sprite, frameId: string): string {
           ? undefined
           : sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
       const bufferId = cel ? celBufferId(cel) : null;
+      let content: string;
+      if (layer.kind === 'group') content = 'G';
+      else if (!cel) content = '-';
+      else if (layer.kind === 'tilemap') content = tilemapSignaturePart(sprite, layer, cel);
+      else content = `${cel.id}@${cel.x},${cel.y}~${bufferId}#${celRevision(bufferId!)}`;
       parts.push(
         `${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.blendMode}:` +
-          `${layer.clippingMask ? 1 : 0}:` +
-          `${layer.kind === 'group' ? 'G' : cel ? `${cel.id}@${cel.x},${cel.y}~${bufferId}#${celRevision(bufferId!)}` : '-'}`,
+          `${layer.clippingMask ? 1 : 0}:${content}`,
       );
       if (layer.kind === 'group') walk(layer.id);
     }
@@ -172,6 +208,49 @@ function pruneCelCache(sprite: Sprite): void {
   const live = new Set(sprite.cels.map((c) => c.id));
   for (const id of celCache.keys()) {
     if (!live.has(id)) celCache.delete(id);
+  }
+}
+
+/**
+ * A tilemap cel's grid resolved against its tileset into pixels, on its own
+ * canvas — the tilemap-layer counterpart to `celCanvas` above. Re-rendered
+ * only when `tilemapSignaturePart` changes (a grid edit or a tileset edit),
+ * not on every composite.
+ */
+function tilemapCelCanvas(
+  sprite: Sprite,
+  layer: Layer & { kind: 'tilemap' },
+  cel: Cel,
+): HTMLCanvasElement {
+  const signature = tilemapSignaturePart(sprite, layer, cel);
+  const cached = tilemapCelCache.get(cel.id);
+  if (cached && cached.signature === signature) return cached.canvas;
+
+  const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
+  const gridBuffer = getGrid(celBufferId(cel));
+  const pixels = renderTilemapCel(tileset, layer.grid, gridBuffer, cel);
+
+  const canvas = cached?.canvas ?? document.createElement('canvas');
+  if (canvas.width !== cel.width || canvas.height !== cel.height) {
+    canvas.width = cel.width;
+    canvas.height = cel.height;
+  }
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, cel.width, cel.height);
+    ctx.putImageData(new ImageData(pixels, cel.width, cel.height), 0, 0);
+  }
+
+  tilemapCelCache.set(cel.id, { canvas, signature });
+  return canvas;
+}
+
+/** Forget tilemap cels the document no longer contains. */
+function pruneTilemapCelCache(sprite: Sprite): void {
+  if (tilemapCelCache.size <= sprite.cels.length) return;
+  const live = new Set(sprite.cels.map((c) => c.id));
+  for (const id of tilemapCelCache.keys()) {
+    if (!live.has(id)) tilemapCelCache.delete(id);
   }
 }
 
@@ -244,7 +323,7 @@ function compositeScope(
     } else {
       const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
       if (!cel) continue;
-      source = celCanvas(cel);
+      source = layer.kind === 'tilemap' ? tilemapCelCanvas(sprite, layer, cel) : celCanvas(cel);
       offsetX = cel.x;
       offsetY = cel.y;
     }
@@ -351,6 +430,7 @@ export function compositeSprite(sprite: Sprite, frameId: string): HTMLCanvasElem
   ctx.drawImage(composited, 0, 0);
 
   pruneCelCache(sprite);
+  pruneTilemapCelCache(sprite);
   compositeSignature = signature;
   return canvas;
 }

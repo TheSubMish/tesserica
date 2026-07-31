@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { allocateBuffer, setPixel } from '../model/pixelBuffers';
-import type { Cel, Frame, Layer, LayerBase, Sprite } from '../model/types';
+import { allocateGrid, setGridCell } from '../model/tileGridBuffers';
+import { clearAllTileBuffers, setTileBuffer } from '../model/tileBuffers';
+import { packTileId } from '../model/tileIds';
+import type { Cel, Frame, GridSpec, Layer, LayerBase, Sprite, Tileset } from '../model/types';
 import { compositeOver, samplePixel } from './sample';
 import { picker } from '../tools/picker';
 import { harness } from '../tools/testHarness';
@@ -196,6 +199,85 @@ describe('clipping masks', () => {
     // Nothing inside the group to clip to, so the clip layer contributes
     // nothing; the group is otherwise empty, so only the outer base shows.
     expect(samplePixel(s, frameId, 0, 0)).toEqual([255, 0, 0, 255]);
+  });
+});
+
+describe('samplePixel on a tilemap layer (roadmap Phase 6)', () => {
+  beforeEach(() => {
+    clearAllTileBuffers();
+  });
+
+  it('reads the resolved (flipped) tile pixel, matching flatten/renderer', () => {
+    const frame: Frame = { id: 'f1', durationMs: 100 };
+    setTileBuffer(
+      'tile-corner',
+      new Uint8ClampedArray([
+        255,
+        0,
+        0,
+        255,
+        0,
+        255,
+        0,
+        255, //
+        0,
+        0,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+      ]),
+    );
+    const tileset: Tileset = {
+      id: 'ts1',
+      name: 'Ground',
+      tileWidth: 2,
+      tileHeight: 2,
+      tiles: [{ id: 'empty' }, { id: 'tile-corner' }],
+    };
+    const grid: GridSpec = { shape: 'rect', tileWidth: 2, tileHeight: 2, offsetX: 0, offsetY: 0 };
+    const tilemapLayer: Layer = {
+      id: 'tm',
+      kind: 'tilemap',
+      name: 'tiles',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      parentId: null,
+      clippingMask: false,
+      tilesetId: 'ts1',
+      grid,
+    };
+    const cel: Cel = {
+      id: 'cel-tm',
+      layerId: 'tm',
+      frameId: 'f1',
+      x: 0,
+      y: 0,
+      width: 4,
+      height: 4,
+    };
+    const gridBuf = allocateGrid(cel.id, 2, 2);
+    setGridCell(gridBuf, 2, 2, 0, 0, packTileId(1, { flipV: true }));
+
+    const s: Sprite = {
+      width: 4,
+      height: 4,
+      layers: [tilemapLayer],
+      frames: [frame],
+      cels: [cel],
+      tags: [],
+      tilesets: [tileset],
+    };
+
+    // flipV: TL becomes old BL (blue), TR becomes old BR (white).
+    expect(samplePixel(s, 'f1', 0, 0)).toEqual([0, 0, 255, 255]);
+    expect(samplePixel(s, 'f1', 1, 0)).toEqual([255, 255, 255, 255]);
+    // The never-painted bottom-right 2x2 cell is transparent.
+    expect(samplePixel(s, 'f1', 2, 2)).toEqual([0, 0, 0, 0]);
   });
 });
 

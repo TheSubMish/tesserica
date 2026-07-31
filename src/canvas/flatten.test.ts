@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { allocateBuffer, clearAllBuffers, setPixel } from '../model/pixelBuffers';
-import type { Cel, Frame, Layer, LayerBase, Sprite } from '../model/types';
+import { allocateGrid, setGridCell } from '../model/tileGridBuffers';
+import { clearAllTileBuffers, setTileBuffer } from '../model/tileBuffers';
+import { packTileId } from '../model/tileIds';
+import type { Cel, Frame, GridSpec, Layer, LayerBase, Sprite, Tileset } from '../model/types';
 import { useUIStore } from '../state/uiStore';
 import { flattenSprite } from './flatten';
 
@@ -194,6 +197,130 @@ describe('flattenSprite', () => {
       const withOnionSkin = flattenSprite(sprite, 'f1');
 
       expect(Array.from(withOnionSkin)).toEqual(Array.from(withoutOnionSkin));
+    });
+  });
+
+  describe('tilemap layers (roadmap Phase 6)', () => {
+    beforeEach(() => {
+      clearAllTileBuffers();
+    });
+
+    it('resolves a grid + tileset into pixels, pixel-exact including a flipped tile', () => {
+      const frame: Frame = { id: 'f1', durationMs: 100 };
+      // A 2x2 tile with four distinct corners: TL red, TR green, BL blue, BR white.
+      setTileBuffer(
+        'tile-corner',
+        new Uint8ClampedArray([
+          255,
+          0,
+          0,
+          255,
+          0,
+          255,
+          0,
+          255, //
+          0,
+          0,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+        ]),
+      );
+      const tileset: Tileset = {
+        id: 'ts1',
+        name: 'Ground',
+        tileWidth: 2,
+        tileHeight: 2,
+        tiles: [{ id: 'empty' }, { id: 'tile-corner' }],
+      };
+      const grid: GridSpec = { shape: 'rect', tileWidth: 2, tileHeight: 2, offsetX: 0, offsetY: 0 };
+      const tilemapLayer: Layer = {
+        id: 'tm',
+        kind: 'tilemap',
+        name: 'tiles',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: 'normal',
+        parentId: null,
+        clippingMask: false,
+        tilesetId: 'ts1',
+        grid,
+      };
+      const cel: Cel = {
+        id: 'cel-tm',
+        layerId: 'tm',
+        frameId: 'f1',
+        x: 0,
+        y: 0,
+        width: W, // 4x4 sprite -> 2x2 grid of 2x2 tiles
+        height: H,
+      };
+      const gridBuf = allocateGrid(cel.id, 2, 2);
+      setGridCell(gridBuf, 2, 2, 0, 0, packTileId(1)); // unflipped, top-left cell
+      setGridCell(gridBuf, 2, 2, 1, 0, packTileId(1, { flipH: true })); // top-right cell, flipped
+
+      const sprite: Sprite = {
+        width: W,
+        height: H,
+        layers: [tilemapLayer],
+        frames: [frame],
+        cels: [cel],
+        tags: [],
+        tilesets: [tileset],
+      };
+
+      const out = flattenSprite(sprite, 'f1');
+      // Unflipped tile at (0,0): TL is red.
+      expect(px(out, 0, 0)).toEqual([255, 0, 0, 255]);
+      expect(px(out, 1, 0)).toEqual([0, 255, 0, 255]);
+      // Flipped tile at grid column 1 (document x=2..3): TL and TR swap.
+      expect(px(out, 2, 0)).toEqual([0, 255, 0, 255]);
+      expect(px(out, 3, 0)).toEqual([255, 0, 0, 255]);
+      // Bottom-left 2x2 cell was never painted (tile id 0, empty) -> transparent.
+      expect(px(out, 0, 2)).toEqual([0, 0, 0, 0]);
+    });
+
+    it('renders fully transparent when the referenced tileset is missing', () => {
+      const frame: Frame = { id: 'f1', durationMs: 100 };
+      const grid: GridSpec = { shape: 'rect', tileWidth: 2, tileHeight: 2, offsetX: 0, offsetY: 0 };
+      const tilemapLayer: Layer = {
+        id: 'tm',
+        kind: 'tilemap',
+        name: 'tiles',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: 'normal',
+        parentId: null,
+        clippingMask: false,
+        tilesetId: 'missing-tileset',
+        grid,
+      };
+      const cel: Cel = {
+        id: 'cel-tm',
+        layerId: 'tm',
+        frameId: 'f1',
+        x: 0,
+        y: 0,
+        width: W,
+        height: H,
+      };
+      allocateGrid(cel.id, 2, 2);
+      const sprite: Sprite = {
+        width: W,
+        height: H,
+        layers: [tilemapLayer],
+        frames: [frame],
+        cels: [cel],
+        tags: [],
+        tilesets: [],
+      };
+      const out = flattenSprite(sprite, 'f1');
+      expect(Array.from(out)).toEqual(new Array(W * H * 4).fill(0));
     });
   });
 });

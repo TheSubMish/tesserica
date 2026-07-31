@@ -15,6 +15,8 @@
 
 import { celBufferId, type Cel, type Layer, type LayerId, type Sprite } from '../model/types';
 import { getBuffer } from '../model/pixelBuffers';
+import { getGrid } from '../model/tileGridBuffers';
+import { renderTilemapCel } from '../model/tilemapRender';
 import { childrenOf } from '../model/layerTree';
 import { compositeOver } from './sample';
 
@@ -128,8 +130,19 @@ function flattenScope(
       own = flattenScope(sprite, frameId, layer.id);
     } else {
       const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-      const buf = cel && getBuffer(celBufferId(cel));
-      own = buf && cel ? placeCel(buf, cel, width, height) : null;
+      if (!cel) {
+        own = null;
+      } else if (layer.kind === 'tilemap') {
+        // A tilemap layer's cel holds grid data, not a pixel buffer — resolve
+        // it against its tileset the same way `canvas/renderer.ts` does, so
+        // export sees exactly what the canvas shows.
+        const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
+        const gridBuffer = getGrid(celBufferId(cel));
+        own = placeCel(renderTilemapCel(tileset, layer.grid, gridBuffer, cel), cel, width, height);
+      } else {
+        const buf = getBuffer(celBufferId(cel));
+        own = buf ? placeCel(buf, cel, width, height) : null;
+      }
     }
     if (!own) continue;
 
