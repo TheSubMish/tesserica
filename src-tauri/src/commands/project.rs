@@ -386,6 +386,7 @@ mod tests {
             }],
             palette: None,
             tags: vec![],
+            tilesets: vec![],
         }
     }
 

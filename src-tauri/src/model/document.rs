@@ -100,6 +100,51 @@ pub struct ConversionSource {
     pub settings: ConvertSettings,
 }
 
+pub type TilesetId = String;
+
+/// `docs/03-data-model.md` §4. Metadata only — mirrors `src/model/types.ts`'s
+/// own choice to keep `TileEntry` as just an id, with the actual RGBA pixels
+/// living elsewhere (`tiles/<tilesetId>/<id>.png` in the `.tess` archive,
+/// `commands::project`). Rust never renders a tilemap (it never composites
+/// layers at all, see `Layer` below), so this only has to round-trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TileEntry {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tileset {
+    pub id: TilesetId,
+    pub name: String,
+    pub tile_width: u32,
+    pub tile_height: u32,
+    /// Index 0 is always the empty tile (`docs/03-data-model.md` §4).
+    pub tiles: Vec<TileEntry>,
+}
+
+/// `docs/03-data-model.md` §4 — v1 ships `rect` only. `Isometric`/`Hexagonal`
+/// round-trip so a `.tess` referencing them (Phase 7) is not a migration, but
+/// nothing here renders or edits them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GridShape {
+    Rect,
+    Isometric,
+    Hexagonal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridSpec {
+    pub shape: GridShape,
+    pub tile_width: u32,
+    pub tile_height: u32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+}
+
 /// The discriminated union from `docs/03-data-model.md` §2.1.
 ///
 /// Tilemap arrives with its phase (6); `conversion` is here because it is the
@@ -109,7 +154,11 @@ pub struct ConversionSource {
 /// (`canvas/renderer.ts`, `canvas/flatten.ts`); Rust never composites layers
 /// at all (`docs/02-architecture.md` §6.2 — pixel buffers never cross IPC, so
 /// there is nothing here for Rust to composite *with*), so this variant only
-/// has to round-trip through a `.tess` faithfully.
+/// has to round-trip through a `.tess` faithfully. `Tilemap` follows the same
+/// rule: its cel holds a grid of packed tile ids
+/// (`src/model/tileGridBuffers.ts`), stored on disk as a raw `.bin` entry
+/// (`commands::project`), resolved into pixels entirely in TS
+/// (`src/model/tilemapRender.ts`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Layer {
@@ -121,6 +170,13 @@ pub enum Layer {
         #[serde(flatten)]
         base: LayerBase,
         collapsed: bool,
+    },
+    #[serde(rename_all = "camelCase")]
+    Tilemap {
+        #[serde(flatten)]
+        base: LayerBase,
+        tileset_id: TilesetId,
+        grid: GridSpec,
     },
     Conversion {
         #[serde(flatten)]
@@ -134,6 +190,7 @@ impl Layer {
         match self {
             Layer::Raster { base } => base,
             Layer::Group { base, .. } => base,
+            Layer::Tilemap { base, .. } => base,
             Layer::Conversion { base, .. } => base,
         }
     }
@@ -229,6 +286,10 @@ pub struct Sprite {
     /// refusing to load.
     #[serde(default)]
     pub tags: Vec<Tag>,
+    /// `#[serde(default)]` — same reasoning, for a `.tess` saved before
+    /// tilesets existed (roadmap Phase 6).
+    #[serde(default)]
+    pub tilesets: Vec<Tileset>,
 }
 
 #[cfg(test)]
@@ -571,6 +632,7 @@ mod tests {
                 repeat: None,
                 color: "#3bb273".into(),
             }],
+            tilesets: vec![],
         };
         let json = serde_json::to_value(&sprite).expect("serializes");
         assert_eq!(json["tags"][0]["name"], "run");
@@ -579,5 +641,116 @@ mod tests {
         let back: Sprite = serde_json::from_value(json).expect("deserializes");
         assert_eq!(back.tags.len(), 1);
         assert_eq!(back.tags[0].name, "run");
+    }
+
+    /// Roadmap Phase 6 "Tileset model, tilemap layers, rect grid" — a
+    /// `Tilemap` layer round-trips its `tilesetId`/`grid` flattened alongside
+    /// `LayerBase`, exactly like `Conversion`'s `source`.
+    #[test]
+    fn a_tilemap_layer_round_trips_with_its_tileset_and_grid() {
+        let layer = Layer::Tilemap {
+            base: LayerBase {
+                id: "tm1".into(),
+                name: "Ground".into(),
+                visible: true,
+                locked: false,
+                opacity: 1.0,
+                blend_mode: BlendMode::Normal,
+                parent_id: None,
+                clipping_mask: false,
+            },
+            tileset_id: "ts1".into(),
+            grid: GridSpec {
+                shape: GridShape::Rect,
+                tile_width: 16,
+                tile_height: 16,
+                offset_x: 0,
+                offset_y: 0,
+            },
+        };
+
+        let json = serde_json::to_value(&layer).expect("serializes");
+        assert_eq!(json["kind"], "tilemap");
+        assert_eq!(json["tilesetId"], "ts1");
+        assert_eq!(json["grid"]["shape"], "rect");
+        assert_eq!(json["grid"]["tileWidth"], 16);
+
+        let back: Layer = serde_json::from_value(json).expect("deserializes");
+        match back {
+            Layer::Tilemap {
+                base,
+                tileset_id,
+                grid,
+            } => {
+                assert_eq!(base.id, "tm1");
+                assert_eq!(tileset_id, "ts1");
+                assert_eq!(grid.shape, GridShape::Rect);
+                assert_eq!(grid.tile_width, 16);
+            }
+            other => panic!("expected a tilemap layer, got {other:?}"),
+        }
+    }
+
+    /// v1 ships `rect` only, but `isometric`/`hexagonal` must still round-trip
+    /// on the wire so a `.tess` referencing them later (Phase 7) is not a
+    /// migration.
+    #[test]
+    fn every_grid_shape_round_trips() {
+        let cases = [
+            (GridShape::Rect, "rect"),
+            (GridShape::Isometric, "isometric"),
+            (GridShape::Hexagonal, "hexagonal"),
+        ];
+        for (shape, wire) in cases {
+            let json = serde_json::to_value(shape).unwrap();
+            assert_eq!(json, wire);
+            let back: GridShape = serde_json::from_value(json).unwrap();
+            assert_eq!(back, shape);
+        }
+    }
+
+    /// A tileset round-trips its tiles list — index 0 the mandatory empty
+    /// tile — through `sprite.json` alongside everything else `Sprite` holds.
+    #[test]
+    fn sprite_round_trips_its_tilesets() {
+        let sprite = Sprite {
+            width: 32,
+            height: 32,
+            color_mode: ColorMode::Rgba,
+            layers: vec![],
+            frames: vec![],
+            cels: vec![],
+            palette: None,
+            tags: vec![],
+            tilesets: vec![Tileset {
+                id: "ts1".into(),
+                name: "Ground".into(),
+                tile_width: 16,
+                tile_height: 16,
+                tiles: vec![
+                    TileEntry { id: "empty".into() },
+                    TileEntry { id: "grass".into() },
+                ],
+            }],
+        };
+
+        let json = serde_json::to_value(&sprite).expect("serializes");
+        assert_eq!(json["tilesets"][0]["name"], "Ground");
+        assert_eq!(json["tilesets"][0]["tiles"][1]["id"], "grass");
+
+        let back: Sprite = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(back.tilesets.len(), 1);
+        assert_eq!(back.tilesets[0].tiles.len(), 2);
+        assert_eq!(back.tilesets[0].tiles[0].id, "empty");
+    }
+
+    /// A `.tess` saved before tilesets existed has no such field at all — the
+    /// sprite must still load, with an empty tileset list, not fail.
+    #[test]
+    fn sprite_defaults_tilesets_to_empty_when_the_field_is_absent() {
+        let sprite: Sprite =
+            serde_json::from_str(r#"{"width":8,"height":8,"layers":[],"frames":[],"cels":[]}"#)
+                .unwrap();
+        assert!(sprite.tilesets.is_empty());
     }
 }
