@@ -4,6 +4,7 @@
 //! `crate::staging`, which uses the raw IPC body instead of JSON.
 
 pub mod animation_export;
+pub mod ase_import;
 pub mod export;
 pub mod onnx_runtime;
 pub mod project;

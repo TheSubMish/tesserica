@@ -614,6 +614,67 @@ document's own budget line already excludes the model from the count.
 
 ---
 
+## D17 · `.ase` import: use **`aseprite-io`** (crates.io), not a hand-rolled parser
+
+**Locked 2026-07-31.** Resolves `08-roadmap.md` Phase 6's last item, "`.ase` import;
+evaluate `aseprite-io`" (`01-reference-analysis.md` §9). Follows from D11 (import only).
+
+**Re-verified against crates.io directly, not trusted from `01`'s 2026-07-26 snapshot.**
+`aseprite-io`:
+
+| | `aseprite-io` |
+|---|---|
+| Latest version | 0.2.0 (published 2026-06-30; 0.1.0 published 2026-03-26 — two releases in ~3 months, actively maintained, not abandoned) |
+| License | `MIT OR Apache-2.0` — MIT-compatible, no GPL surface |
+| Total downloads | 580 (small, but the crate is 4 months old and this project only needs it to be *correct*, not popular) |
+| Its own dependencies | `flate2` only (default features) — already resolved transitively via this project's own `zip` dependency's `deflate-flate2` feature, so adding it introduces **no new entry** to the dependency tree |
+| Coverage (checked against its own source, `reader.rs`/`types.rs`/`writer.rs`, not just its README) | Full header/frame/chunk walk; palette (old and new chunk forms); every layer kind (normal/group/tilemap) with correct child-level→parent-index resolution; every cel kind (raw, zlib-compressed via `flate2`, linked, tilemap) — compression **is** handled, not assumed away; tags (name/range/direction/repeat — see the one real gap below); slices; tilesets (embedded and external); user data with typed properties; external file references; legacy mask chunks. Claims byte-perfect round-trip fidelity for its own write path. |
+
+**One real, load-bearing gap found by reading the source, not assumed from the docs**:
+`reader.rs::read_tags_chunk` reads a tag's name/range/direction/repeat but `skip`s the
+deprecated 3-byte embedded RGB colour field outright rather than parsing it — an imported
+tag's *colour* is not recoverable from this crate at 0.2.0, cosmetic only
+(`Tag.color` is a chip colour, `docs/03-data-model.md` §2.3), but real. Handled in
+`commands::ase_import` by assigning a deterministic placeholder colour and reporting it in
+`LoadResult.warnings`, not by silently inventing one.
+
+**Decision: use `aseprite-io` directly**, plain `.ase`/`.aseprite` import via
+`AsepriteFile::from_reader`, converted onto this project's own `model::document::Sprite` in
+`src-tauri/src/commands/ase_import.rs` — the same `LoadResult`/`LoadedCel` wire shape
+`.tess` load (`commands::project`) already returns, so the frontend needed one new command
+call, not new plumbing. `default-features = false` (no `image`/`tiny-skia` conversion
+helpers): grayscale/indexed → straight-alpha RGBA conversion (D9) against the file's own
+palette is small enough to hand-write, and skipping those features keeps the dependency
+surface to `flate2` alone.
+
+**Rejected: hand-rolling a parser against the public spec.** `01` §9 named this a
+legitimate fallback, not a last resort — but the crate's own source shows it already
+covers every chunk this project's `Sprite` model can use (raster/group layers, every cel
+kind including zlib decompression, tags, palette), correctly, with a license this project
+can ship. Hand-rolling that from the spec would mean re-implementing (and re-testing) work
+this crate has already done, for identically-shaped output, at real risk of introducing
+*new* bugs (chunk-order edge cases, the group child-level algorithm, zlib framing) rather
+than avoiding them. The `Cargo.toml` dependency comment documents the same re-verification
+so a future maintainer does not have to repeat it from scratch.
+
+**What did not make it into this pass, reported rather than silently dropped** (also
+disclosed in `commands::ase_import`'s own module doc comment and in every affected
+`LoadResult.warnings` entry):
+
+- **`.ase` tilemap layers are skipped.** Aseprite's own tile flip/rotate bit layout does not
+  match this project's `model/tileIds.ts` packing (the tileset-*export* item earlier in
+  Phase 6 already hit the analogous mismatch against Tiled's own bit layout) — repacking it
+  correctly is real work distinct from the rest of this item, not attempted here.
+- Aseprite's three non-W3C blend modes (`addition`/`subtract`/`divide`) import as `normal`
+  — this project's `BlendMode` is the fixed W3C set (`03` §2.1).
+- `pingpongReverse` (Aseprite's fourth tag loop direction) imports as `pingpong` — this
+  project's `TagDirection` has three.
+- Per-cel opacity and Aseprite slices have no field in this project's data model at all
+  (`model::document::Cel` has no opacity; there is no `Slice` type) and are dropped without
+  a per-instance warning, since there is nothing here for them to have failed to reach.
+
+---
+
 ## Still open — deferred, not decided
 
 These genuinely need measurement rather than a preference, and each is scheduled:
@@ -645,3 +706,4 @@ These genuinely need measurement rather than a preference, and each is scheduled
 | D14 | **Canvas2D holds** at target sizes; no WebGL2 renderer |
 | D15 | Segmentation: direct **`ort`** (not `rembg-rs`), loaded via `load-dynamic` |
 | D16 | ONNX Runtime: **download on first use**, real installer measured at 2.1 MB |
+| D17 | `.ase` import: use **`aseprite-io`** crate, not a hand-rolled parser |

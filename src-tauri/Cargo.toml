@@ -84,6 +84,23 @@ sha2 = "0.10.9"
 flate2 = "1"
 tar = "0.4.46"
 
+# `.ase`/`.aseprite` import (`docs/08-roadmap.md` Phase 6 "`.ase` import";
+# evaluated against a hand-rolled parser per `docs/01-reference-analysis.md`
+# §9, decision recorded as `docs/10-decisions.md` D17). `aseprite-io` parses
+# the full binary chunk set this project's own `Sprite` model can express —
+# palette, every layer kind, every cel kind (raw/zlib-compressed/linked/
+# tilemap), tags, slices, tilesets, user data — with byte-perfect round-trip
+# claimed by its own docs; this project only ever reads with it (export stays
+# out of scope per `01` §9). Re-verified directly against crates.io rather
+# than trusted from an earlier note: v0.2.0, released 2026-06-30, MIT OR
+# Apache-2.0, its only dependency is `flate2` (already resolved transitively
+# via `zip`'s own `deflate-flate2` feature, so this adds no new entry to the
+# dependency tree). `default-features = false` — the optional `image`/
+# `tiny-skia` conversion helpers are left off; converting grayscale/indexed
+# source pixels to straight-alpha RGBA (D9 — v1 is RGBA only) against the
+# file's own palette is small enough to do by hand in `commands::ase_import`.
+aseprite-io = { version = "0.2.0", default-features = false }
+
 [profile.release]
 codegen-units = 1
 lto = true

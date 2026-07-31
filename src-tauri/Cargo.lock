@@ -48,6 +48,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "aseprite-io"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "303c59908b2ef2b9fafa3636f803b59c4a7f67b4d5d06a4d8185051cb019299a"
+dependencies = [
+ "flate2",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3451,6 +3460,7 @@ dependencies = [
 name = "tesserica"
 version = "0.1.0"
 dependencies = [
+ "aseprite-io",
  "flate2",
  "image",
  "md5",
