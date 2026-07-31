@@ -163,19 +163,17 @@ function signatureOf(sprite: Sprite, frameId: string): string {
   const parts: string[] = [`${sprite.width}x${sprite.height}@${frameId}`];
   const walk = (parentId: LayerId | null): void => {
     for (const layer of childrenOf(sprite.layers, parentId)) {
-      const cel =
-        layer.kind === 'group'
-          ? undefined
-          : sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-      const bufferId = cel ? celBufferId(cel) : null;
-      let content: string;
-      if (layer.kind === 'group') content = 'G';
-      else if (!cel) content = '-';
-      else if (layer.kind === 'tilemap') content = tilemapSignaturePart(sprite, layer, cel);
-      else content = `${cel.id}@${cel.x},${cel.y}~${bufferId}#${celRevision(bufferId!)}`;
+      // A group's own "content" marker stays the fixed 'G' here (unchanged
+      // from before) — the *document*-wide signature already covers a
+      // group's descendants by recursing into them below, so nesting
+      // `layerContentSignature`'s own (different) recursive shape here too
+      // would just duplicate that coverage. Effects apply to *any* layer
+      // kind including a group, so `effectsFingerprint` is added
+      // unconditionally, not folded into `content`.
+      const content = layer.kind === 'group' ? 'G' : layerContentSignature(sprite, frameId, layer);
       parts.push(
         `${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.blendMode}:` +
-          `${layer.clippingMask ? 1 : 0}:${content}`,
+          `${layer.clippingMask ? 1 : 0}:${content}:fx(${effectsFingerprint(layer.effects)})`,
       );
       if (layer.kind === 'group') walk(layer.id);
     }

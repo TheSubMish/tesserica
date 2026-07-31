@@ -321,6 +321,51 @@ describe('dirty-layer caching', () => {
     drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
     expect(scratchCalls().length).toBeGreaterThan(before);
   });
+
+  /**
+   * Regression: `signatureOf` (the cache `compositeSprite` itself checks
+   * before doing any work at all) originally listed every `LayerBase` field
+   * *except* `effects` — added alongside `layerContentSignature` (the
+   * *separate* per-layer signature the effects cache uses) without also
+   * folding an effects fingerprint into this, the top-level signature. A
+   * live app driven end to end over Chrome DevTools Protocol caught this
+   * directly: adding an outline effect through the real UI updated the
+   * document and the Effects panel correctly, but the on-screen canvas kept
+   * showing the un-effected square, because `compositeSprite` saw an
+   * unchanged signature and returned its stale cached canvas *before ever
+   * calling `compositeScope` again* — `effectAppliedCanvas` was never even
+   * reached. Toggling *only* `layer.effects` (no pixel, opacity, blend mode
+   * or clipping-mask change) must still force a recomposite.
+   */
+  it("recomposites when only a layer's effect stack changes", () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeSprite(8, 8);
+    const ctx = stubContext();
+    const vp = { zoom: 4, panX: 0, panY: 0 };
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    const scratchCalls = () => contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'drawImage');
+    const before = scratchCalls().length;
+
+    sprite.layers[0].effects = [
+      {
+        id: 'fx1',
+        kind: 'outline',
+        enabled: true,
+        color: [0, 0, 0, 255],
+        thickness: 1,
+        corners: false,
+      },
+    ];
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    expect(scratchCalls().length).toBeGreaterThan(before);
+
+    // Toggling it back off is an equally real, equally cache-relevant change.
+    const afterAdd = scratchCalls().length;
+    sprite.layers[0].effects = [{ ...sprite.layers[0].effects[0], enabled: false }];
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    expect(scratchCalls().length).toBeGreaterThan(afterAdd);
+  });
 });
 
 describe('drawSelection', () => {
