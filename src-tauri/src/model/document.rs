@@ -81,6 +81,63 @@ pub struct LayerBase {
     /// doc comment), so this — like `BlendMode` — only has to round-trip.
     #[serde(default)]
     pub clipping_mask: bool,
+    /// `docs/03-data-model.md` §5 — non-destructive layer effects. Composited
+    /// entirely in TS (`canvas/effects.ts`); Rust never composites layers at
+    /// all (see `Layer`'s own doc comment below), so this — like `BlendMode`
+    /// and `Group`/`Tilemap`/`Conversion` — only has to round-trip through a
+    /// `.tess` faithfully. `#[serde(default)]` so a `.tess` saved before
+    /// Phase 7 (no effects) still loads: an absent field means "no effects".
+    #[serde(default)]
+    pub effects: Vec<Effect>,
+}
+
+/// `docs/03-data-model.md` §5. Two fields beyond the doc's own sketch, for the
+/// same reason `Tag::id` was added beyond *its* sketch (see that struct's
+/// comment below): `id` because every other collection here is addressed by a
+/// stable id, which is what makes reorder/delete unambiguous, and `enabled`
+/// because the roadmap explicitly requires each effect to be individually
+/// toggleable and the doc's sketch has no field for that at all.
+///
+/// `#[serde(tag = "kind", rename_all = "kebab-case")]` makes the wire `kind`
+/// values `outline`/`drop-shadow`/`gradient-map`/`hsv-shift`/`outline-inner`
+/// — identical to `src/model/types.ts`'s own string literals — with no
+/// per-variant field rename needed, since every field name here (`color`,
+/// `thickness`, `dx`, `h`, …) is already a single word.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Effect {
+    Outline {
+        id: String,
+        enabled: bool,
+        color: Rgba,
+        thickness: u32,
+        corners: bool,
+    },
+    DropShadow {
+        id: String,
+        enabled: bool,
+        dx: i32,
+        dy: i32,
+        color: Rgba,
+    },
+    GradientMap {
+        id: String,
+        enabled: bool,
+        palette: Vec<Rgba>,
+    },
+    HsvShift {
+        id: String,
+        enabled: bool,
+        h: f32,
+        s: f32,
+        v: f32,
+    },
+    OutlineInner {
+        id: String,
+        enabled: bool,
+        color: Rgba,
+        thickness: u32,
+    },
 }
 
 /// What makes convert→edit continuous (`docs/03-data-model.md` §2.1).
@@ -406,6 +463,7 @@ mod tests {
                 blend_mode: BlendMode::Normal,
                 parent_id: None,
                 clipping_mask: false,
+                effects: vec![],
             },
             source: ConversionSource {
                 source_id: 42,
@@ -479,6 +537,161 @@ mod tests {
         assert!(matches!(layer, Layer::Raster { .. }));
     }
 
+    /// Phase 7's "Non-destructive layer effects" — every `kind`'s wire tag
+    /// must be kebab-case and match `src/model/types.ts`'s own string
+    /// literals exactly, since nothing here re-derives them from the enum
+    /// variant name at read time.
+    #[test]
+    fn every_effect_kind_round_trips_kebab_case() {
+        let cases: Vec<(Effect, &str)> = vec![
+            (
+                Effect::Outline {
+                    id: "e1".into(),
+                    enabled: true,
+                    color: [0, 0, 0, 255],
+                    thickness: 2,
+                    corners: true,
+                },
+                "outline",
+            ),
+            (
+                Effect::DropShadow {
+                    id: "e2".into(),
+                    enabled: true,
+                    dx: 2,
+                    dy: -3,
+                    color: [0, 0, 0, 128],
+                },
+                "drop-shadow",
+            ),
+            (
+                Effect::GradientMap {
+                    id: "e3".into(),
+                    enabled: false,
+                    palette: vec![[0, 0, 0, 255], [255, 255, 255, 255]],
+                },
+                "gradient-map",
+            ),
+            (
+                Effect::HsvShift {
+                    id: "e4".into(),
+                    enabled: true,
+                    h: 30.0,
+                    s: -10.0,
+                    v: 5.0,
+                },
+                "hsv-shift",
+            ),
+            (
+                Effect::OutlineInner {
+                    id: "e5".into(),
+                    enabled: true,
+                    color: [255, 0, 0, 255],
+                    thickness: 1,
+                },
+                "outline-inner",
+            ),
+        ];
+
+        for (effect, kind) in cases {
+            let json = serde_json::to_value(&effect).expect("serializes");
+            assert_eq!(json["kind"], kind, "wire kind for {effect:?}");
+            assert_eq!(
+                json["id"],
+                serde_json::to_value(effect_id(&effect)).unwrap()
+            );
+
+            let back: Effect = serde_json::from_value(json).expect("deserializes");
+            assert_eq!(
+                serde_json::to_value(&back).unwrap(),
+                serde_json::to_value(&effect).unwrap()
+            );
+        }
+    }
+
+    fn effect_id(effect: &Effect) -> &str {
+        match effect {
+            Effect::Outline { id, .. }
+            | Effect::DropShadow { id, .. }
+            | Effect::GradientMap { id, .. }
+            | Effect::HsvShift { id, .. }
+            | Effect::OutlineInner { id, .. } => id,
+        }
+    }
+
+    /// A layer's whole effect stack — order, `enabled` state and every kind's
+    /// own parameters — has to survive a `.tess` round trip untouched, since
+    /// this is what "non-destructive" means: turning an effect back on or
+    /// reordering the stack must recover exactly what was there before.
+    #[test]
+    fn a_layer_round_trips_a_multi_effect_stack_in_order() {
+        let base = LayerBase {
+            id: "l1".into(),
+            name: "hero".into(),
+            visible: true,
+            locked: false,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            parent_id: None,
+            clipping_mask: false,
+            effects: vec![
+                Effect::Outline {
+                    id: "e1".into(),
+                    enabled: true,
+                    color: [0, 0, 0, 255],
+                    thickness: 1,
+                    corners: false,
+                },
+                Effect::GradientMap {
+                    id: "e2".into(),
+                    enabled: false,
+                    palette: vec![[10, 20, 30, 255], [200, 210, 220, 255]],
+                },
+            ],
+        };
+        let layer = Layer::Raster { base };
+
+        let json = serde_json::to_value(&layer).expect("serializes");
+        assert_eq!(json["effects"][0]["kind"], "outline");
+        assert_eq!(json["effects"][1]["kind"], "gradient-map");
+
+        let back: Layer = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(back.base().effects.len(), 2);
+        match &back.base().effects[0] {
+            Effect::Outline { id, thickness, .. } => {
+                assert_eq!(id, "e1");
+                assert_eq!(*thickness, 1);
+            }
+            other => panic!("expected outline first, got {other:?}"),
+        }
+        match &back.base().effects[1] {
+            Effect::GradientMap {
+                enabled, palette, ..
+            } => {
+                assert!(!enabled);
+                assert_eq!(palette.len(), 2);
+            }
+            other => panic!("expected gradient-map second, got {other:?}"),
+        }
+    }
+
+    /// `#[serde(default)]` on `LayerBase::effects` — a `.tess` saved before
+    /// Phase 7 has no such field on the wire at all.
+    #[test]
+    fn effects_default_to_empty_when_absent() {
+        let json = serde_json::json!({
+            "kind": "raster",
+            "id": "l1",
+            "name": "bg",
+            "visible": true,
+            "locked": false,
+            "opacity": 1.0,
+            "blendMode": "normal"
+        });
+        let layer: Layer = serde_json::from_value(json).expect("deserializes");
+        assert!(layer.base().effects.is_empty());
+    }
+
     /// Phase 3's "Layer groups, clipping masks" roadmap item — a group has to
     /// round-trip its `collapsed` flag, and children have to keep their
     /// `parentId` pointer into it, exactly like the TS side's flat-array +
@@ -495,6 +708,7 @@ mod tests {
                 blend_mode: BlendMode::Normal,
                 parent_id: None,
                 clipping_mask: false,
+                effects: vec![],
             },
             collapsed: true,
         };
@@ -508,6 +722,7 @@ mod tests {
                 blend_mode: BlendMode::Normal,
                 parent_id: Some("g1".into()),
                 clipping_mask: true,
+                effects: vec![],
             },
         };
 
@@ -551,6 +766,7 @@ mod tests {
         let layer: Layer = serde_json::from_value(json).expect("deserializes");
         assert_eq!(layer.base().parent_id, None);
         assert!(!layer.base().clipping_mask);
+        assert!(layer.base().effects.is_empty());
     }
 
     /// Phase 4's "Tags with preset names" — a tag has to round-trip through
@@ -658,6 +874,7 @@ mod tests {
                 blend_mode: BlendMode::Normal,
                 parent_id: None,
                 clipping_mask: false,
+                effects: vec![],
             },
             tileset_id: "ts1".into(),
             grid: GridSpec {

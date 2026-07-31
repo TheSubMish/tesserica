@@ -86,6 +86,7 @@ function makeLayerBase(id: string, i: number, over: Partial<LayerBase> = {}): La
     blendMode: BLEND_CYCLE[i % BLEND_CYCLE.length],
     parentId: null,
     clippingMask: false,
+    effects: [],
     ...over,
   };
 }

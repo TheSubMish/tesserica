@@ -258,6 +258,7 @@ function createInitialSprite(
     blendMode: 'normal',
     parentId: null,
     clippingMask: false,
+    effects: [],
   };
   const cel: Cel = {
     id: makeId('c'),
@@ -361,6 +362,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       blendMode: 'normal',
       parentId: null,
       clippingMask: false,
+      effects: [],
     };
     const cel: Cel = {
       id: makeId('c'),
@@ -400,6 +402,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       blendMode: 'normal',
       parentId,
       clippingMask: false,
+      effects: [],
     };
     // One cel per frame. Phase 1 has a single frame, but writing it as a map
     // over frames means adding frames in Phase 4 needs no change here.
@@ -428,6 +431,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       blendMode: 'normal',
       parentId,
       clippingMask: false,
+      effects: [],
       collapsed: false,
     };
     // No cels — a group has no pixels of its own (`docs/03-data-model.md` §2.1).
@@ -447,6 +451,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       blendMode: 'normal',
       parentId,
       clippingMask: false,
+      effects: [],
       tilesetId,
       grid,
     };

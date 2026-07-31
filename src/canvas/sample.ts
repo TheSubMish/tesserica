@@ -18,57 +18,16 @@ import { EMPTY_TILE_ID, tileGridDims } from '../model/tileIds';
 import { childrenOf } from '../model/layerTree';
 import {
   celBufferId,
-  type BlendMode,
   type Cel,
   type Layer,
   type LayerId,
   type RGBA,
   type Sprite,
 } from '../model/types';
-import { blendFunction } from './blend';
+import { applyEffects, hasEnabledEffects } from './effects';
 
-/**
- * Source-over compositing of straight-alpha colours, in 0..255 / 0..1.
- *
- * `blendMode` folds in via the W3C Compositing formula
- * `Cs' = (1 − αb)·Cs + αb·B(Cb, Cs)`, then `Cs'` takes the place `Cs` occupied
- * in plain source-over — the alpha maths (`outA`, the mix weights) is
- * completely unchanged by blend mode, only the colour being mixed in is
- * (`blend.ts`). `'normal'` skips the extra work: `B(Cb, Cs) = Cs` there, which
- * makes `Cs' = Cs` identically, so this must stay behaviourally identical to
- * the pre-blend-mode function for every existing caller.
- */
-export function compositeOver(
-  src: RGBA,
-  srcAlpha: number,
-  dst: RGBA,
-  blendMode: BlendMode = 'normal',
-): RGBA {
-  const sa = (src[3] / 255) * srcAlpha;
-  const da = dst[3] / 255;
-  const outA = sa + da * (1 - sa);
-  if (outA <= 0) return [0, 0, 0, 0];
-
-  let blended: readonly [number, number, number] = [src[0], src[1], src[2]];
-  if (blendMode !== 'normal' && da > 0) {
-    const backdrop: readonly [number, number, number] = [dst[0] / 255, dst[1] / 255, dst[2] / 255];
-    const source: readonly [number, number, number] = [src[0] / 255, src[1] / 255, src[2] / 255];
-    const b = blendFunction(blendMode, backdrop, source);
-    blended = [
-      ((1 - da) * source[0] + da * b[0]) * 255,
-      ((1 - da) * source[1] + da * b[1]) * 255,
-      ((1 - da) * source[2] + da * b[2]) * 255,
-    ];
-  }
-
-  const mix = (s: number, d: number) => (s * sa + d * da * (1 - sa)) / outA;
-  return [
-    Math.round(mix(blended[0], dst[0])),
-    Math.round(mix(blended[1], dst[1])),
-    Math.round(mix(blended[2], dst[2])),
-    Math.round(outA * 255),
-  ];
-}
+export { compositeOver } from './compositeOver';
+import { compositeOver } from './compositeOver';
 
 /** The layer's own pixel at one document coordinate, or `null` outside its cel. */
 function sampleCel(cel: Cel, x: number, y: number): RGBA | null {
@@ -129,6 +88,95 @@ function sampleTilemapCel(
 }
 
 /**
+ * A leaf layer's own content, materialized over the *whole* sprite rather
+ * than one pixel — needed only when the layer has an enabled effect
+ * (`canvas/effects.ts`), since outline/drop-shadow are neighbourhood-
+ * dependent and cannot be answered from a single coordinate in isolation.
+ * Cheap enough to recompute per query: the eyedropper samples one pixel per
+ * click, never in a loop (`CanvasView.tsx`), so this is not a hot path the
+ * way `renderer.ts`'s per-redraw compositing is.
+ */
+function leafOwnBuffer(
+  sprite: Sprite,
+  layer: Layer & { kind: 'raster' | 'tilemap' | 'conversion' },
+  cel: Cel,
+): Uint8ClampedArray {
+  const { width, height } = sprite;
+  const out = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const rgba =
+        layer.kind === 'tilemap'
+          ? sampleTilemapCel(sprite, layer, cel, x, y)
+          : sampleCel(cel, x, y);
+      if (!rgba) continue;
+      const i = (y * width + x) * 4;
+      out[i] = rgba[0];
+      out[i + 1] = rgba[1];
+      out[i + 2] = rgba[2];
+      out[i + 3] = rgba[3];
+    }
+  }
+  return out;
+}
+
+/**
+ * A group's own content, materialized over the whole sprite — the group
+ * counterpart to {@link leafOwnBuffer}, reusing `compositeScopePixel` itself
+ * (recursively, one call per pixel) so a nested layer's own effects are
+ * already folded in by the time this buffer is built.
+ */
+function groupOwnBuffer(sprite: Sprite, frameId: string, groupId: LayerId): Uint8ClampedArray {
+  const { width, height } = sprite;
+  const out = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const rgba = compositeScopePixel(sprite, frameId, groupId, x, y);
+      const i = (y * width + x) * 4;
+      out[i] = rgba[0];
+      out[i + 1] = rgba[1];
+      out[i + 2] = rgba[2];
+      out[i + 3] = rgba[3];
+    }
+  }
+  return out;
+}
+
+/**
+ * One layer's own contribution at one document coordinate, effects included
+ * (`docs/03-data-model.md` §5) — what the eyedropper must agree with, since it
+ * reports what is actually visible, not the pre-effect pixel.
+ */
+function ownContributionAt(
+  sprite: Sprite,
+  frameId: string,
+  layer: Layer,
+  x: number,
+  y: number,
+): RGBA | null {
+  if (!hasEnabledEffects(layer.effects)) {
+    if (layer.kind === 'group') return compositeScopePixel(sprite, frameId, layer.id, x, y);
+    const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+    if (!cel) return null;
+    return layer.kind === 'tilemap'
+      ? sampleTilemapCel(sprite, layer, cel, x, y)
+      : sampleCel(cel, x, y);
+  }
+
+  let buffer: Uint8ClampedArray;
+  if (layer.kind === 'group') {
+    buffer = groupOwnBuffer(sprite, frameId, layer.id);
+  } else {
+    const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+    if (!cel) return null;
+    buffer = leafOwnBuffer(sprite, layer, cel);
+  }
+  const applied = applyEffects(buffer, sprite.width, sprite.height, layer.effects);
+  const i = (y * sprite.width + x) * 4;
+  return [applied[i], applied[i + 1], applied[i + 2], applied[i + 3]];
+}
+
+/**
  * Composite one document pixel through one scope — the top-level stack when
  * `parentId` is `null`, or one group's children otherwise
  * (`model/layerTree.ts`). A group recurses into this same function and its
@@ -154,16 +202,7 @@ function compositeScopePixel(
   for (const layer of childrenOf(sprite.layers, parentId)) {
     if (!layer.visible || layer.opacity === 0) continue;
 
-    const own: RGBA | null =
-      layer.kind === 'group'
-        ? compositeScopePixel(sprite, frameId, layer.id, x, y)
-        : (() => {
-            const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-            if (!cel) return null;
-            return layer.kind === 'tilemap'
-              ? sampleTilemapCel(sprite, layer, cel, x, y)
-              : sampleCel(cel, x, y);
-          })();
+    const own = ownContributionAt(sprite, frameId, layer, x, y);
     if (!own) continue;
 
     if (layer.clippingMask) {

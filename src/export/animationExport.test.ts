@@ -22,6 +22,7 @@ function layer(id: string): Layer {
     blendMode: 'normal',
     parentId: null,
     clippingMask: false,
+    effects: [],
   };
 }
 

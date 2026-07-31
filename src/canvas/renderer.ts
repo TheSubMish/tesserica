@@ -30,6 +30,8 @@ import type { OnionSkinGhost } from '../model/onionSkin';
 import { canvasCompositeOp } from './blend';
 import type { Viewport } from './coords';
 import { selectionEdges, type Selection } from '../model/selection';
+import { flattenScope, leafLayerContent } from './flatten';
+import { applyEffects, effectsFingerprint, hasEnabledEffects } from './effects';
 
 /**
  * Fixed 8px in *screen* space, deliberately not scaled by zoom
@@ -92,6 +94,7 @@ let compositeSignature: string | null = null;
 export function invalidateRenderCache(): void {
   celCache.clear();
   tilemapCelCache.clear();
+  effectCanvasCache.clear();
   compositeSignature = null;
   canvasPool.clear();
   ghostCache.clear();
@@ -133,6 +136,27 @@ function tilemapSignaturePart(
     ? `${tileset.id}(${tileset.tiles.map((e) => `${e.id}#${tileEntryRevision(e.id)}`).join(',')})`
     : 'missing';
   return `${cel.id}@${cel.x},${cel.y}~${bufferId}#${gridRevision(bufferId)}~${tilesetSig}`;
+}
+
+/**
+ * One layer's own content signature — the same "did this layer's own pixels
+ * change" question `signatureOf` below answers per layer, factored out so the
+ * effects cache (`effectAppliedCanvas`) can invalidate on exactly the same
+ * information without a second walk of `tilemapSignaturePart`/`celRevision`.
+ * A group's signature recurses into its children so an edit anywhere in the
+ * subtree still invalidates a group-level effect.
+ */
+function layerContentSignature(sprite: Sprite, frameId: string, layer: Layer): string {
+  if (layer.kind === 'group') {
+    return childrenOf(sprite.layers, layer.id)
+      .map((child) => `${child.id}:${layerContentSignature(sprite, frameId, child)}`)
+      .join('|');
+  }
+  const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+  if (!cel) return '-';
+  if (layer.kind === 'tilemap') return tilemapSignaturePart(sprite, layer, cel);
+  const bufferId = celBufferId(cel);
+  return `${cel.id}@${cel.x},${cel.y}~${bufferId}#${celRevision(bufferId)}`;
 }
 
 function signatureOf(sprite: Sprite, frameId: string): string {
@@ -259,6 +283,97 @@ function isDrawable(layer: Layer): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Non-destructive layer effects (`docs/03-data-model.md` §5, roadmap Phase 7)
+//
+// Outline/drop-shadow are neighbourhood-dependent — they cannot be answered
+// per pixel or per cel-sized canvas the way `celCanvas`/`tilemapCelCanvas`
+// are, since an outline can paint outside a cel's own bounds. So a layer with
+// an enabled effect is rendered differently from the fast path above: its own
+// content is materialized at full *document* scale via `flatten.ts`'s exact,
+// hand-rolled buffer maths (`leafLayerContent`/`flattenScope` — the same
+// functions export uses), `canvas/effects.ts::applyEffects` runs on that
+// buffer, and the result becomes the layer's `source` at offset (0, 0)
+// instead of its normal cel-sized canvas at its cel offset.
+//
+// This is the opposite trade-off from blend modes (`compositeScope`'s own
+// doc comment): blend modes use the browser's fast native
+// `globalCompositeOperation` in the live preview and only match `flatten.ts`
+// exactly at export time. Effects go the other way — the live preview is
+// exact here too — because `sample.ts`'s eyedropper already has to be exact
+// (it reports what is actually visible) and reusing the exact buffer maths
+// for the live canvas as well is less code than a third, approximate
+// implementation, not more. The one place this *is* an approximation is
+// `putImageData`'s own precision (see `flatten.ts`'s "why not read it back
+// off the display canvas" — irrelevant for an opaque outline/gradient pixel,
+// only theoretically relevant for a semi-transparent one), which is why
+// export remains the source of truth for anything that must be byte-exact.
+// ---------------------------------------------------------------------------
+
+interface EffectCanvasEntry {
+  canvas: HTMLCanvasElement;
+  signature: string;
+}
+
+const effectCanvasCache = new Map<LayerId, EffectCanvasEntry>();
+
+/** Forget effect canvases for layers the document no longer contains. */
+function pruneEffectCanvasCache(sprite: Sprite): void {
+  if (effectCanvasCache.size <= sprite.layers.length) return;
+  const live = new Set(sprite.layers.map((l) => l.id));
+  for (const id of effectCanvasCache.keys()) {
+    if (!live.has(id)) effectCanvasCache.delete(id);
+  }
+}
+
+/** A layer's own content before any effect — same shape `flatten.ts` merges, just for one layer. */
+function ownContentBeforeEffects(
+  sprite: Sprite,
+  frameId: string,
+  layer: Layer,
+): Uint8ClampedArray | null {
+  if (layer.kind === 'group') return flattenScope(sprite, frameId, layer.id);
+  const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
+  return cel ? leafLayerContent(sprite, layer, cel, sprite.width, sprite.height) : null;
+}
+
+/**
+ * The document-scale, effect-applied canvas for one layer — cached per layer
+ * id, invalidated by the same content signature `signatureOf` already tracks
+ * plus a fingerprint of the effect stack itself, so toggling, reordering or
+ * editing an effect's parameters invalidates exactly like a pixel edit would.
+ */
+function effectAppliedCanvas(
+  sprite: Sprite,
+  frameId: string,
+  layer: Layer,
+  contentSignature: string,
+): HTMLCanvasElement | null {
+  const signature = `${contentSignature}~fx:${effectsFingerprint(layer.effects)}`;
+  const cached = effectCanvasCache.get(layer.id);
+  if (cached && cached.signature === signature) return cached.canvas;
+
+  const own = ownContentBeforeEffects(sprite, frameId, layer);
+  if (!own) {
+    effectCanvasCache.delete(layer.id);
+    return null;
+  }
+  const applied = applyEffects(own, sprite.width, sprite.height, layer.effects);
+
+  const canvas = cached?.canvas ?? document.createElement('canvas');
+  if (canvas.width !== sprite.width || canvas.height !== sprite.height) {
+    canvas.width = sprite.width;
+    canvas.height = sprite.height;
+  }
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, sprite.width, sprite.height);
+  ctx.putImageData(new ImageData(applied, sprite.width, sprite.height), 0, 0);
+
+  effectCanvasCache.set(layer.id, { canvas, signature });
+  return canvas;
+}
+
+// ---------------------------------------------------------------------------
 // Group nesting + clipping masks (`docs/08-roadmap.md` Phase 3, "Layer
 // groups, clipping masks")
 //
@@ -328,6 +443,19 @@ function compositeScope(
       offsetY = cel.y;
     }
     if (!source) continue;
+
+    if (hasEnabledEffects(layer.effects)) {
+      const applied = effectAppliedCanvas(
+        sprite,
+        frameId,
+        layer,
+        layerContentSignature(sprite, frameId, layer),
+      );
+      if (!applied) continue;
+      source = applied;
+      offsetX = 0;
+      offsetY = 0;
+    }
 
     if (layer.clippingMask) {
       if (!baseCtx) continue; // nothing below to clip to in this scope
@@ -431,6 +559,7 @@ export function compositeSprite(sprite: Sprite, frameId: string): HTMLCanvasElem
 
   pruneCelCache(sprite);
   pruneTilemapCelCache(sprite);
+  pruneEffectCanvasCache(sprite);
   compositeSignature = signature;
   return canvas;
 }

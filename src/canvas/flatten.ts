@@ -18,7 +18,8 @@ import { getBuffer } from '../model/pixelBuffers';
 import { getGrid } from '../model/tileGridBuffers';
 import { renderTilemapCel } from '../model/tilemapRender';
 import { childrenOf } from '../model/layerTree';
-import { compositeOver } from './sample';
+import { compositeOver } from './compositeOver';
+import { applyEffects } from './effects';
 
 /** A leaf layer's own pixels placed at their cel offset in a sprite-sized buffer. */
 function placeCel(
@@ -43,6 +44,32 @@ function placeCel(
     }
   }
   return out;
+}
+
+/**
+ * A non-group layer's own pixels, resolved and placed at document scale —
+ * exported so `canvas/renderer.ts` can materialize the same "own content" a
+ * layer with an enabled effect needs (`docs/03-data-model.md` §5) without a
+ * second implementation of "how a tilemap cel or a raster cel becomes
+ * sprite-sized pixels".
+ */
+export function leafLayerContent(
+  sprite: Sprite,
+  layer: Exclude<Layer, { kind: 'group' }>,
+  cel: Cel,
+  width: number,
+  height: number,
+): Uint8ClampedArray | null {
+  if (layer.kind === 'tilemap') {
+    // A tilemap layer's cel holds grid data, not a pixel buffer — resolve it
+    // against its tileset the same way `canvas/renderer.ts` does, so export
+    // sees exactly what the canvas shows.
+    const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
+    const gridBuffer = getGrid(celBufferId(cel));
+    return placeCel(renderTilemapCel(tileset, layer.grid, gridBuffer, cel), cel, width, height);
+  }
+  const buf = getBuffer(celBufferId(cel));
+  return buf ? placeCel(buf, cel, width, height) : null;
 }
 
 /** `own`'s alpha scaled by `opacity` — its shape as a future clip base, at its own opacity. */
@@ -113,7 +140,7 @@ function mergeClipped(
  * `base` — the nearest non-clipping layer's own contribution — resets on
  * every recursive call.
  */
-function flattenScope(
+export function flattenScope(
   sprite: Sprite,
   frameId: string,
   parentId: LayerId | null,
@@ -130,21 +157,19 @@ function flattenScope(
       own = flattenScope(sprite, frameId, layer.id);
     } else {
       const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
-      if (!cel) {
-        own = null;
-      } else if (layer.kind === 'tilemap') {
-        // A tilemap layer's cel holds grid data, not a pixel buffer — resolve
-        // it against its tileset the same way `canvas/renderer.ts` does, so
-        // export sees exactly what the canvas shows.
-        const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
-        const gridBuffer = getGrid(celBufferId(cel));
-        own = placeCel(renderTilemapCel(tileset, layer.grid, gridBuffer, cel), cel, width, height);
-      } else {
-        const buf = getBuffer(celBufferId(cel));
-        own = buf ? placeCel(buf, cel, width, height) : null;
-      }
+      own = cel ? leafLayerContent(sprite, layer, cel, width, height) : null;
     }
     if (!own) continue;
+
+    // Non-destructive layer effects (`docs/03-data-model.md` §5): applied to
+    // this layer's own content, already placed at document scale, *before*
+    // it merges with anything below it — a group's own effects therefore see
+    // its children's already-composited (and already-effected) pixels, and
+    // effects further up the stack see this layer's effects baked in, not
+    // its raw pixels. `applyEffects` is a no-op (returns `own` unchanged) when
+    // the layer has no enabled effect, so this costs nothing for the common
+    // case.
+    own = applyEffects(own, width, height, layer.effects);
 
     if (layer.clippingMask) {
       // No base in this scope to clip to — nothing below it, or everything

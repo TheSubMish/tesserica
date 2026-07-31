@@ -19,6 +19,7 @@ function layer(id: string, over: Partial<LayerBase> = {}): Layer {
     blendMode: 'normal',
     parentId: null,
     clippingMask: false,
+    effects: [],
     ...over,
   };
 }
@@ -34,6 +35,7 @@ function group(id: string, over: Partial<LayerBase> = {}): Layer {
     blendMode: 'normal',
     parentId: null,
     clippingMask: false,
+    effects: [],
     collapsed: false,
     ...over,
   };
@@ -248,6 +250,7 @@ describe('samplePixel on a tilemap layer (roadmap Phase 6)', () => {
       blendMode: 'normal',
       parentId: null,
       clippingMask: false,
+      effects: [],
       tilesetId: 'ts1',
       grid,
     };

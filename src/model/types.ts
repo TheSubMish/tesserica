@@ -69,9 +69,44 @@ export interface LayerBase {
    * See `canvas/layerTree.ts`.
    */
   clippingMask: boolean;
-  // `effects` (docs/03-data-model.md §5) is Phase 7 — deliberately omitted
-  // rather than added unused.
+  /**
+   * `docs/03-data-model.md` §5 — non-destructive layer effects, applied at
+   * composite time, reorderable and toggleable. Order matters: each entry
+   * composites on top of the previous one's *output*, so "outline, then
+   * gradient-map" and "gradient-map, then outline" are genuinely different
+   * results (`canvas/effects.ts::applyEffects`).
+   */
+  effects: Effect[];
 }
+
+export type EffectId = string;
+
+/**
+ * `docs/03-data-model.md` §5. Composited entirely in TS
+ * (`canvas/effects.ts`) — Rust never composites layers at all (see `Layer`'s
+ * own doc comment below), so `src-tauri/src/model/document.rs`'s mirror only
+ * has to round-trip through `.tess` faithfully.
+ *
+ * Two fields beyond the doc's own sketch, for the same reason `Tag.id` was
+ * added beyond *its* sketch (see that comment below): `id` because every
+ * other collection here is addressed by a stable id, which is what makes
+ * reorder/delete unambiguous, and `enabled` because the roadmap explicitly
+ * requires each effect to be individually toggleable and the sketch has no
+ * field for that at all.
+ */
+export type Effect =
+  | {
+      id: EffectId;
+      kind: 'outline';
+      enabled: boolean;
+      color: RGBA;
+      thickness: number;
+      corners: boolean;
+    }
+  | { id: EffectId; kind: 'drop-shadow'; enabled: boolean; dx: number; dy: number; color: RGBA }
+  | { id: EffectId; kind: 'gradient-map'; enabled: boolean; palette: RGBA[] }
+  | { id: EffectId; kind: 'hsv-shift'; enabled: boolean; h: number; s: number; v: number }
+  | { id: EffectId; kind: 'outline-inner'; enabled: boolean; color: RGBA; thickness: number };
 
 /**
  * What makes convert→edit continuous (`docs/03-data-model.md` §2.1).

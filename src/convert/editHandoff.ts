@@ -54,6 +54,7 @@ export function conversionDocument(
     blendMode: 'normal',
     parentId: null,
     clippingMask: false,
+    effects: [],
     source: { sourceId, settings },
   };
 

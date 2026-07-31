@@ -21,6 +21,7 @@ function layer(id: string, over: Partial<LayerBase> = {}): Layer {
     blendMode: 'normal',
     parentId: null,
     clippingMask: false,
+    effects: [],
     ...over,
   };
 }
@@ -36,6 +37,7 @@ function group(id: string, over: Partial<LayerBase> = {}): Layer {
     blendMode: 'normal',
     parentId: null,
     clippingMask: false,
+    effects: [],
     collapsed: false,
     ...over,
   };
@@ -247,6 +249,7 @@ describe('flattenSprite', () => {
         blendMode: 'normal',
         parentId: null,
         clippingMask: false,
+        effects: [],
         tilesetId: 'ts1',
         grid,
       };
@@ -297,6 +300,7 @@ describe('flattenSprite', () => {
         blendMode: 'normal',
         parentId: null,
         clippingMask: false,
+        effects: [],
         tilesetId: 'missing-tileset',
         grid,
       };

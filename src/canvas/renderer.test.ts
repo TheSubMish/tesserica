@@ -119,6 +119,7 @@ function makeSprite(width: number, height: number): Sprite {
         blendMode: 'normal',
         parentId: null,
         clippingMask: false,
+        effects: [],
       },
     ],
     frames: [{ id: 'f1', durationMs: 100 }],
@@ -452,6 +453,7 @@ describe('drawOnionSkin', () => {
           blendMode: 'normal',
           parentId: null,
           clippingMask: false,
+          effects: [],
         },
       ],
       frames,
@@ -684,6 +686,7 @@ describe('drawOnionSkin', () => {
         blendMode: 'normal',
         parentId: null,
         clippingMask: false,
+        effects: [],
         tilesetId: 'ts1',
         grid,
       };

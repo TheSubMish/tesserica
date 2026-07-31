@@ -136,6 +136,7 @@ describe('reconvertLayer — live re-editing', () => {
             blendMode: 'normal',
             parentId: null,
             clippingMask: false,
+            effects: [],
           },
         ],
         frames: [{ id: 'f1', durationMs: 100 }],

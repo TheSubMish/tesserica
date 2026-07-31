@@ -24,6 +24,7 @@ function raster(id: string, parentId: string | null, over: Partial<LayerBase> = 
     blendMode: 'normal',
     parentId,
     clippingMask: false,
+    effects: [],
     ...over,
   };
 }
@@ -39,6 +40,7 @@ function group(id: string, parentId: string | null, over: Partial<LayerBase> = {
     blendMode: 'normal',
     parentId,
     clippingMask: false,
+    effects: [],
     collapsed: false,
     ...over,
   };

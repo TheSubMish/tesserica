@@ -250,6 +250,9 @@ fn convert(file: &AsepriteFile, staging: &Staging) -> (Sprite, Vec<LoadedCel>, V
             blend_mode: map_blend_mode(ase_layer.blend_mode, &mut warnings, &ase_layer.name),
             parent_id,
             clipping_mask: false,
+            // `.ase` has no equivalent of `docs/03-data-model.md` §5's
+            // non-destructive effects (Phase 7) to import from.
+            effects: vec![],
         };
 
         let layer = if ase_layer.kind == AseLayerKind::Group {

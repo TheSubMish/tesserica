@@ -17,6 +17,7 @@ describe('celAt', () => {
         blendMode: 'normal',
         parentId: null,
         clippingMask: false,
+        effects: [],
       },
     ],
     frames: [

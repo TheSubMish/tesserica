@@ -543,6 +543,7 @@ mod tests {
                     blend_mode: BlendMode::Normal,
                     parent_id: None,
                     clipping_mask: false,
+                    effects: vec![],
                 },
             }],
             frames: vec![Frame {
@@ -932,6 +933,7 @@ mod tests {
                     blend_mode: BlendMode::Normal,
                     parent_id: None,
                     clipping_mask: false,
+                    effects: vec![],
                 },
                 tileset_id: "ts1".into(),
                 grid: GridSpec {
