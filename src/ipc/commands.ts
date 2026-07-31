@@ -14,7 +14,7 @@
  * because a second transport would buy nothing.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 
 import type { ConvertSettings } from '../pipeline/settings.ts';
 
@@ -362,6 +362,67 @@ export async function exportConversion(request: {
   path: string;
 }): Promise<ExportConversionResult> {
   return invoke<ExportConversionResult>('export_conversion', { request });
+}
+
+// ---------------------------------------------------------------------------
+// Batch conversion (`docs/08-roadmap.md` Phase 7 "Batch conversion + CLI
+// headless mode", `docs/06-workflows.md` W5, `src-tauri/src/commands/
+// batch_convert.rs`).
+//
+// Reuses `ConvertSettings` unchanged — no parallel settings type. Progress
+// streams back over a Tauri **Channel** (`docs/02-architecture.md` §6.2,
+// D13), never accumulated into the command's own return value, which is
+// this project's established reason for that pattern. Cancellation is a
+// separate command against a job id the `started` event carries.
+// ---------------------------------------------------------------------------
+
+export type BatchConvertEvent =
+  | { kind: 'started'; jobId: number; total: number }
+  | { kind: 'fileStarted'; index: number; file: string }
+  | {
+      kind: 'fileSucceeded';
+      index: number;
+      file: string;
+      outputPath: string;
+      width: number;
+      height: number;
+      colorsUsed: number;
+    }
+  | { kind: 'fileFailed'; index: number; file: string; error: string }
+  | { kind: 'finished'; succeeded: number; failed: number; cancelled: boolean };
+
+export interface BatchConvertSummary {
+  jobId: number;
+  total: number;
+  succeeded: number;
+  failed: number;
+  cancelled: boolean;
+}
+
+/**
+ * Run a batch conversion, reporting per-file progress to `onProgress` as it
+ * streams in over the Channel. Resolves once the batch (or its cancellation)
+ * has fully finished, with the same summary the `finished` event itself
+ * carries in aggregate.
+ */
+export async function batchConvert(
+  request: {
+    folder: string;
+    outFolder: string;
+    pixelSize: number;
+    settings: ConvertSettings;
+    scale: ExportScale;
+  },
+  onProgress: (event: BatchConvertEvent) => void,
+): Promise<BatchConvertSummary> {
+  const progress = new Channel<BatchConvertEvent>();
+  progress.onmessage = onProgress;
+  return invoke<BatchConvertSummary>('batch_convert', { request, progress });
+}
+
+/** Cooperative cancellation: already-converting files still finish. */
+export async function cancelBatchConvert(jobId: number): Promise<void> {
+  await invoke('cancel_batch_convert', { jobId });
 }
 
 // ---------------------------------------------------------------------------
