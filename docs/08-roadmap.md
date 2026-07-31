@@ -827,7 +827,53 @@ done — both are real gaps, stated plainly rather than implied closed.
 
 **Goal:** W4 and W7 work.
 
-- [ ] Tileset model, tilemap layers, rect grid (`03` §4)
+- [ ] Tileset model, tilemap layers, rect grid (`03` §4) — **left unchecked
+      deliberately**, same posture Phase 4's frame/cel foundation took before
+      the Timeline panel existed: the data model, rendering and undo/redo
+      machinery are built and verified, but nothing in the shipped UI can
+      create a tileset or a tilemap layer yet — no button anywhere calls
+      `addTileset`/`addTilemapLayer`. The next item, the tile stamp tool, is
+      what will make this reachable by a human. What landed: `Tileset`/
+      `TileEntry`/`GridSpec`/`GridShape` (`model/types.ts`, mirrored in
+      `src-tauri/src/model/document.rs`'s `Layer::Tilemap` variant), tile-id
+      bit packing (`model/tileIds.ts`, index in bits 0–27, flip-h/flip-v/
+      transpose in 28–30, verified never to overflow a signed int32), grid
+      and tile-pixel storage outside React state (`model/tileGridBuffers.ts`,
+      `model/tileBuffers.ts`, mirroring `model/pixelBuffers.ts`'s existing
+      pattern), undoable tileset/tilemap-layer/grid-cell commands
+      (`history/tilesetCommands.ts`, reusing `layerCommands.ts`'s
+      `AddLayerCommand` for layer creation by generalizing `LayerExistence` to
+      snapshot grid buffers instead of pixel buffers), a tilemap branch in all
+      three places every prior layer-kind addition touched
+      (`canvas/renderer.ts`, `canvas/flatten.ts`, `canvas/sample.ts` —
+      nearest-neighbour trivially, since a tile is always blitted 1:1 into its
+      grid cell with exact array-transform flips, never a canvas matrix), and
+      a full `.tess` round trip (a tilemap cel's grid as raw bytes at
+      `cels/<id>.bin`, each tile's own pixels as PNG at
+      `tiles/<tilesetId>/<tileId>.png`, both documented in §7 but never
+      implemented before this). Verified: `cargo test` 202/202, `cargo clippy
+      --all-targets -- -D warnings` clean, `npm run test` 700/700 (new
+      coverage: tile-id packing/unpacking including every flip combination
+      and the int32-overflow boundary; tileset/tile-entry/tilemap-layer
+      CRUD with undo/redo; pixel-exact rendering of a flipped tile agreeing
+      across renderer/flatten/sample; a `.tess` round trip of a populated
+      tilemap layer with byte-for-byte grid fidelity). Live-verified over
+      Chrome DevTools Protocol against the real running Vite dev bundle
+      (`tauri dev`'s WebView unreachable in this container, consistent with
+      every earlier phase's own note here): created a tileset and a tile
+      programmatically through the real `history/tilesetCommands.ts` actions
+      (not synthetic store mutations — genuinely undoable, run through the
+      real history store), painted a flipped tile into a real tilemap layer,
+      and read back actual canvas pixels showing the correct flip; confirmed
+      `flatten.ts` and `sample.ts` agree with the renderer pixel-for-pixel;
+      and confirmed a real `Ctrl+Z`-equivalent (`useHistoryStore.getState()
+      .undo()`) reverted the paint on screen. This session's own attempt hit
+      the same "second, disconnected module instance" trap Phase 4's write-up
+      already named (Vite dev serves a relative import with a `?t=<cache-bust
+      query>` distinct from a bare `import()` of the same file from outside
+      the module graph, so two "singleton" stores can silently coexist) —
+      resolved by importing the exact versioned URL the app's own module
+      graph uses, not by falling back to a weaker check.
 - [ ] Tile stamp tool, auto-deduplication, flip/rotate flags
 - [ ] Tileset + tilemap JSON export
 - [ ] Grid detection via autocorrelation (`04` §3.3) — unlocks W7 Case A
