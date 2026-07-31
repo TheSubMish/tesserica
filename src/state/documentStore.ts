@@ -279,6 +279,7 @@ function createInitialSprite(
       frames: [frame],
       cels: [cel],
       tags: [],
+      colorMode: 'rgba',
       tilesets: [],
     },
     activeLayerId: layer.id,
@@ -380,6 +381,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       frames: [frame],
       cels: [cel],
       tags: [],
+      colorMode: 'rgba',
       tilesets: [],
     };
     get().replaceDocument(sprite, new Map());

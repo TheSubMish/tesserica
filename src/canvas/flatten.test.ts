@@ -59,7 +59,16 @@ function makeSprite(layers: Layer[], cels?: Partial<Cel>[]): Sprite {
       ...(cels?.[i] ?? {}),
     }));
   for (const c of list) allocateBuffer(c.id, c.width, c.height);
-  return { width: W, height: H, layers, frames: [frame], cels: list, tags: [], tilesets: [] };
+  return {
+    width: W,
+    height: H,
+    colorMode: 'rgba',
+    layers,
+    frames: [frame],
+    cels: list,
+    tags: [],
+    tilesets: [],
+  };
 }
 
 const px = (buf: Uint8ClampedArray, x: number, y: number) =>
@@ -269,6 +278,7 @@ describe('flattenSprite', () => {
       const sprite: Sprite = {
         width: W,
         height: H,
+        colorMode: 'rgba',
         layers: [tilemapLayer],
         frames: [frame],
         cels: [cel],
@@ -317,6 +327,7 @@ describe('flattenSprite', () => {
       const sprite: Sprite = {
         width: W,
         height: H,
+        colorMode: 'rgba',
         layers: [tilemapLayer],
         frames: [frame],
         cels: [cel],

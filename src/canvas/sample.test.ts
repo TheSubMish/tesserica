@@ -57,7 +57,16 @@ function sprite(layers: Layer[], size = 4): { sprite: Sprite; frameId: string } 
     }));
   cels.forEach((c) => allocateBuffer(c.id, size, size));
   return {
-    sprite: { width: size, height: size, layers, frames: [frame], cels, tags: [], tilesets: [] },
+    sprite: {
+      width: size,
+      height: size,
+      colorMode: 'rgba',
+      layers,
+      frames: [frame],
+      cels,
+      tags: [],
+      tilesets: [],
+    },
     frameId: frame.id,
   };
 }
@@ -269,6 +278,7 @@ describe('samplePixel on a tilemap layer (roadmap Phase 6)', () => {
     const s: Sprite = {
       width: 4,
       height: 4,
+      colorMode: 'rgba',
       layers: [tilemapLayer],
       frames: [frame],
       cels: [cel],

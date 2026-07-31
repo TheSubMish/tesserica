@@ -76,6 +76,7 @@ export function conversionDocument(
     frames: [frame],
     cels: [cel],
     tags: [],
+    colorMode: 'rgba',
     tilesets: [],
   };
 

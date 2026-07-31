@@ -7,8 +7,10 @@
  * layer × frame → cel structure is present from the start, even though Phase 0
  * only ever has one frame.
  *
- * D9: v1 is RGBA only. The `indexed` cel variant stays out of the union until
- * Phase 7 so nothing accidentally depends on it.
+ * D9 landed in Phase 7: `Sprite.colorMode` is real, and an indexed-mode
+ * raster cel's pixels are palette indices (`model/indexBuffers.ts`) rather
+ * than RGBA — see that file and `model/celStorage.ts` for the storage split,
+ * and `model/indexedColor.ts` for the "colour not in the palette" policy.
  */
 
 import type { ConvertSettings } from '../pipeline/settings.ts';
@@ -240,8 +242,14 @@ export function celBufferId(cel: Pick<Cel, 'id' | 'linkedTo'>): CelId {
 /**
  * `docs/03-data-model.md` §3.
  *
- * D9: v1 is RGBA only, so a palette is a *swatch list* — nothing indexes into
- * it. Indexed mode and live palette swapping are Phase 7.
+ * For an `'rgba'`-mode sprite, a palette is purely a *swatch list* — the
+ * session-wide `state/paletteStore.ts` picker, never referenced by `Sprite`
+ * itself. An `'indexed'`-mode sprite is different: `Sprite.palette` is its
+ * own embedded copy, and every indexed cel's stored bytes are indices into
+ * exactly that palette (`model/indexBuffers.ts`, `model/indexedColor.ts`).
+ * Embedded rather than referenced by id because a `.tess` must remain
+ * self-contained — the session's palette list (bundled + imported) can
+ * change or vanish between runs, but a document's own colours must not.
  */
 export interface Palette {
   id: string;
@@ -283,15 +291,33 @@ export interface Tag {
   color: string;
 }
 
+/**
+ * `docs/10-decisions.md` D9. Defaults to `'rgba'` everywhere a `Sprite` is
+ * constructed (`app/newSprite.ts`), so every pre-Phase-7 document — in
+ * memory, in a saved `.tess`, or in a test fixture — is unaffected.
+ * `'grayscale'` stays listed in `docs/03-data-model.md` §2 for the same
+ * "extension, not migration" reason `indexed` itself was preserved, but
+ * nothing in this codebase implements it; the type below deliberately omits
+ * it so no code can accidentally branch on a mode nothing produces.
+ */
+export type ColorMode = 'rgba' | 'indexed';
+
 export interface Sprite {
   width: number;
   height: number;
+  colorMode: ColorMode;
   layers: Layer[]; // bottom → top
   frames: Frame[];
   cels: Cel[];
   tags: Tag[];
   /** `docs/03-data-model.md` §4, roadmap Phase 6. Empty until a tileset exists. */
   tilesets: Tileset[];
+  /**
+   * Only meaningful when `colorMode === 'indexed'` — see `Palette`'s own
+   * comment above. `undefined` for every `'rgba'` sprite, including every
+   * document that predates this field.
+   */
+  palette?: Palette;
 }
 
 export const celKey = (layerId: LayerId, frameId: FrameId): string => `${layerId}:${frameId}`;

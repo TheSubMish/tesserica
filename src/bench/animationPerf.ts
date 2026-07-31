@@ -165,6 +165,7 @@ export function buildBenchSprite(shape: SpriteShape): { sprite: Sprite; bufferId
     frames,
     cels,
     tags: [],
+    colorMode: 'rgba',
     tilesets: [],
   };
   return { sprite, bufferIds };
