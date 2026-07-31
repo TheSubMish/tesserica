@@ -95,6 +95,23 @@ describe('folder selection', () => {
     });
     expect(openMock).toHaveBeenCalledWith(expect.objectContaining({ directory: true }));
   });
+
+  /**
+   * Caught live over CDP against the real Vite dev bundle (no Tauri shell,
+   * so `@tauri-apps/plugin-dialog`'s `open()` really does throw rather than
+   * resolving `null`): with no try/catch around the folder pickers, clicking
+   * "Choose…" produced an uncaught exception / unhandled rejection instead
+   * of the honest in-dialog error every other failure path here shows.
+   */
+  it('shows an honest error instead of an unhandled rejection when the folder picker itself fails', async () => {
+    render();
+    openMock.mockRejectedValueOnce(new Error('no such backend'));
+    await act(async () => {
+      chooseButtons()[0].click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('no such backend');
+  });
 });
 
 describe('loading settings from a conversion layer', () => {

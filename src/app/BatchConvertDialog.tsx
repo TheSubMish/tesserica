@@ -89,13 +89,27 @@ export function BatchConvertDialog({ onClose }: { onClose: () => void }) {
   const [summary, setSummary] = useState<BatchConvertSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Both wrapped in try/catch and called as `void pick…()` from `onClick`:
+  // outside the Tauri shell (or if the platform's own folder picker errors)
+  // `open()` rejects rather than resolving `null`, and with no `.catch` here
+  // that would surface as an unhandled promise rejection instead of the same
+  // honest in-dialog error `run()` already shows for a missing backend —
+  // caught live over CDP against the real Vite dev bundle, not assumed.
   const pickSourceFolder = async () => {
-    const picked = await open({ title: 'Source folder', directory: true, multiple: false });
-    if (typeof picked === 'string') setSourceFolder(picked);
+    try {
+      const picked = await open({ title: 'Source folder', directory: true, multiple: false });
+      if (typeof picked === 'string') setSourceFolder(picked);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
   const pickOutFolder = async () => {
-    const picked = await open({ title: 'Output folder', directory: true, multiple: false });
-    if (typeof picked === 'string') setOutFolder(picked);
+    try {
+      const picked = await open({ title: 'Output folder', directory: true, multiple: false });
+      if (typeof picked === 'string') setOutFolder(picked);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const useLayerSettings = () => {
