@@ -68,6 +68,23 @@ describe('beginStamp / continueStamp / endStamp', () => {
     endStamp();
   });
 
+  it("bumps the document's reactive revision on every live paint, not just at pointer-up", () => {
+    // Regression: a first pass mutated the grid buffer directly without
+    // calling `doc.touch()`, so `CanvasView`'s redraw effect (which watches
+    // `revision`, not the grid buffer's own separate counter) never re-ran —
+    // a stamp was invisible until some unrelated event happened to redraw.
+    // Caught by live verification (real click on the real canvas showed no
+    // pixel change), not by the grid-content assertions above.
+    setUp();
+    const before = doc().revision;
+    beginStamp(3, 3);
+    expect(doc().revision).toBeGreaterThan(before);
+    const afterBegin = doc().revision;
+    continueStamp(11, 3);
+    expect(doc().revision).toBeGreaterThan(afterBegin);
+    endStamp();
+  });
+
   it('interpolates cells crossed during a fast drag, like a brush stroke', () => {
     const { cel, grid } = setUp();
     beginStamp(3, 3); // cell (0,0)

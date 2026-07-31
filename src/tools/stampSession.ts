@@ -73,7 +73,15 @@ function selectedPackedTileId(tilesetId: TilesetId): number | null {
 
 function paintCell(target: StampTarget, col: number, row: number, tileId: number): void {
   if (col < 0 || row < 0 || col >= target.cols || row >= target.rows) return;
-  useDocumentStore.getState().setTilemapCell(target.celId, col, row, tileId);
+  const doc = useDocumentStore.getState();
+  doc.setTilemapCell(target.celId, col, row, tileId);
+  // `setTilemapCell` only bumps the grid buffer's own revision counter
+  // (`model/tileGridBuffers.ts`) — every other tool's dispatch loop bumps the
+  // document's *reactive* `revision` too (`CanvasView`'s generic `dispatch`:
+  // `doc.touch(bufferId)`), which is what the redraw `useEffect` actually
+  // watches. Without this, a stamp is invisible until some unrelated event
+  // happens to re-render the canvas.
+  doc.touch(target.bufferId);
 }
 
 let session: TileStrokeSnapshot | null = null;
