@@ -827,13 +827,15 @@ done — both are real gaps, stated plainly rather than implied closed.
 
 **Goal:** W4 and W7 work.
 
-- [ ] Tileset model, tilemap layers, rect grid (`03` §4) — **left unchecked
-      deliberately**, same posture Phase 4's frame/cel foundation took before
-      the Timeline panel existed: the data model, rendering and undo/redo
-      machinery are built and verified, but nothing in the shipped UI can
-      create a tileset or a tilemap layer yet — no button anywhere calls
-      `addTileset`/`addTilemapLayer`. The next item, the tile stamp tool, is
-      what will make this reachable by a human. What landed: `Tileset`/
+- [x] Tileset model, tilemap layers, rect grid (`03` §4) — was **left
+      unchecked deliberately** in the pass that built the data model, the same
+      posture Phase 4's frame/cel foundation took before the Timeline panel
+      existed: rendering and undo/redo machinery were built and verified, but
+      nothing in the shipped UI could create a tileset or a tilemap layer yet.
+      **That UI gap is now closed** by the next item's `panels/
+      TilesetPanel.tsx` — creating a tileset, adding tiles, and adding a
+      tilemap layer are all real button clicks now, live-verified end to end
+      (see below). What landed in the original pass: `Tileset`/
       `TileEntry`/`GridSpec`/`GridShape` (`model/types.ts`, mirrored in
       `src-tauri/src/model/document.rs`'s `Layer::Tilemap` variant), tile-id
       bit packing (`model/tileIds.ts`, index in bits 0–27, flip-h/flip-v/
@@ -874,7 +876,98 @@ done — both are real gaps, stated plainly rather than implied closed.
       the module graph, so two "singleton" stores can silently coexist) —
       resolved by importing the exact versioned URL the app's own module
       graph uses, not by falling back to a weaker check.
-- [ ] Tile stamp tool, auto-deduplication, flip/rotate flags
+- [x] Tile stamp tool, auto-deduplication, flip/rotate flags — makes the item
+      above reachable by a human. `panels/TilesetPanel.tsx` is the tileset
+      panel: an inline "+ New tileset" form (name + tile size, the same idiom
+      `TimelinePanel`'s "+ Tag" form uses, not a modal), a tile-picker grid of
+      real `<canvas>` thumbnails (nearest-neighbour, nothing new — nearest
+      is already how every pixel-art surface in this app renders), and an
+      "Add tilemap layer" button that creates one bound to the tileset shown.
+      Adding a tile is **capture a rectangular selection**, not an import
+      dialog — reuses Phase 3's selection tools directly: the active
+      selection's bounding box must equal the tileset's own tile size
+      exactly, or it is a plain, actionable error rather than an
+      undocumented silent resample (`docs/04-image-pipeline.md` is normative
+      and specifies no such resize). `tools/stampSession.ts` is the Stamp
+      tool's real logic, called directly from `CanvasView` the same way
+      `tools/zoom.ts` bypasses generic dispatch (`tools/stamp.ts` is a
+      documented no-op `Tool`, exactly like `zoom`): a tilemap cel has no
+      `Uint8ClampedArray` for `ToolContext` to hand a tool, only a packed-id
+      `Uint32Array` grid (`model/tileGridBuffers.ts`). Paints live during a
+      drag (interpolating skipped cells with the existing Bresenham
+      `linePoints`, the same helper the Pencil tool already uses) and closes
+      into one `PaintTileCellsCommand` at pointer-up — **one drag is one
+      undo step** (`03` §6), not one step per cell; Escape abandons the
+      gesture cleanly (`history/tileStrokeRecorder.ts` mirrors
+      `strokeRecorder.ts`'s snapshot/diff shape one buffer type over).
+      **Auto-deduplication** (`model/tilesets.ts::findMatchingTile`):
+      capturing a tile whose pixels exactly match an existing tile — directly
+      or under a horizontal flip, a vertical flip, or both (a 180° rotation)
+      — reuses that entry's index instead of storing a duplicate `TileEntry`;
+      `history/tilesetCommands.ts::addTileToTileset` is now dedup-aware and
+      reports which orientation reproduces the capture. **Honest partial**:
+      dedup does not chase a diagonal transpose (a tile that is only a
+      duplicate under `model/tilemapRender.ts::transposeTile`), the
+      documented "flip-only, not full rotate-aware" floor this roadmap itself
+      names as legitimate — transpose is only well-defined for a square tile,
+      and a new `TileEntry` is the honest fallback rather than a special case
+      for the square-tile subset. **Flip/rotate flags**: `state/
+      tilesetStore.ts` holds `flipH`/`flipV`/`transpose`, three toggle buttons
+      next to the picker, feeding straight into `model/tileIds.ts::
+      packTileId`'s bits 28–30 — all three are real and toggleable, even
+      though dedup only recognizes the first two automatically. New tests:
+      `model/tileIds.test.ts::docPixelToCell` (the grid-targeting math,
+      cel-offset aware), `model/tilesets.test.ts` (`extractTilePixels`,
+      `findMatchingTile` exact/flipH/flipV/no-match/size-mismatch cases),
+      `history/tilesetCommands.test.ts` (dedup reuse for all three cases plus
+      an explicit "does not chase a diagonal transpose" case, and
+      `PaintTileCellsCommand` apply/invert as one step), `state/
+      tilesetStore.test.ts`, and `tools/stampSession.test.ts` (targeting,
+      drag interpolation, flip/transpose packing, one-drag-one-undo, Escape
+      abandonment, and a regression test pinning down a real bug this pass's
+      own live verification caught — see below). **Verified live**, not just
+      by unit test: `npm run tauri dev` failed to bind its dev-server port in
+      this container (already in use by a long-lived Vite process from
+      elsewhere in this environment, consistent with every earlier phase's
+      WebView-access notes here), so verification used that already-running
+      Vite dev bundle over Chrome DevTools Protocol — a headless Chrome
+      driven by a raw Node `WebSocket` speaking CDP directly (no new
+      dependency), dispatching **real synthetic `PointerEvent`s on the actual
+      `<canvas>` element** (confirmed `canvas.setPointerCapture` does not
+      throw for a synthetic pointer id first) and **real DOM clicks** on the
+      actual rendered buttons — no store imports, avoiding the "second,
+      disconnected module instance" trap the item above's own write-up
+      already named. Read back ground truth via `CanvasRenderingContext2D
+      .getImageData` on the app's own canvas (calling `getContext('2d')` a
+      second time on an existing canvas returns the *same* context the app
+      already draws with, so this reads genuinely rendered pixels, not a
+      separate probe), sampling each doc pixel's *center* rather than its
+      corner once the pixel-grid overlay (on by default at this zoom) turned
+      out to tint exact pixel-boundary samples. Drove the whole workflow: drew
+      a real two-tone 16×16 block with the Rectangle tool (left-drag primary,
+      right-drag secondary) so a flip would be visually detectable, dragged a
+      matching selection, created a tileset through the real form, captured
+      the tile (confirmed the notice reads "Added tile #1."), re-captured the
+      identical selection (confirmed "Reused tile #1" and the tile count
+      stayed at 2 — dedup, not a duplicate), added a tilemap layer, hid the
+      raster layer so only the tilemap layer's own content could be showing,
+      selected the Stamp tool and the captured tile, and clicked: **this
+      caught a real bug** — the stamp changed no visible pixel at all,
+      because `setTilemapCell` only bumps the grid buffer's own revision
+      counter, not `documentStore`'s reactive `revision` field the redraw
+      effect actually watches, so a stamp was invisible until an unrelated
+      event happened to force a redraw. Fixed by having the live-paint path
+      call `doc.touch(bufferId)` exactly as every other tool's dispatch loop
+      already does, re-verified the same live sequence end to end
+      afterward — the stamp rendered correctly, `Ctrl+Z`/`Ctrl+Y` (real
+      `KeyboardEvent`s) correctly hid and restored it, toggling "Flip
+      horizontal" and stamping a second cell showed the tile's two colours
+      genuinely swapped, and a single drag spanning two grid cells was
+      reverted by exactly one `Ctrl+Z` — confirming one-drag-one-undo-step
+      against the real renderer, not just the command's own unit test. A
+      regression test (`tools/stampSession.test.ts`) now pins the fixed
+      behaviour down at the unit level too, since none of the existing
+      grid-content assertions would have caught it.
 - [ ] Tileset + tilemap JSON export
 - [ ] Grid detection via autocorrelation (`04` §3.3) — unlocks W7 Case A
 - [ ] `.ase` import; evaluate `aseprite-io` (`01` §9)
