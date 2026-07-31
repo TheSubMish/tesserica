@@ -9,3 +9,4 @@ pub mod onnx_runtime;
 pub mod project;
 pub mod segment;
 pub mod source;
+pub mod tilemap_export;

@@ -26,10 +26,17 @@
  */
 
 import { useRef, useState } from 'react';
+import { save } from '@tauri-apps/plugin-dialog';
 import { celBufferId, type GridSpec } from '../model/types';
 import { getBuffer } from '../model/pixelBuffers';
 import { getTileBuffer } from '../model/tileBuffers';
 import { extractTilePixels } from '../model/tilesets';
+import {
+  concatTilePixels,
+  DEFAULT_TILESET_SHEET_COLUMNS,
+  tilemapExportSelection,
+} from '../export/tilemapExport';
+import { exportTilemap, hasBackend, releaseStaged, stageBytes } from '../ipc/commands';
 import { addTileset, addTileToTileset, addTilemapLayer } from '../history/tilesetCommands';
 import { useDocumentStore } from '../state/documentStore';
 import { useSelectionStore } from '../state/selectionStore';
@@ -62,6 +69,7 @@ function TileThumb({
 export function TilesetPanel() {
   const sprite = useDocumentStore((s) => s.sprite);
   const activeLayerId = useDocumentStore((s) => s.activeLayerId);
+  const activeFrameId = useDocumentStore((s) => s.activeFrameId);
   const selection = useSelectionStore((s) => s.selection);
 
   const selectedTilesetId = useTilesetStore((s) => s.selectedTilesetId);
@@ -75,6 +83,8 @@ export function TilesetPanel() {
   const [tileWidth, setTileWidth] = useState(16);
   const [tileHeight, setTileHeight] = useState(16);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<{ text: string; error: boolean } | null>(null);
 
   const tilesets = sprite.tilesets;
   const tileset = tilesets.find((t) => t.id === selectedTilesetId) ?? tilesets[0];
@@ -158,6 +168,79 @@ export function TilesetPanel() {
   };
 
   const activeLayer = sprite.layers.find((l) => l.id === activeLayerId);
+  const isTilemapLayer = activeLayer?.kind === 'tilemap';
+
+  const runExport = async () => {
+    setExportNotice(null);
+    if (!activeLayer || activeLayer.kind !== 'tilemap') return;
+    if (!hasBackend()) {
+      setExportNotice({
+        text: 'Export needs the desktop app — the Rust backend is not available here.',
+        error: true,
+      });
+      return;
+    }
+
+    const selectionForExport = tilemapExportSelection(sprite, activeLayer.id, activeFrameId);
+    if (!selectionForExport) {
+      setExportNotice({ text: 'This layer has no tilemap grid to export yet.', error: true });
+      return;
+    }
+    const atlas = concatTilePixels(selectionForExport.tileset);
+    if (!atlas) {
+      setExportNotice({
+        text: 'Could not read every tile — one is missing its pixels.',
+        error: true,
+      });
+      return;
+    }
+    if (atlas.count === 0) {
+      setExportNotice({ text: 'Add at least one real tile before exporting.', error: true });
+      return;
+    }
+
+    try {
+      setExporting(true);
+      const path = await save({
+        title: 'Export tileset + tilemap',
+        defaultPath: `${selectionForExport.tileset.name || 'tileset'}.png`,
+        filters: [{ name: 'PNG image', extensions: ['png'] }],
+      });
+      if (!path) return;
+
+      const stageId = await stageBytes(
+        new Uint8Array(atlas.pixels.buffer, 0, atlas.pixels.byteLength),
+      );
+      try {
+        const result = await exportTilemap({
+          stageId,
+          tileWidth: selectionForExport.tileset.tileWidth,
+          tileHeight: selectionForExport.tileset.tileHeight,
+          tileCount: atlas.count,
+          columns: Math.max(1, Math.min(DEFAULT_TILESET_SHEET_COLUMNS, atlas.count)),
+          scale: 1,
+          tilesetName: selectionForExport.tileset.name,
+          layerName: activeLayer.name,
+          gridCols: selectionForExport.cols,
+          gridRows: selectionForExport.rows,
+          tileIds: selectionForExport.tileIds,
+          path,
+        });
+        setExportNotice({
+          text: `Wrote ${result.width}×${result.height} tileset to ${result.path}, map JSON to ${result.jsonPath}`,
+          error: false,
+        });
+      } catch (e) {
+        await releaseStaged(stageId).catch(() => {});
+        throw e;
+      }
+    } catch (e) {
+      setExportNotice({ text: e instanceof Error ? e.message : String(e), error: true });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const canCapture =
     !!tileset &&
     !!selection &&
@@ -315,6 +398,19 @@ export function TilesetPanel() {
               ? `Selection ${selection.bounds.width}×${selection.bounds.height}`
               : `Select a ${tileset.tileWidth}×${tileset.tileHeight} region to capture a tile.`}
           </p>
+
+          {isTilemapLayer && (
+            <>
+              <button
+                className="export-tilemap-btn"
+                disabled={exporting}
+                onClick={() => void runExport()}
+              >
+                {exporting ? 'Exporting…' : 'Export tileset + tilemap…'}
+              </button>
+              <p className="hint">PNG atlas + Tiled-shaped `.json` map for this layer's grid.</p>
+            </>
+          )}
         </>
       )}
 
@@ -324,6 +420,15 @@ export function TilesetPanel() {
           role={notice.error ? 'alert' : 'status'}
         >
           {notice.text}
+        </p>
+      )}
+
+      {exportNotice && (
+        <p
+          className={exportNotice.error ? 'hint error' : 'hint'}
+          role={exportNotice.error ? 'alert' : 'status'}
+        >
+          {exportNotice.text}
         </p>
       )}
     </section>

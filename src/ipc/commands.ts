@@ -137,6 +137,46 @@ export async function exportGif(request: {
 }
 
 // ---------------------------------------------------------------------------
+// Tileset + tilemap JSON export (`docs/08-roadmap.md` Phase 6 "Tileset +
+// tilemap JSON export", `src-tauri/src/commands/tilemap_export.rs`).
+//
+// Same shape as `exportSpritesheet`: the frontend stages every real tile's
+// own pixels once (`export/tilemapExport.ts::concatTilePixels`) and sends the
+// grid's packed tile ids as plain JSON metadata — small enough that it is not
+// the "pixel buffer" this file's own rule is about. Rust assembles the
+// tileset atlas, scales it, and writes a Tiled-shaped map JSON alongside it.
+// ---------------------------------------------------------------------------
+
+export interface ExportTilemapResult {
+  path: string;
+  jsonPath: string;
+  width: number;
+  height: number;
+  columns: number;
+  rows: number;
+  tileCount: number;
+  bytes: number;
+  jsonBytes: number;
+}
+
+export async function exportTilemap(request: {
+  stageId: StageId;
+  tileWidth: number;
+  tileHeight: number;
+  tileCount: number;
+  columns: number;
+  scale: ExportScale;
+  tilesetName: string;
+  layerName: string;
+  gridCols: number;
+  gridRows: number;
+  tileIds: number[];
+  path: string;
+}): Promise<ExportTilemapResult> {
+  return invoke<ExportTilemapResult>('export_tilemap', { request });
+}
+
+// ---------------------------------------------------------------------------
 // `.tess` (docs/03-data-model.md §7)
 // ---------------------------------------------------------------------------
 
