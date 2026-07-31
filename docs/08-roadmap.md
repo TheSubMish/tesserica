@@ -1039,10 +1039,100 @@ done — both are real gaps, stated plainly rather than implied closed.
       at the flipped cell, and GID `0` everywhere else across all 256 cells of
       the real 16×16 grid — the same flip id (`268435457`) the live app's own
       store actually held, not a synthetic stand-in.
-- [ ] Grid detection via autocorrelation (`04` §3.3) — unlocks W7 Case A
+- [x] Grid detection via autocorrelation (`04` §3.3) — unlocks W7 Case A
+      (`06-workflows.md`: "Convert mode detects the underlying grid via
+      autocorrelation and offers 'detected 8x — snap to original?'").
+      `src/convert/gridDetect.ts::detectGrid` computes the per-column and
+      per-row `sum(|pixel[x]-pixel[x-1]|)` signals §3.3 specifies, in plain
+      8-bit sRGB per-channel (RGBA) absolute difference rather than Oklab —
+      documented in the module's own header as a deliberate call: Oklab
+      exists to answer "how different do these colours *look*", and a
+      nearest-neighbour upscale by an integer factor repeats a source
+      pixel's bytes **exactly** across its block, so within a block every
+      one of these differences is genuinely, bit-identically zero, not
+      "perceptually negligible" — spending `cbrt`/`pow` calls (and D12's
+      cross-language libm disagreement) on that question would be answering
+      it worse, not better, and since this code never runs in Rust there is
+      no cross-language agreement to protect in the first place. Candidate
+      periods are scored by comparing the mean of the diff signal at
+      indices that are multiples of the candidate against the signal's
+      overall mean, and — the one genuinely tricky part, caught by unit
+      test, not assumed — **the smallest period that comes within 75% of
+      the best score wins, not the highest-scoring candidate**: a true
+      period's hard edges sit at every one of its multiples, so a harmonic
+      (2×, 3× the truth) lands on a subset of the same real edges and can
+      score just as well or even slightly better by sampling chance (the
+      "octave error" familiar from pitch-detection autocorrelation, which
+      has the identical problem for the identical reason); scanning from
+      the smallest candidate up and accepting the first near-the-best one
+      is what recovers the fundamental instead of an arbitrary multiple of
+      it, while still correctly rejecting a *sub*harmonic (half the true
+      period), whose on-grid bucket is diluted by genuinely zero-diff
+      interior columns and scores markedly lower. Column and row periods
+      are detected independently and checked against each other: agreement
+      is offered as a confident "snap to original" suggestion; disagreement
+      is shown honestly as unconfirmed rather than silently resolved one
+      way. **No strong periodicity → no suggestion** (`04` §3.3's own
+      "already pixel-sized" case): a flat/uniform source and photo-like
+      noise both correctly report nothing rather than a bogus period.
+      **No Rust mirror**, and deliberately so, unlike every other item in
+      `src/pipeline/`: this never runs inside `convert()` in either
+      language — it is a one-shot, user-triggered analysis of the *preview
+      proxy* that only ever offers a value for the pixel-size control the
+      pipeline already has, dual-implemented and golden-tested on its own
+      terms. Because its output is always subject to an explicit user
+      accept/dismiss and never itself produces a shipped pixel, there is
+      nothing here for the golden suite to compare and no cross-language
+      agreement at risk. UI: a "Detect grid…" button next to the
+      pixel-size slider in `ConvertPanel.tsx` runs detection against
+      whatever `previewRuntime` already holds and surfaces the result as an
+      explicit accept ("Use 8×") / dismiss banner — it never overwrites the
+      slider on its own, and the slider stays a normal editable control
+      immediately afterward, exactly `06`'s "offers … snap to original?"
+      wording rather than a forced snap. A note appears when the source
+      exceeds the 1024px preview proxy (`PREVIEW_PROXY_MAX_EDGE`) and was
+      itself box-downscaled before detection ever saw it, disclosing reduced
+      reliability rather than hiding it. 11 unit tests
+      (`gridDetect.test.ts`) build genuine synthetic sources — a small
+      random low-res sprite this file itself nearest-neighbour-upscales by
+      a known factor — and assert the *exact* recovered period at 3×, 4×,
+      6×, 8×, 16×, and a non-square 8×/4× (column/row disagreement) case,
+      plus photo-like noise (two independently seeded samples), an
+      already-pixel-sized source, and a flat single-colour source (guards
+      the mean-of-zero division) all correctly reporting no detection.
+      **Verified live**, not just by unit test: `tauri dev` was not
+      attempted (this container's documented WebView flakiness, every
+      earlier phase's own note here), so the fallback was the real Vite
+      dev bundle over Chrome DevTools Protocol — a headless Chrome driven
+      by Node's built-in `WebSocket` speaking CDP directly (no new
+      dependency), attached to an already-loaded tab rather than navigating
+      fresh each call once repeated `Target.createTarget` calls in this
+      session accumulated enough leftover tabs under this container's
+      already-documented memory pressure to make the CDP connection itself
+      flaky ("Promise was collected" mid-evaluate) — closing the stray
+      tabs and reusing one live session resolved it, itself a small
+      real lesson about this environment recorded here rather than
+      papered over. Switched to Convert mode via a real button click,
+      injected a genuine 16×16 random sprite nearest-neighbour-upscaled 8×
+      directly into `previewRuntime`/`convertStore` (the same technique
+      every Phase 5 item above used, via the exact module URLs the page's
+      own module graph had already resolved), clicked the real "Detect
+      grid…" button and read back "Detected 8× — snap to original?",
+      clicked the real "Use 8×" button and confirmed the actual pixel-size
+      range input's value changed from its default 12 to 8, then dispatched
+      a genuine `input`/`change` event setting it to 20 to confirm the
+      control is still a plain editable field afterward, never locked by
+      the suggestion. Separately injected 96×96 photo-like noise and
+      confirmed the real UI renders "No repeating grid detected — this
+      source doesn't look like an upscaled sprite" instead of a bogus
+      value.
 - [ ] `.ase` import; evaluate `aseprite-io` (`01` §9)
 
-**Exit:** ✅ **W4, W7 complete.**
+**Exit:** ⚠️ **W4 complete. W7 Case A complete, Case B not yet.** The Exit line
+here previously read "W4, W7 complete" while `.ase` import — W7 Case B, the
+other half of the same workflow — was still unchecked above; corrected in the
+same pass that landed grid detection rather than left standing. Phase 6 is not
+done until `.ase` import lands.
 
 ---
 
