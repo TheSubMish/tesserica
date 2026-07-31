@@ -1397,7 +1397,97 @@ Ordered by value, not commitment:
       `npm run test` (810 passed), `npx tsc --noEmit` (clean), `npm run lint`
       (clean), `npm run build` (clean), and `npm run test:golden` (17 passed —
       no pipeline files touched, a sanity check) all pass.
-- [ ] Pixel-art-aware rotate/scale — rotxel, cleanEdge (`04` §7)
+- [x] Pixel-art-aware rotate/scale — rotxel, cleanEdge (`04` §7) — grounded in
+      Pixelorama's actual open-source implementation (github.com/Orama-Interactive/
+      Pixelorama, MIT, read 2026-08-01), not a guess at "something rotxel-like."
+      **rotxel** turned out to be exactly what this line expected: a real CPU
+      function, `DrawingAlgos.gd::rotxel()` — nine sub-cell inverse-rotated
+      searches per destination pixel, resolved against the source's 3×3
+      neighbourhood with the same edge-priority rules Pixelorama's own `scale_3x`
+      uses for its corner outputs, so the output is always a colour that already
+      existed in the source. `canvas/transform.ts::rotxelRotate` is a line-by-line
+      port, including the odd-width quirk (`+1` to both `ox`/`oy`, checked against
+      *width* only) and the exact-angle fast paths — reimplemented with exact
+      integer arithmetic rather than Pixelorama's own (still trig-based)
+      `is_equal_approx` special-casing, removing the one remaining source of
+      floating-point tie-break ambiguity at 0°/90°/180°/270°. **cleanEdge** did
+      *not* turn out to be what this line's own one-liner assumed going in (“a
+      post-process that removes stray/isolated pixels”): the real thing
+      (`Shaders/Effects/Rotation/cleanEdge.gdshader`, torcado, MIT) is a
+      from-scratch GPU resampling *algorithm* in its own right — an alternative
+      to rotxel, not a pass that runs after it — and it is GPU-shader-only, its
+      neighbour lookups keying off `ceil()` of a continuous UV sampled through
+      Godot's nearest-texture-filter hardware path. Which physical texel a
+      boundary-straddling UV resolves to is a GPU sampler tie-break convention
+      the GLSL source does not pin down on its own; porting that detail to two
+      CPU implementations without a live GPU reference to diff against would mean
+      guessing at the one thing that decides correctness, which CLAUDE.md rules
+      out. The shader documents its own simpler variant (`#undef SLOPE`/
+      `CLEANUP`, "otherwise only uses 45 degree slopes"): with those off,
+      `sliceDist`'s logic reduces to a real, self-contained, cited heuristic —
+      does a 45° diagonal run between this pixel's two orthogonal neighbours, and
+      if so, which side of it does the sample fall on — including the shader's
+      own guard against erasing a single-pixel-wide diagonal line. That reduced
+      heuristic is what `cleanEdgeSample`/`cleanEdgeTransform` implement: an
+      **adaptation of a real, cited algorithm, not a byte-exact port** (unlike
+      `rotxel`, which is one), documented as such in `transform.ts`'s own module
+      comment rather than left to look more faithful than it is. **No Rust
+      mirror** — unlike the conversion pipeline (`docs/02-architecture.md` §6.2:
+      Rust holds the source and re-runs the pipeline at full resolution because
+      the frontend only ever sees a downscaled proxy), an editor layer's pixel
+      buffer *is* already the full-resolution buffer in the frontend; there is no
+      proxy/full-res split for Rust to reconcile, and Rust never composites or
+      transforms raster layers at all (confirmed by grep — the only Rust
+      "rotate" hits are an unrelated Oklab hue comment, a tilemap-flip-flag
+      comment, and an animation-export struct field). Same reasoning this
+      phase's own layer-effects item already established for `Effect`. Wired
+      into the editor as a genuine, usable feature rather than a library
+      function nothing calls: a new **Transform tool** (`R`, `tools/transform.ts`
+      — a read-only no-op `Tool` purely so it is a selectable `ToolId` with its
+      own `ToolOptions` panel) with an algorithm dropdown (Rotxel / cleanEdge),
+      angle and scale sliders, and an Apply button; `canvas/applyTransform.ts`
+      does the actual edit against the active selection's *bounding box* (or the
+      whole cel when nothing is selected — a rotation does not preserve which
+      destination cell a non-rectangular mask's source cell lands on, so unlike
+      `Move`, a pure translation, there is no well-defined way to carry the mask
+      shape through), reusing `beginStroke`/`finishStroke` the same way every
+      drag tool does, so it is undoable through the ordinary dirty-rect command
+      system with zero new `Command` class. 22 new tests in `transform.test.ts`
+      (rotxel exact at 0°/90°/180°/270° — including that four successive 90°
+      rotations return to the exact original, which only holds if 90° is a true
+      bijective permutation with no lossy smoothing — plus several arbitrary
+      angles asserting the source-colour-only invariant and a solid-colour
+      square staying that one colour; `cleanEdgeSample`'s slice/fallback/
+      single-pixel-diagonal-guard behaviour and its own source-colour-only
+      invariant over a dense grid of sample points; `cleanEdgeTransform` at a
+      non-integer scale and a combined rotate+scale; a constructed diagonal-edge
+      rotation showing fewer stray single-pixel artifacts than a naive
+      nearest-neighbour rotation at the same angle) plus 6 in
+      `applyTransform.test.ts` (undo/redo byte-exact round-trip, selection-bounds
+      scoping leaving pixels outside it untouched, the locked/hidden/no-cel
+      guards). **Verified live**, over Chrome DevTools Protocol against the real
+      Vite dev bundle (this container's Tauri WebView unreachable, as every
+      earlier phase's own note here records): drew a small asymmetric shape with
+      the real Pencil tool via real dispatched pointer events, switched to the
+      real Transform tool, typed a real angle into the real click-to-type field
+      (the first attempt used raw synthesized key events and silently produced
+      the wrong value — `180` instead of `30` — because Chrome's synthetic
+      `keyDown`+`char` pair double-inserted characters into a controlled React
+      input; switched to setting the input's value through its native setter
+      plus a real bubbling `input` event, which is what actually reflects
+      through React's own event delegation, and reproduced the correct `30°`),
+      clicked the real Apply button, and read the canvas's own `getImageData` —
+      not a store internal — before and after: the shape rotated with clean,
+      non-blurry, non-speckled edges (screenshot-confirmed), `Ctrl+Z` restored
+      the canvas to the pre-rotation state byte-for-byte (0 differing bytes),
+      and `Ctrl+Y` redid it back to the exact post-apply state (0 differing
+      bytes). Repeated with `cleanEdge` at a combined 20°/160% rotate+scale —
+      same clean result, correctly enlarged and rotated, no blended colours.
+      `npm run test` (832 passed), `npx tsc --noEmit` (clean), `npm run lint`
+      (clean), `npm run build` (clean), `cargo test` (240 passed, 5 ignored —
+      pre-existing/unrelated), `cargo clippy --all-targets -- -D warnings`
+      (clean — no Rust files touched), and `npm run test:golden` (17 passed — no
+      pipeline files touched, a sanity check) all pass.
 - [ ] **Indexed color mode + live palette swapping** (deferred from v1 by D9 — touches
       every tool, blend mode and effect, so it is a real chunk of work, not a flag)
 - [ ] Bead / cross-stitch chart export (W9)
