@@ -6,6 +6,7 @@
  * the ones that matter.
  */
 
+import { applyTransform, canApplyTransform } from '../canvas/applyTransform';
 import { SliderField } from '../app/SliderField';
 import { useToolStore, type SelectMode } from '../state/toolStore';
 
@@ -23,6 +24,9 @@ export function ToolOptions() {
   const shapeFill = useToolStore((s) => s.shapeFill);
   const fillContiguous = useToolStore((s) => s.fillContiguous);
   const selectMode = useToolStore((s) => s.selectMode);
+  const transformAlgorithm = useToolStore((s) => s.transformAlgorithm);
+  const transformAngle = useToolStore((s) => s.transformAngle);
+  const transformScale = useToolStore((s) => s.transformScale);
 
   const hasBrush = tool === 'pencil' || tool === 'eraser' || tool === 'line';
   const isShape = tool === 'rect' || tool === 'ellipse';
@@ -100,6 +104,66 @@ export function ToolOptions() {
         <p className="hint">
           Pick a tile in the Tileset panel, then click or drag on a tile layer to place it.
         </p>
+      )}
+
+      {tool === 'transform' && (
+        <>
+          <label className="field">
+            <span>Algorithm</span>
+            <select
+              aria-label="Transform algorithm"
+              value={transformAlgorithm}
+              onChange={(e) =>
+                useToolStore
+                  .getState()
+                  .setTransformAlgorithm(e.target.value as 'rotxel' | 'cleanEdge')
+              }
+            >
+              <option value="rotxel">Rotxel (rotation only)</option>
+              <option value="cleanEdge">cleanEdge (rotate + scale)</option>
+            </select>
+          </label>
+
+          <SliderField
+            label="Angle"
+            min={-180}
+            max={180}
+            step={1}
+            value={transformAngle}
+            format={(v) => `${v}°`}
+            onChange={(v) => useToolStore.getState().setTransformAngle(v)}
+          />
+
+          <SliderField
+            label="Scale"
+            min={10}
+            max={400}
+            step={1}
+            value={transformScale}
+            disabled={transformAlgorithm === 'rotxel'}
+            format={(v) => `${v}%`}
+            onChange={(v) => useToolStore.getState().setTransformScale(v)}
+          />
+
+          <p className="hint">
+            Rotates (and, with cleanEdge, scales) the selection — or the whole layer when nothing is
+            selected — in place, using a pixel-art-aware algorithm that never invents a new colour.
+          </p>
+
+          <button
+            className="primary"
+            disabled={!canApplyTransform()}
+            onClick={() =>
+              applyTransform({
+                algorithm: transformAlgorithm,
+                angleDegrees: transformAngle,
+                scalePercent: transformScale,
+              })
+            }
+          >
+            Apply
+          </button>
+        </>
       )}
     </section>
   );

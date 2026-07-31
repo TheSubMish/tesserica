@@ -7,6 +7,7 @@ import { move } from './move';
 import { picker } from './picker';
 import { select } from './select';
 import { stamp } from './stamp';
+import { transform } from './transform';
 import { zoom } from './zoom';
 import type { ToolId } from '../state/toolStore';
 
@@ -22,6 +23,7 @@ export const tools: Record<ToolId, Tool> = {
   move,
   zoom,
   stamp,
+  transform,
 };
 
 export function getTool(id: ToolId): Tool {

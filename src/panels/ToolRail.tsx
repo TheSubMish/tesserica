@@ -16,6 +16,9 @@ const TOOLS: { id: ToolId; glyph: string; label: string; key: string }[] = [
   { id: 'move', glyph: '⇄', label: 'Move', key: 'V' },
   { id: 'zoom', glyph: '🔍', label: 'Zoom', key: 'Z' },
   { id: 'stamp', glyph: '🧩', label: 'Stamp', key: 'S' },
+  // Phase 7 — rotxel/cleanEdge rotate & scale (`docs/08-roadmap.md`), added
+  // beyond the `05-ui-design.md` §4.1 v1 table the same way Stamp was.
+  { id: 'transform', glyph: '⟳', label: 'Transform', key: 'R' },
 ];
 
 export function ToolRail() {

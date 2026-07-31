@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { RGBA } from '../model/types';
+import type { TransformAlgorithm } from '../canvas/transform';
 
 export type ToolId =
   | 'pencil'
@@ -12,7 +13,8 @@ export type ToolId =
   | 'select'
   | 'move'
   | 'zoom'
-  | 'stamp';
+  | 'stamp'
+  | 'transform';
 
 /**
  * Sub-mode of the Select tool (`docs/05-ui-design.md` §4.1 — "Select: Rect,
@@ -36,6 +38,13 @@ interface ToolState {
   /** Which shape the Select tool draws. */
   selectMode: SelectMode;
 
+  // ---- Transform tool (`docs/08-roadmap.md` Phase 7 — rotxel/cleanEdge) ----
+  transformAlgorithm: TransformAlgorithm;
+  /** Degrees, any value — normalised inside `transform.ts`. */
+  transformAngle: number;
+  /** Percent. Ignored by `rotxel`, which has no scale parameter. */
+  transformScale: number;
+
   setTool(id: ToolId): void;
   setPrimary(c: RGBA): void;
   setSecondary(c: RGBA): void;
@@ -47,6 +56,9 @@ interface ToolState {
   setShapeFill(v: boolean): void;
   setFillContiguous(v: boolean): void;
   setSelectMode(m: SelectMode): void;
+  setTransformAlgorithm(a: TransformAlgorithm): void;
+  setTransformAngle(deg: number): void;
+  setTransformScale(pct: number): void;
 }
 
 export const DEFAULT_PRIMARY: RGBA = [0, 0, 0, 255];
@@ -63,6 +75,9 @@ export const useToolStore = create<ToolState>((set) => ({
   shapeFill: false,
   fillContiguous: true,
   selectMode: 'rect',
+  transformAlgorithm: 'rotxel',
+  transformAngle: 0,
+  transformScale: 100,
 
   setTool: (id) => set({ activeTool: id }),
   setPrimary: (c) => set({ primary: c }),
@@ -74,4 +89,7 @@ export const useToolStore = create<ToolState>((set) => ({
   setShapeFill: (v) => set({ shapeFill: v }),
   setFillContiguous: (v) => set({ fillContiguous: v }),
   setSelectMode: (m) => set({ selectMode: m }),
+  setTransformAlgorithm: (a) => set({ transformAlgorithm: a }),
+  setTransformAngle: (deg) => set({ transformAngle: deg }),
+  setTransformScale: (pct) => set({ transformScale: Math.max(1, Math.min(400, pct)) }),
 }));
