@@ -24,8 +24,8 @@
 import { getBuffer, releaseBuffer, setBuffer } from '../model/pixelBuffers';
 import { getGrid, releaseGrid, setGrid } from '../model/tileGridBuffers';
 import { descendantIds, wouldCreateCycle } from '../model/layerTree';
-import type { BlendMode, Cel, CelId, Layer, LayerId } from '../model/types';
-import { useDocumentStore } from '../state/documentStore';
+import type { BlendMode, Cel, CelId, Effect, EffectId, Layer, LayerId } from '../model/types';
+import { makeId, useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import type { Command, DocumentApi } from './command';
 
@@ -435,4 +435,104 @@ export function setLayerBlendMode(id: LayerId, blendMode: BlendMode): void {
 /** "Clip to layer below" (roadmap Phase 3) — scoped to the layer's own group. */
 export function setLayerClippingMask(id: LayerId, clippingMask: boolean): void {
   setProps(clippingMask ? 'Enable Clipping Mask' : 'Disable Clipping Mask', id, { clippingMask });
+}
+
+// ---------------------------------------------------------------------------
+// Non-destructive layer effects (`docs/03-data-model.md` §5, roadmap Phase 7)
+//
+// The whole `effects` array is one `LayerBase` field, so every operation
+// below is a single `setProps` call replacing it wholesale — the same
+// "diff-and-patch" vocabulary every other property edit here already uses,
+// not a new command type. `setProps`'s own before/after diff always considers
+// a new array reference "changed" (arrays compare by identity), which is
+// exactly right: every function below only ever runs when it genuinely
+// intends to record a step.
+// ---------------------------------------------------------------------------
+
+function defaultEffect(kind: Effect['kind']): Effect {
+  const id = makeId('fx');
+  switch (kind) {
+    case 'outline':
+      return { id, kind, enabled: true, color: [0, 0, 0, 255], thickness: 1, corners: false };
+    case 'outline-inner':
+      return { id, kind, enabled: true, color: [0, 0, 0, 255], thickness: 1 };
+    case 'drop-shadow':
+      return { id, kind, enabled: true, dx: 2, dy: 2, color: [0, 0, 0, 160] };
+    case 'gradient-map':
+      return {
+        id,
+        kind,
+        enabled: true,
+        palette: [
+          [0, 0, 0, 255],
+          [255, 255, 255, 255],
+        ],
+      };
+    case 'hsv-shift':
+      return { id, kind, enabled: true, h: 0, s: 0, v: 0 };
+  }
+}
+
+/** Appends a new effect of `kind`, with reasonable defaults, to the top of the layer's stack. */
+export function addLayerEffect(id: LayerId, kind: Effect['kind']): void {
+  const doc = useDocumentStore.getState();
+  const layer = doc.sprite.layers.find((l) => l.id === id);
+  if (!layer) return;
+  setProps('Add Effect', id, { effects: [...layer.effects, defaultEffect(kind)] });
+}
+
+export function removeLayerEffect(id: LayerId, effectId: EffectId): void {
+  const doc = useDocumentStore.getState();
+  const layer = doc.sprite.layers.find((l) => l.id === id);
+  if (!layer) return;
+  setProps('Remove Effect', id, { effects: layer.effects.filter((e) => e.id !== effectId) });
+}
+
+export function setLayerEffectEnabled(id: LayerId, effectId: EffectId, enabled: boolean): void {
+  const doc = useDocumentStore.getState();
+  const layer = doc.sprite.layers.find((l) => l.id === id);
+  if (!layer) return;
+  setProps(enabled ? 'Enable Effect' : 'Disable Effect', id, {
+    effects: layer.effects.map((e) => (e.id === effectId ? { ...e, enabled } : e)),
+  });
+}
+
+/**
+ * Patches one effect's own parameters — `patch` must match its `kind`
+ * (callers narrow via `Extract<Effect, {kind: '...'}>`, e.g. the panel's
+ * thickness slider only ever sends `{ thickness }` to an outline effect).
+ * `coalesceKey`, like `setLayerOpacity`, lets one continuous slider drag
+ * become one undo step rather than one per tick.
+ */
+export function updateLayerEffect(
+  id: LayerId,
+  effectId: EffectId,
+  patch: Partial<Effect>,
+  coalesceKey?: string,
+): void {
+  const doc = useDocumentStore.getState();
+  const layer = doc.sprite.layers.find((l) => l.id === id);
+  if (!layer) return;
+  setProps(
+    'Edit Effect',
+    id,
+    {
+      effects: layer.effects.map((e) => (e.id === effectId ? ({ ...e, ...patch } as Effect) : e)),
+    },
+    coalesceKey ? `effect:${effectId}:${coalesceKey}` : null,
+  );
+}
+
+/** `delta` is +1 towards the end of the stack (composited later), -1 towards the start. */
+export function reorderLayerEffect(id: LayerId, effectId: EffectId, delta: number): void {
+  const doc = useDocumentStore.getState();
+  const layer = doc.sprite.layers.find((l) => l.id === id);
+  if (!layer) return;
+  const from = layer.effects.findIndex((e) => e.id === effectId);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= layer.effects.length) return;
+  const next = [...layer.effects];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  setProps('Reorder Effect', id, { effects: next });
 }

@@ -35,6 +35,7 @@ import {
 import { visibleLayerRows, wouldCreateCycle } from '../model/layerTree';
 import type { BlendMode, Layer } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
+import { LayerEffectsSection } from './LayerEffectsSection';
 
 /** `docs/03-data-model.md` §2.1 — the full W3C set, in the order Photoshop-family tools use. */
 const BLEND_MODES: { value: BlendMode; label: string }[] = [
@@ -286,6 +287,8 @@ export function LayerPanel() {
             onDragStart={() => opacitySession.current++}
             onChange={(v) => setLayerOpacity(active.id, v / 100, opacitySession.current)}
           />
+
+          <LayerEffectsSection layer={active} />
         </>
       )}
     </section>

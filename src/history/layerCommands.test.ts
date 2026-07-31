@@ -5,16 +5,21 @@ import { useHistoryStore } from '../state/historyStore';
 import {
   addGroup,
   addLayer,
+  addLayerEffect,
   deleteLayer,
   groupLayer,
   moveLayer,
+  removeLayerEffect,
   renameLayer,
+  reorderLayerEffect,
   setLayerClippingMask,
+  setLayerEffectEnabled,
   setLayerLocked,
   setLayerOpacity,
   setLayerParent,
   setLayerVisible,
   ungroupLayer,
+  updateLayerEffect,
 } from './layerCommands';
 
 const doc = () => useDocumentStore.getState();
@@ -326,5 +331,145 @@ describe('clipping masks', () => {
     expect(doc().sprite.layers[0].clippingMask).toBe(true);
     history().undo();
     expect(doc().sprite.layers[0].clippingMask).toBe(false);
+  });
+});
+
+describe('layer effects (docs/03-data-model.md §5, roadmap Phase 7)', () => {
+  const layerId = () => doc().sprite.layers[0].id;
+  const effects = () => doc().sprite.layers[0].effects;
+
+  it('adds a new effect of the requested kind, undoably', () => {
+    expect(effects()).toEqual([]);
+    addLayerEffect(layerId(), 'outline');
+    expect(effects()).toHaveLength(1);
+    expect(effects()[0].kind).toBe('outline');
+    expect(effects()[0].enabled).toBe(true);
+
+    history().undo();
+    expect(effects()).toEqual([]);
+    history().redo();
+    expect(effects()).toHaveLength(1);
+  });
+
+  it('adds every kind with reasonable, distinguishable defaults', () => {
+    for (const kind of [
+      'outline',
+      'outline-inner',
+      'drop-shadow',
+      'gradient-map',
+      'hsv-shift',
+    ] as const) {
+      addLayerEffect(layerId(), kind);
+    }
+    expect(effects().map((e) => e.kind)).toEqual([
+      'outline',
+      'outline-inner',
+      'drop-shadow',
+      'gradient-map',
+      'hsv-shift',
+    ]);
+    // Every entry gets its own stable id — never shared, never blank.
+    const ids = effects().map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('removes an effect by id, undoably', () => {
+    addLayerEffect(layerId(), 'outline');
+    addLayerEffect(layerId(), 'hsv-shift');
+    const [first, second] = effects();
+    history().clear();
+
+    removeLayerEffect(layerId(), first.id);
+    expect(effects().map((e) => e.id)).toEqual([second.id]);
+
+    history().undo();
+    expect(effects().map((e) => e.id)).toEqual([first.id, second.id]);
+  });
+
+  it('toggles enabled without touching any other field, undoably', () => {
+    addLayerEffect(layerId(), 'outline');
+    const id = effects()[0].id;
+    history().clear();
+
+    setLayerEffectEnabled(layerId(), id, false);
+    expect(effects()[0].enabled).toBe(false);
+    expect(effects()[0].kind).toBe('outline');
+
+    history().undo();
+    expect(effects()[0].enabled).toBe(true);
+  });
+
+  it("edits one effect's own parameters without touching its neighbours", () => {
+    addLayerEffect(layerId(), 'outline');
+    addLayerEffect(layerId(), 'hsv-shift');
+    const [outlineId, hsvId] = effects().map((e) => e.id);
+    history().clear();
+
+    updateLayerEffect(layerId(), outlineId, { thickness: 4 });
+    const outline = effects().find((e) => e.id === outlineId)!;
+    expect(outline.kind).toBe('outline');
+    expect((outline as { thickness: number }).thickness).toBe(4);
+    // The other effect is untouched.
+    expect(effects().find((e) => e.id === hsvId)).toEqual(
+      expect.objectContaining({ kind: 'hsv-shift', h: 0, s: 0, v: 0 }),
+    );
+
+    history().undo();
+    expect((effects().find((e) => e.id === outlineId) as { thickness: number }).thickness).toBe(1);
+  });
+
+  it('coalesces a continuous edit into one undo step', () => {
+    addLayerEffect(layerId(), 'outline');
+    const id = effects()[0].id;
+    history().clear();
+
+    updateLayerEffect(layerId(), id, { thickness: 2 }, 'drag-1');
+    updateLayerEffect(layerId(), id, { thickness: 3 }, 'drag-1');
+    updateLayerEffect(layerId(), id, { thickness: 4 }, 'drag-1');
+    expect((effects()[0] as { thickness: number }).thickness).toBe(4);
+
+    history().undo();
+    // One undo step reverts the *whole* drag, not just the last tick.
+    expect((effects()[0] as { thickness: number }).thickness).toBe(1);
+  });
+
+  it('reorders the stack, and order is what a reordered composite depends on', () => {
+    addLayerEffect(layerId(), 'outline');
+    addLayerEffect(layerId(), 'gradient-map');
+    const [outlineId, gradientId] = effects().map((e) => e.id);
+    history().clear();
+
+    reorderLayerEffect(layerId(), outlineId, 1);
+    expect(effects().map((e) => e.id)).toEqual([gradientId, outlineId]);
+
+    history().undo();
+    expect(effects().map((e) => e.id)).toEqual([outlineId, gradientId]);
+  });
+
+  it('refuses to reorder past either end of the stack', () => {
+    addLayerEffect(layerId(), 'outline');
+    addLayerEffect(layerId(), 'gradient-map');
+    const [outlineId, gradientId] = effects().map((e) => e.id);
+    history().clear();
+
+    reorderLayerEffect(layerId(), outlineId, -1); // already first
+    expect(effects().map((e) => e.id)).toEqual([outlineId, gradientId]);
+
+    reorderLayerEffect(layerId(), gradientId, 1); // already last
+    expect(effects().map((e) => e.id)).toEqual([outlineId, gradientId]);
+  });
+
+  it('a multi-effect stack round-trips through save/load unchanged (`.tess` shape)', () => {
+    addLayerEffect(layerId(), 'outline');
+    addLayerEffect(layerId(), 'gradient-map');
+    updateLayerEffect(layerId(), effects()[0].id, { thickness: 3, enabled: false });
+
+    // The in-memory shape is exactly what a serializer would see — no
+    // separate storage to fall out of sync with.
+    const snapshot = JSON.parse(JSON.stringify(effects()));
+    expect(snapshot).toEqual(effects());
+    expect(snapshot[0].enabled).toBe(false);
+    expect(snapshot[0].thickness).toBe(3);
+    expect(snapshot[1].kind).toBe('gradient-map');
   });
 });

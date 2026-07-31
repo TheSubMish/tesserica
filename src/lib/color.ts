@@ -24,3 +24,17 @@ export function toCss(c: RGBA): string {
 export function sameRgb(a: RGBA, b: RGBA): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
+
+/**
+ * The inverse of {@link toHex} — `#RRGGBB` (any case) plus an alpha supplied
+ * separately, since a native `<input type="color">` (the layer-effects
+ * colour fields, roadmap Phase 7) never carries one. Malformed input falls
+ * back to opaque black rather than throwing, since a browser colour input
+ * cannot actually produce anything but a well-formed 6-digit hex string.
+ */
+export function fromHex(hex: string, alpha: number): RGBA {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return [0, 0, 0, alpha];
+  const n = parseInt(match[1], 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff, alpha];
+}
