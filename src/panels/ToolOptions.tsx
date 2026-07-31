@@ -95,6 +95,12 @@ export function ToolOptions() {
       {tool === 'eyedropper' && <p className="hint">Alt picks a colour from any tool.</p>}
 
       {tool === 'zoom' && <p className="hint">Click to zoom in, Alt+click to zoom out.</p>}
+
+      {tool === 'stamp' && (
+        <p className="hint">
+          Pick a tile in the Tileset panel, then click or drag on a tile layer to place it.
+        </p>
+      )}
     </section>
   );
 }

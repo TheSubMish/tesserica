@@ -24,6 +24,7 @@ import { useToolStore } from '../state/toolStore';
 import { GRID_AUTO_ZOOM, useUIStore } from '../state/uiStore';
 import { getTool } from '../tools/registry';
 import type { ToolContext } from '../tools/Tool';
+import { abortStamp, beginStamp, continueStamp, endStamp } from '../tools/stampSession';
 import { centerPan, fitZoom, screenToDoc } from './coords';
 import { samplePixel } from './sample';
 import {
@@ -52,6 +53,8 @@ export function CanvasView() {
   // trigger React renders.
   const drawing = useRef(false);
   const panning = useRef(false);
+  /** A Stamp-tool gesture in progress — bypasses generic tool dispatch entirely (`tools/stamp.ts`). */
+  const stamping = useRef(false);
   const spaceHeld = useRef(false);
   const last = useRef({ x: 0, y: 0 });
   const lastScreen = useRef({ x: 0, y: 0 });
@@ -335,6 +338,21 @@ export function CanvasView() {
         return;
       }
 
+      // Stamp tool: bypasses generic tool dispatch entirely, the same way
+      // Zoom does above — a tilemap cel has no `Uint8ClampedArray` buffer for
+      // `ToolContext` to hand it (`tools/stamp.ts`). A no-op (nothing picked,
+      // or the active layer isn't a tilemap layer) falls through to nothing —
+      // deliberately not to generic dispatch, since the Stamp tool has no
+      // pixel-buffer behaviour to fall back to either.
+      if (useToolStore.getState().activeTool === 'stamp') {
+        const { x, y } = screenToDoc(useUIStore.getState(), sx, sy);
+        if (beginStamp(x, y)) {
+          stamping.current = true;
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }
+        return;
+      }
+
       const { x, y } = screenToDoc(useUIStore.getState(), sx, sy);
       drawing.current = true;
       last.current = { x, y };
@@ -364,6 +382,11 @@ export function CanvasView() {
       const inBounds = x >= 0 && y >= 0 && x < sprite.width && y < sprite.height;
       useUIStore.getState().setCursor(inBounds ? { x, y } : null);
 
+      if (stamping.current) {
+        continueStamp(x, y);
+        return;
+      }
+
       if (drawing.current) {
         // Pointer events fire every few milliseconds, so a fast drag reports
         // positions many pixels apart; the tool interpolates between them.
@@ -379,6 +402,12 @@ export function CanvasView() {
 
   const endStroke = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (stamping.current) {
+        endStamp();
+        stamping.current = false;
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+        return;
+      }
       if (drawing.current) {
         const rect = e.currentTarget.getBoundingClientRect();
         const { x, y } = screenToDoc(
@@ -405,7 +434,14 @@ export function CanvasView() {
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !drawing.current) return;
+      if (e.key !== 'Escape') return;
+      if (stamping.current) {
+        abortStamp();
+        stamping.current = false;
+        e.preventDefault();
+        return;
+      }
+      if (!drawing.current) return;
       const snapshot = stroke.current;
       if (snapshot) {
         const buffer = getBuffer(snapshot.celId);

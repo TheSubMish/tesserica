@@ -76,3 +76,23 @@ export function tileGridDims(
     rows: Math.max(0, Math.floor(cel.height / grid.tileHeight)),
   };
 }
+
+/**
+ * Document pixel → the tilemap grid cell it falls in (roadmap Phase 6, "Tile
+ * stamp tool"). Cel-local, matching `model/tilemapRender.ts::renderTilemapCel`'s
+ * own placement math (`ox = col * tileWidth`, no `offsetX`/`offsetY` term —
+ * `GridSpec`'s offset fields are not yet wired into rendering anywhere, so the
+ * stamp tool's targeting deliberately agrees with the renderer rather than
+ * inventing an offset behaviour neither one implements).
+ */
+export function docPixelToCell(
+  docX: number,
+  docY: number,
+  cel: { x: number; y: number },
+  grid: { tileWidth: number; tileHeight: number },
+): { col: number; row: number } {
+  return {
+    col: Math.floor((docX - cel.x) / grid.tileWidth),
+    row: Math.floor((docY - cel.y) / grid.tileHeight),
+  };
+}

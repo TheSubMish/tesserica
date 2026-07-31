@@ -11,7 +11,8 @@ export type ToolId =
   | 'eyedropper'
   | 'select'
   | 'move'
-  | 'zoom';
+  | 'zoom'
+  | 'stamp';
 
 /**
  * Sub-mode of the Select tool (`docs/05-ui-design.md` §4.1 — "Select: Rect,

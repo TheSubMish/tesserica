@@ -5,6 +5,7 @@ import {
   FLIP_V_BIT,
   TILE_INDEX_MASK,
   TRANSPOSE_BIT,
+  docPixelToCell,
   packTileId,
   tileGridDims,
   unpackTileId,
@@ -94,5 +95,25 @@ describe('tileGridDims', () => {
       cols: 0,
       rows: 0,
     });
+  });
+});
+
+describe('docPixelToCell', () => {
+  const grid = { tileWidth: 8, tileHeight: 16 };
+
+  it('maps a document pixel to its containing cell, cel offset at origin', () => {
+    expect(docPixelToCell(0, 0, { x: 0, y: 0 }, grid)).toEqual({ col: 0, row: 0 });
+    expect(docPixelToCell(7, 15, { x: 0, y: 0 }, grid)).toEqual({ col: 0, row: 0 });
+    expect(docPixelToCell(8, 16, { x: 0, y: 0 }, grid)).toEqual({ col: 1, row: 1 });
+    expect(docPixelToCell(23, 31, { x: 0, y: 0 }, grid)).toEqual({ col: 2, row: 1 });
+  });
+
+  it('accounts for a non-zero cel offset', () => {
+    expect(docPixelToCell(10, 20, { x: 10, y: 16 }, grid)).toEqual({ col: 0, row: 0 });
+    expect(docPixelToCell(18, 32, { x: 10, y: 16 }, grid)).toEqual({ col: 1, row: 1 });
+  });
+
+  it('floors toward negative infinity above/left of the grid, matching screenToDoc', () => {
+    expect(docPixelToCell(-1, -1, { x: 0, y: 0 }, grid)).toEqual({ col: -1, row: -1 });
   });
 });

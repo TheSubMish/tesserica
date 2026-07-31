@@ -5,7 +5,13 @@ import { EMPTY_TILE_ID, packTileId, tileGridDims } from '../model/tileIds';
 import { celBufferId } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
-import { addTileToTileset, addTileset, addTilemapLayer, paintTilemapCell } from './tilesetCommands';
+import {
+  addTileToTileset,
+  addTileset,
+  addTilemapLayer,
+  paintTilemapCell,
+  PaintTileCellsCommand,
+} from './tilesetCommands';
 
 const doc = () => useDocumentStore.getState();
 const history = () => useHistoryStore.getState();
@@ -40,13 +46,15 @@ describe('addTileToTileset', () => {
     const pixels = new Uint8ClampedArray([
       255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 1, 1, 1, 1,
     ]);
-    const tileId = addTileToTileset(tilesetId, pixels);
-    expect(tileId).toBeDefined();
+    const outcome = addTileToTileset(tilesetId, pixels);
+    expect(outcome).toBeDefined();
+    expect(outcome!.reused).toBe(false);
+    expect(outcome!.index).toBe(1);
 
     const tileset = doc().sprite.tilesets.find((t) => t.id === tilesetId)!;
     expect(tileset.tiles).toHaveLength(2);
-    expect(tileset.tiles[1].id).toBe(tileId);
-    expect(getTileBuffer(tileId!)).toEqual(pixels);
+    expect(tileset.tiles[1].id).toBe(outcome!.id);
+    expect(getTileBuffer(outcome!.id)).toEqual(pixels);
 
     history().undo();
     expect(doc().sprite.tilesets.find((t) => t.id === tilesetId)!.tiles).toHaveLength(1);
@@ -64,6 +72,79 @@ describe('addTileToTileset', () => {
 
   it('refuses an unknown tileset', () => {
     expect(addTileToTileset('nope', new Uint8ClampedArray(16))).toBeUndefined();
+  });
+
+  describe('auto-deduplication', () => {
+    it('reuses an existing tile when the pixels match exactly, without adding a new entry', () => {
+      const tilesetId = addTileset('Ground', 2, 2);
+      const pixels = new Uint8ClampedArray([
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 1, 1, 1, 1,
+      ]);
+      const first = addTileToTileset(tilesetId, pixels)!;
+      expect(first.reused).toBe(false);
+
+      const second = addTileToTileset(tilesetId, new Uint8ClampedArray(pixels))!;
+      expect(second.reused).toBe(true);
+      expect(second.id).toBe(first.id);
+      expect(second.index).toBe(first.index);
+      expect(second.flipH).toBe(false);
+      expect(second.flipV).toBe(false);
+      expect(doc().sprite.tilesets.find((t) => t.id === tilesetId)!.tiles).toHaveLength(2);
+    });
+
+    it('reuses an existing tile that is a horizontal flip of the captured pixels', () => {
+      const tilesetId = addTileset('Ground', 2, 1);
+      // Two distinct colours side by side — flipping horizontally swaps them.
+      const original = new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255]);
+      const flipped = new Uint8ClampedArray([0, 0, 255, 255, 255, 0, 0, 255]);
+      const first = addTileToTileset(tilesetId, original)!;
+
+      const outcome = addTileToTileset(tilesetId, flipped)!;
+      expect(outcome.reused).toBe(true);
+      expect(outcome.id).toBe(first.id);
+      expect(outcome.flipH).toBe(true);
+      expect(outcome.flipV).toBe(false);
+      expect(doc().sprite.tilesets.find((t) => t.id === tilesetId)!.tiles).toHaveLength(2);
+    });
+
+    it('reuses an existing tile that is a vertical flip of the captured pixels', () => {
+      const tilesetId = addTileset('Ground', 1, 2);
+      const original = new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255]);
+      const flipped = new Uint8ClampedArray([0, 0, 255, 255, 255, 0, 0, 255]);
+      const first = addTileToTileset(tilesetId, original)!;
+
+      const outcome = addTileToTileset(tilesetId, flipped)!;
+      expect(outcome.reused).toBe(true);
+      expect(outcome.id).toBe(first.id);
+      expect(outcome.flipH).toBe(false);
+      expect(outcome.flipV).toBe(true);
+    });
+
+    it('adds a new entry when nothing matches, even under flips', () => {
+      const tilesetId = addTileset('Ground', 2, 1);
+      const original = new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255]);
+      const unrelated = new Uint8ClampedArray([0, 255, 0, 255, 0, 255, 0, 255]);
+      addTileToTileset(tilesetId, original);
+      const outcome = addTileToTileset(tilesetId, unrelated)!;
+      expect(outcome.reused).toBe(false);
+      expect(doc().sprite.tilesets.find((t) => t.id === tilesetId)!.tiles).toHaveLength(3);
+    });
+
+    it('does not chase a diagonal transpose — the documented flip-only partial', () => {
+      // A 2x2 tile whose transpose differs from every flipH/flipV/both
+      // combination of itself is not recognised as a duplicate.
+      const tilesetId = addTileset('Ground', 2, 2);
+      const original = new Uint8ClampedArray([
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+      ]);
+      addTileToTileset(tilesetId, original);
+      // Transpose (swap x/y) of the 2x2 above.
+      const transposed = new Uint8ClampedArray([
+        255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255,
+      ]);
+      const outcome = addTileToTileset(tilesetId, transposed)!;
+      expect(outcome.reused).toBe(false);
+    });
   });
 });
 
@@ -170,5 +251,45 @@ describe('paintTilemapCell', () => {
     const before = useHistoryStore.getState().past.length;
     paintTilemapCell(rasterCel.id, 0, 0, packTileId(1));
     expect(useHistoryStore.getState().past.length).toBe(before);
+  });
+});
+
+describe('PaintTileCellsCommand', () => {
+  function setUp() {
+    const tilesetId = addTileset('Ground', 8, 8);
+    const grid = { shape: 'rect' as const, tileWidth: 8, tileHeight: 8, offsetX: 0, offsetY: 0 };
+    const layerId = addTilemapLayer(tilesetId, grid)!;
+    const cel = doc().celsForLayer(layerId)[0];
+    return { cel, grid };
+  }
+
+  it('applies and inverts a whole gesture worth of cells as one undo step', () => {
+    const { cel, grid } = setUp();
+    const { cols, rows } = tileGridDims(cel, grid);
+    const gridBuffer = getGrid(celBufferId(cel))!;
+
+    const cmd = new PaintTileCellsCommand(cel.id, [
+      { col: 0, row: 0, before: EMPTY_TILE_ID, after: packTileId(1) },
+      { col: 1, row: 0, before: EMPTY_TILE_ID, after: packTileId(1, { flipH: true }) },
+      { col: 2, row: 1, before: EMPTY_TILE_ID, after: packTileId(1, { flipV: true }) },
+    ]);
+
+    const before = useHistoryStore.getState().past.length;
+    useHistoryStore.getState().run(cmd); // applies, then records — the historyStore's own contract
+    expect(useHistoryStore.getState().past.length).toBe(before + 1);
+
+    expect(getGridCell(gridBuffer, cols, rows, 0, 0)).toBe(packTileId(1));
+    expect(getGridCell(gridBuffer, cols, rows, 1, 0)).toBe(packTileId(1, { flipH: true }));
+    expect(getGridCell(gridBuffer, cols, rows, 2, 1)).toBe(packTileId(1, { flipV: true }));
+
+    history().undo();
+    expect(getGridCell(gridBuffer, cols, rows, 0, 0)).toBe(EMPTY_TILE_ID);
+    expect(getGridCell(gridBuffer, cols, rows, 1, 0)).toBe(EMPTY_TILE_ID);
+    expect(getGridCell(gridBuffer, cols, rows, 2, 1)).toBe(EMPTY_TILE_ID);
+
+    history().redo();
+    expect(getGridCell(gridBuffer, cols, rows, 0, 0)).toBe(packTileId(1));
+    expect(getGridCell(gridBuffer, cols, rows, 1, 0)).toBe(packTileId(1, { flipH: true }));
+    expect(getGridCell(gridBuffer, cols, rows, 2, 1)).toBe(packTileId(1, { flipV: true }));
   });
 });

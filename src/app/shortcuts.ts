@@ -84,6 +84,9 @@ export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
         case 'z':
           tools.setTool('zoom');
           break;
+        case 's':
+          tools.setTool('stamp');
+          break;
         case 'x':
           tools.swapColors();
           break;
