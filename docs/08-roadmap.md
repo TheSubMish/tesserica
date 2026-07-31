@@ -968,7 +968,77 @@ done — both are real gaps, stated plainly rather than implied closed.
       regression test (`tools/stampSession.test.ts`) now pins the fixed
       behaviour down at the unit level too, since none of the existing
       grid-content assertions would have caught it.
-- [ ] Tileset + tilemap JSON export
+- [x] Tileset + tilemap JSON export — full-resolution export (`02-architecture.md`
+      "Rust produces what you ship"), following `animation_export.rs`'s own shape:
+      the frontend stages every *real* tile's own RGBA pixels once
+      (`export/tilemapExport.ts::concatTilePixels`, skipping index 0, the
+      mandatory empty tile) and sends the grid's packed tile ids as plain JSON
+      metadata — small enough that it is not the "pixel buffer" `docs/02` §6.2's
+      rule is about, the same reasoning that already lets `animation_export.rs`
+      send `frames`/`tags` as JSON. The new Rust command,
+      `src-tauri/src/commands/tilemap_export.rs::export_tilemap`, assembles the
+      tileset atlas by reusing `animation_export.rs`'s own `SheetLayout`/
+      `assemble_sheet` unchanged (a tileset sheet is exactly the same "grid of
+      equal-size images" problem a spritesheet already solved), scales it
+      nearest-neighbour at an integer factor, and writes a Tiled-shaped map JSON
+      alongside it. **Schema choice: Tiled's own `.tmj`/JSON map format**, not a
+      bespoke one — the same "widely-supported over novel" reasoning
+      `animation_export.rs` already used for Aseprite's spritesheet shape, and
+      Tiled's JSON is the closest thing tile-based engines have to a lingua
+      franca (Tiled itself, Phaser's and PixiJS's Tiled loaders, Godot's
+      `TileMap` importer). **The bit-layout question was checked, not assumed**:
+      Tiled reserves the *top* three bits of a 32-bit GID for flip/rotate flags
+      (`FLIPPED_HORIZONTALLY_FLAG = 0x80000000`, `..._VERTICALLY_... =
+      0x40000000`, `..._DIAGONALLY_...  = 0x20000000` — Tiled's name for a
+      transpose), leaving a 28-bit index below them; `docs/03-data-model.md` §4's
+      own packing puts the *same* three flags, in the *same* H/V/diagonal order,
+      one bit lower across the board (bits 28/29/30, to keep a packed id a
+      positive `int32` per that section's own comment) above the *same* 28-bit
+      index. Close, but not identical, so `tesserica_id_to_tiled_gid` does a real
+      per-flag translation rather than a passthrough — a dedicated regression
+      test (`flip_flags_land_on_tiled_own_bit_positions_not_a_passthrough`) pins
+      that down. It also folds in the index-space shift for free: Tesserica's
+      index 0 (a real, drawable empty tile) maps to Tiled's own "no tile" GID 0,
+      and with `firstgid = 1` and that empty tile never itself entered into the
+      exported atlas, every real Tesserica tile index `i` becomes Tiled GID `i`
+      exactly. UI: an "Export tileset + tilemap…" button in `TilesetPanel.tsx`,
+      active once a tilemap layer is selected, exporting that layer's active
+      frame. 14 new Rust unit tests (bit unpacking, the GID mapping including the
+      not-a-passthrough regression, camelCase wire-shape decode, JSON shape, a
+      real PNG+JSON write-and-decode-back, and validation failures) and 8 new TS
+      unit tests (`export/tilemapExport.test.ts`) built against a real document
+      driven through the actual store commands
+      (`addTileset`/`addTileToTileset`/`addTilemapLayer`/`paintTilemapCell`), not
+      hand-mocked fixtures. **Verified live**, not just by unit test: `tauri dev`
+      was not attempted (this container's documented WebView flakiness, every
+      earlier phase's own note here), so the fallback was the real Vite dev
+      bundle over Chrome DevTools Protocol — a headless Chrome driven by a raw
+      Node `WebSocket` speaking CDP directly, dispatching **real synthetic
+      `PointerEvent`s** to draw a genuine two-tone 4×4 tile (Rectangle tool fill
+      plus a single asymmetric Pencil-tool marker pixel, so a flip would be
+      visually detectable), a real drag-selection, a real "+ Add tile from
+      selection" click ("Added tile #1."), a real "Add tilemap layer from this
+      tileset" click, and the real Stamp tool painting one plain cell and one
+      flip-horizontal cell — confirmed by screenshot that the marker rendered on
+      the opposite side of the tile for the flipped cell, exactly as expected.
+      Clicking the real "Export tileset + tilemap…" button showed the same
+      honest "Export needs the desktop app" fallback every other export path
+      shows outside a Tauri shell — proof the button, the store reads and the
+      IPC call boundary are all real and reachable, not a stub. Because the Rust
+      leg itself can't be exercised this way, the actual tile pixels and packed
+      grid ids were then read back out of the *same live document* (dynamically
+      importing the exact, non-cache-busted module URLs the running page's own
+      module graph had already resolved — `documentStore.ts`, `tileBuffers.ts`,
+      `tileGridBuffers.ts` — the same "avoid a second, disconnected module
+      instance" technique this roadmap's own tile-stamp entry above already
+      used) and fed through the real, unmodified `write_tilemap` production
+      function in a temporary, not-committed test: it wrote a genuine PNG whose
+      decoded pixels matched the live-captured tile exactly (including the
+      asymmetric marker) and a genuine map JSON whose `data` array held GID `1`
+      at the plain cell, GID `1 | 0x80000000` (Tiled's real flip-horizontal bit)
+      at the flipped cell, and GID `0` everywhere else across all 256 cells of
+      the real 16×16 grid — the same flip id (`268435457`) the live app's own
+      store actually held, not a synthetic stand-in.
 - [ ] Grid detection via autocorrelation (`04` §3.3) — unlocks W7 Case A
 - [ ] `.ase` import; evaluate `aseprite-io` (`01` §9)
 
