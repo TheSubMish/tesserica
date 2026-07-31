@@ -1222,7 +1222,95 @@ instead of the artist's original.
 
 Ordered by value, not commitment:
 
-- [ ] Non-destructive layer effects: outline, drop shadow, gradient map (`03` §5)
+- [x] Non-destructive layer effects: outline, drop shadow, gradient map (`03` §5) —
+      `docs/03-data-model.md` §5 names five kinds, not three, and all five landed:
+      outline, drop-shadow, gradient-map, hsv-shift, outline-inner. `LayerBase` gets
+      `effects: Effect[]` (`model/types.ts`), each entry carrying an `id` and an
+      `enabled` flag beyond the doc's own sketch — the same reasoning `Tag.id` used
+      (stable addressing for reorder/delete) plus a field the roadmap's own
+      "toggleable" requirement needs and the sketch has none for. `canvas/effects.ts`
+      is the one implementation of the actual pixel maths: outline/outline-inner via
+      iterated binary dilate/erode (`corners` toggles 4- vs 8-connected adjacency for
+      outline; outline-inner is fixed 4-connected since the doc gives it no `corners`
+      field), drop-shadow via an offset silhouette composited behind the layer's own
+      content, gradient-map via a luminance-ordered remap onto a palette gradient, and
+      hsv-shift via a plain RGB↔HSV round trip with an explicit unit convention (h in
+      degrees wrapped 0..360, s/v in ±100 percentage points) since the doc names the
+      fields but not their units. **Oklab vs. sRGB for gradient-map, decided
+      explicitly**: CLAUDE.md invariant 5 ("all colour distance and error diffusion
+      happen in Oklab") is scoped to the conversion *pipeline*'s cross-language
+      palette-quantization parity (D12) — a concern that does not exist here, since
+      effects have no Rust mirror at all and nothing about this function is compared
+      bit-for-bit against another implementation. Oklab `l` was used anyway, for the
+      same "colour math belongs in a perceptual space" reasoning this project applies
+      everywhere else it touches colour — a genuinely better luminance measure than
+      naive gamma-encoded sRGB luma, not a requirement `docs/04`'s pipeline invariant
+      forces. Applied at composite time in the three places that must agree on what's
+      visible: `flatten.ts` (export, exact — one line before merging a layer with
+      what's below it), `sample.ts` (eyedropper — materializes a layer's own content
+      once per query, since outline/drop-shadow are neighbourhood-dependent and cannot
+      be answered from a single pixel in isolation), and `renderer.ts` (live canvas —
+      reuses `flatten.ts`'s exact buffer maths, cached per layer, rather than a third
+      approximate implementation; the opposite trade-off from blend modes, which stay
+      native-canvas-fast live and only match exactly at export). **Rust gets a
+      round-trip-only mirror, not rendering logic** — `Effect` in
+      `src-tauri/src/model/document.rs`, tagged `kebab-case` so wire `kind` values match
+      the TS string literals exactly, `#[serde(default)]` on `LayerBase::effects` for
+      pre-Phase-7 `.tess` files. This holds for the same reason `Layer::Group` and
+      `BlendMode` are round-trip-only: Rust never composites layers at all
+      (`docs/02-architecture.md` §6.2 — pixel buffers never cross IPC, so there is
+      nothing for Rust to composite *with*), and effects are purely a compositing-time
+      concern. `history/layerCommands.ts` gets add/remove/toggle/reorder/update
+      commands, all wrapping the existing `setProps`/`SetLayerPropsCommand` vocabulary
+      (the whole `effects` array is one `LayerBase` field, so every operation is just a
+      new array reference through the same diff-and-patch machinery already undoable
+      by construction), with `updateLayerEffect`'s own coalesce key so a slider drag is
+      one undo step. `panels/LayerEffectsSection.tsx`, split out of `LayerPanel.tsx` the
+      same way `SegmentModelSection` is split out of `ConvertPanel`, is the UI: an
+      "+ Add effect" dropdown, per-row enable/reorder/remove controls, and a per-kind
+      parameter editor (native `<input type="color">` plus a separate alpha field —
+      `lib/color.ts` gained `fromHex` to pair with the existing `toHex` — thickness/
+      offset/hue/saturation/value sliders, and a palette-picker dropdown for
+      gradient-map that snapshots the chosen palette's colours into the effect rather
+      than keeping a live reference to a `Palette` that could later be renamed or
+      deleted). Tests: 22 cases in `canvas/effects.test.ts` (outline shape including
+      `corners` on/off and the exact-thickness diamond-growth behaviour, outline-inner
+      vs. outline distinction, drop-shadow offset/z-order, gradient-map's
+      luminance-to-palette mapping at known sample points, hsv-shift's exact channel
+      maths, stack ordering/toggling), 12 in `history/layerCommands.test.ts`, 8 in
+      `panels/LayerEffectsSection.test.tsx` (real DOM events against the real
+      component and the real store), 6 in `lib/color.test.ts`, and 6 Rust round-trip
+      tests in `model::document` (every kind's kebab-case wire tag, a multi-effect
+      stack round-tripping in order, default-when-absent). **Verified live, and this
+      is what caught a real bug**: drove the actual Vite dev bundle at `localhost:1420`
+      over Chrome DevTools Protocol (this container's Tauri WebView unreachable as
+      every earlier phase's own note here records) — added each of the five effect
+      kinds through the real "+ Add effect" dropdown and real per-row controls,
+      confirmed the document and the Effects panel updated correctly every time, but
+      the very first check (a screenshot, plus a direct read of `compositeSprite`'s own
+      returned canvas versus what the live app had actually painted) showed the
+      **on-screen canvas silently not updating**: `compositeSprite`'s top-level cache
+      signature (`signatureOf`) listed every `LayerBase` field except `effects`, so
+      adding/toggling/reordering an effect changed nothing the cache was watching, and
+      it kept serving its stale pre-effect canvas without ever calling
+      `effectAppliedCanvas` at all. Fixed by folding `effectsFingerprint(layer.effects)`
+      into `signatureOf`; confirmed the fix was real by reverting it, re-running the
+      new regression test (failed exactly as the live bug did), then restoring it and
+      re-verifying live — the outline now renders correctly (screenshot), and the full
+      add → toggle-off (canvas reverts to the exact pre-effect pixel count) →
+      toggle-on (canvas matches the first application exactly) → remove cycle round-
+      trips losslessly through real DOM clicks for all five kinds. Also confirmed,
+      function-level, against a real 4×4 red square on a 16×16 canvas: `flatten.ts`
+      (export) matched the live `compositeSprite` canvas byte-for-byte in every single
+      case, including combined and reordered stacks; reordering `[outline,
+      gradient-map]` vs. `[gradient-map, outline]` produced genuinely different pixels
+      (the gradient remapping the outline's own colour only when the outline ran
+      first) — confirming order is real, not cosmetic; and removing every effect
+      returned the canvas to the exact original baseline pixel-for-pixel. `npm run
+      test` (800 passed), `npx tsc --noEmit` (clean), `npm run lint` (clean),
+      `cargo test` (226 passed, 5 ignored — pre-existing, unrelated), `cargo clippy
+      --all-targets -- -D warnings` (clean), `npm run build` (clean), and `npm run
+      test:golden` (17 passed — no pipeline files touched, a sanity check) all pass.
 - [ ] Batch conversion + CLI headless mode (W5)
 - [ ] Pixel-art-aware rotate/scale — rotxel, cleanEdge (`04` §7)
 - [ ] **Indexed color mode + live palette swapping** (deferred from v1 by D9 — touches
