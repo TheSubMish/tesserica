@@ -19,15 +19,22 @@ import type {
   ConversionSource,
   Frame,
   FrameId,
+  GridSpec,
   Layer,
   LayerBase,
   LayerId,
   Sprite,
   Tag,
   TagId,
+  TileEntry,
+  TileEntryId,
+  Tileset,
+  TilesetId,
 } from '../model/types';
 import { descendantIds } from '../model/layerTree';
 import { shiftTagRangeForInsert, shiftTagRangeForRemove } from '../model/tags';
+import { celBufferId } from '../model/types';
+import { tileGridDims } from '../model/tileIds';
 import {
   allocateBuffer,
   bumpCelRevision,
@@ -36,6 +43,15 @@ import {
   releaseBuffer,
   setBuffer,
 } from '../model/pixelBuffers';
+import {
+  allocateGrid,
+  bumpGridRevision,
+  clearAllGrids,
+  getGrid,
+  setGrid,
+  setGridCell,
+} from '../model/tileGridBuffers';
+import { allocateEmptyTileBuffer, clearAllTileBuffers, setTileBuffer } from '../model/tileBuffers';
 
 let nextId = 1;
 export const makeId = (prefix: string): string => `${prefix}${nextId++}`;
@@ -65,8 +81,18 @@ interface DocumentState {
   projectPath: string | null;
 
   setProjectPath(path: string | null): void;
-  /** Replace the whole document, e.g. after opening a `.tess`. */
-  replaceDocument(sprite: Sprite, pixels: Map<CelId, Uint8ClampedArray>): void;
+  /**
+   * Replace the whole document, e.g. after opening a `.tess`.
+   *
+   * `grids`/`tileBuffers` are optional — every caller before Phase 6 (and
+   * every document with no tilemap layers) has nothing to pass for either.
+   */
+  replaceDocument(
+    sprite: Sprite,
+    pixels: Map<CelId, Uint8ClampedArray>,
+    grids?: Map<CelId, Uint32Array>,
+    tileBuffers?: Map<TileEntryId, Uint8ClampedArray>,
+  ): void;
   /**
    * Start a fresh document — `Ctrl+N` (`docs/06-workflows.md` W2 step 1).
    *
@@ -91,6 +117,18 @@ interface DocumentState {
    * (`model/layerTree.ts`) — so there are no cels to allocate.
    */
   createGroup(name?: string, parentId?: LayerId | null): { layer: Layer; cels: Cel[] };
+  /**
+   * Build a detached tilemap layer plus one (empty-grid) cel per frame —
+   * `createLayer`'s mirror one variant over (`docs/03-data-model.md` §4,
+   * roadmap Phase 6). `tilesetId` must already exist in `sprite.tilesets`;
+   * callers are expected to check (`history/tilesetCommands.ts::addTilemapLayer`).
+   */
+  createTilemapLayer(
+    tilesetId: TilesetId,
+    grid: GridSpec,
+    name?: string,
+    parentId?: LayerId | null,
+  ): { layer: Layer; cels: Cel[] };
   /** Insert a layer at `index` in the bottom→top order. */
   insertLayer(layer: Layer, cels: Cel[], index: number): void;
   /**
@@ -180,6 +218,25 @@ interface DocumentState {
   /** Patch a tag's metadata (name, range, direction, repeat, color). */
   updateTag(id: TagId, patch: Partial<Tag>): void;
   tagIndex(id: TagId): number;
+
+  // ---- tilesets & tilemap cels (`docs/03-data-model.md` §4, roadmap Phase 6)
+  // ----
+  /** Insert a tileset at `index` in creation order. */
+  insertTileset(tileset: Tileset, index: number): void;
+  /** Drop a tileset. Its tile buffers are **not** released — mirrors the
+   * layer/frame convention, so undoing the removal restores identical pixels. */
+  removeTilesetMetadata(id: TilesetId): void;
+  tilesetIndex(id: TilesetId): number;
+  /** Append (or re-insert, on undo) one tile entry into an existing tileset. */
+  insertTileEntry(tilesetId: TilesetId, entry: TileEntry, index: number): void;
+  removeTileEntryMetadata(tilesetId: TilesetId, tileEntryId: TileEntryId): void;
+  /**
+   * Paint one grid cell of a tilemap cel with a packed tile id
+   * (`model/tileIds.ts`). A pure mutation of the cel's grid buffer, mirroring
+   * `setCelLink`'s "callers own the undo bookkeeping" shape
+   * (`history/tilesetCommands.ts::SetTileCellCommand`).
+   */
+  setTilemapCell(celId: CelId, col: number, row: number, tileId: number): void;
 }
 
 function createInitialSprite(
@@ -239,31 +296,53 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   setProjectPath: (path) => set({ projectPath: path }),
 
-  replaceDocument: (sprite, pixels) => {
+  replaceDocument: (sprite, pixels, grids = new Map(), tileBuffers = new Map()) => {
     // The old document's buffers are unreachable the moment the sprite is
     // swapped, so drop them rather than leaking them for the process lifetime.
     clearAllBuffers();
+    clearAllGrids();
+    clearAllTileBuffers();
+    const tilesets = sprite.tilesets ?? [];
     reserveIds([
       ...sprite.layers.map((l) => l.id),
       ...sprite.frames.map((f) => f.id),
       ...sprite.cels.map((c) => c.id),
+      ...tilesets.flatMap((t) => [t.id, ...t.tiles.map((e) => e.id)]),
     ]);
+
+    for (const tileset of tilesets) {
+      for (const entry of tileset.tiles) {
+        const buf = tileBuffers.get(entry.id);
+        const expected = tileset.tileWidth * tileset.tileHeight * 4;
+        if (buf && buf.length === expected) setTileBuffer(entry.id, buf);
+        else allocateEmptyTileBuffer(entry.id, tileset.tileWidth, tileset.tileHeight);
+      }
+    }
 
     for (const cel of sprite.cels) {
       // A linked cel has no buffer of its own — it shares `linkedTo`'s, which
       // this same loop populates from its own entry. Allocating one here
       // would give it independent (blank) pixels, breaking the link on load.
       if (cel.linkedTo) continue;
+      const layer = sprite.layers.find((l) => l.id === cel.layerId);
+      if (layer?.kind === 'tilemap') {
+        const { cols, rows } = tileGridDims(cel, layer.grid);
+        const g = grids.get(cel.id);
+        if (g && g.length === cols * rows) setGrid(cel.id, g);
+        else allocateGrid(cel.id, cols, rows);
+        continue;
+      }
       const buf = pixels.get(cel.id);
       if (buf && buf.length === cel.width * cel.height * 4) setBuffer(cel.id, buf);
       else allocateBuffer(cel.id, cel.width, cel.height);
     }
 
     set((s) => ({
-      // `tags` postdates this shape — a `.tess` saved before tags existed has
-      // no such field on the wire, and the Timeline panel expects an array,
-      // not `undefined` (mirrors the Rust side's `#[serde(default)]`).
-      sprite: { ...sprite, tags: sprite.tags ?? [] },
+      // `tags`/`tilesets` postdate this shape — a `.tess` saved before either
+      // existed has no such field on the wire, and readers downstream (the
+      // Timeline panel, the tileset panel) expect an array, not `undefined`
+      // (mirrors the Rust side's `#[serde(default)]`).
+      sprite: { ...sprite, tags: sprite.tags ?? [], tilesets },
       activeLayerId: sprite.layers[sprite.layers.length - 1]?.id ?? s.activeLayerId,
       activeFrameId: sprite.frames[0]?.id ?? s.activeFrameId,
       revision: s.revision + 1,
@@ -355,11 +434,49 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     return { layer, cels: [] };
   },
 
+  createTilemapLayer: (tilesetId, grid, name, parentId = null) => {
+    const s = get();
+    const count = s.sprite.layers.filter((l) => l.kind === 'tilemap').length;
+    const layer: Layer = {
+      id: makeId('l'),
+      kind: 'tilemap',
+      name: name ?? `Tile Layer ${count + 1}`,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      parentId,
+      clippingMask: false,
+      tilesetId,
+      grid,
+    };
+    // One cel per frame, exactly like `createLayer` — the cel's *content* is
+    // grid data (`model/tileGridBuffers.ts`), not a pixel buffer, resolved by
+    // `insertLayer`/`insertFrame` below via `layer.kind === 'tilemap'`.
+    const cels: Cel[] = s.sprite.frames.map((f) => ({
+      id: makeId('c'),
+      layerId: layer.id,
+      frameId: f.id,
+      x: 0,
+      y: 0,
+      width: s.sprite.width,
+      height: s.sprite.height,
+    }));
+    return { layer, cels };
+  },
+
   insertLayer: (layer, cels, index) =>
     set((s) => {
       for (const cel of cels) {
-        if (cel.linkedTo) continue; // shares another cel's buffer; nothing to allocate
-        if (!getBuffer(cel.id)) allocateBuffer(cel.id, cel.width, cel.height);
+        if (cel.linkedTo) continue; // shares another cel's buffer/grid; nothing to allocate
+        if (layer.kind === 'tilemap') {
+          if (!getGrid(cel.id)) {
+            const { cols, rows } = tileGridDims(cel, layer.grid);
+            allocateGrid(cel.id, cols, rows);
+          }
+        } else if (!getBuffer(cel.id)) {
+          allocateBuffer(cel.id, cel.width, cel.height);
+        }
       }
       const layers = [...s.sprite.layers];
       layers.splice(Math.max(0, Math.min(index, layers.length)), 0, layer);
@@ -498,8 +615,16 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   insertFrame: (frame, cels, index) =>
     set((s) => {
       for (const cel of cels) {
-        if (cel.linkedTo) continue; // shares another cel's buffer
-        if (!getBuffer(cel.id)) allocateBuffer(cel.id, cel.width, cel.height);
+        if (cel.linkedTo) continue; // shares another cel's buffer/grid
+        const layer = s.sprite.layers.find((l) => l.id === cel.layerId);
+        if (layer?.kind === 'tilemap') {
+          if (!getGrid(cel.id)) {
+            const { cols, rows } = tileGridDims(cel, layer.grid);
+            allocateGrid(cel.id, cols, rows);
+          }
+        } else if (!getBuffer(cel.id)) {
+          allocateBuffer(cel.id, cel.width, cel.height);
+        }
       }
       const clampedIndex = Math.max(0, Math.min(index, s.sprite.frames.length));
       const frames = [...s.sprite.frames];
@@ -591,6 +716,55 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     })),
 
   tagIndex: (id) => get().sprite.tags.findIndex((t) => t.id === id),
+
+  insertTileset: (tileset, index) =>
+    set((s) => {
+      const tilesets = [...s.sprite.tilesets];
+      tilesets.splice(Math.max(0, Math.min(index, tilesets.length)), 0, tileset);
+      return { sprite: { ...s.sprite, tilesets }, revision: s.revision + 1 };
+    }),
+
+  removeTilesetMetadata: (id) =>
+    set((s) => {
+      const tilesets = s.sprite.tilesets.filter((t) => t.id !== id);
+      if (tilesets.length === s.sprite.tilesets.length) return s;
+      return { sprite: { ...s.sprite, tilesets }, revision: s.revision + 1 };
+    }),
+
+  tilesetIndex: (id) => get().sprite.tilesets.findIndex((t) => t.id === id),
+
+  insertTileEntry: (tilesetId, entry, index) =>
+    set((s) => {
+      const tilesets = s.sprite.tilesets.map((t) => {
+        if (t.id !== tilesetId) return t;
+        const tiles = [...t.tiles];
+        tiles.splice(Math.max(0, Math.min(index, tiles.length)), 0, entry);
+        return { ...t, tiles };
+      });
+      return { sprite: { ...s.sprite, tilesets }, revision: s.revision + 1 };
+    }),
+
+  removeTileEntryMetadata: (tilesetId, tileEntryId) =>
+    set((s) => {
+      const tilesets = s.sprite.tilesets.map((t) =>
+        t.id === tilesetId ? { ...t, tiles: t.tiles.filter((e) => e.id !== tileEntryId) } : t,
+      );
+      return { sprite: { ...s.sprite, tilesets }, revision: s.revision + 1 };
+    }),
+
+  setTilemapCell: (celId, col, row, tileId) => {
+    const s = get();
+    const cel = s.sprite.cels.find((c) => c.id === celId);
+    if (!cel) return;
+    const layer = s.sprite.layers.find((l) => l.id === cel.layerId);
+    if (layer?.kind !== 'tilemap') return;
+    const bufferId = celBufferId(cel);
+    const grid = getGrid(bufferId);
+    if (!grid) return;
+    const { cols, rows } = tileGridDims(cel, layer.grid);
+    setGridCell(grid, cols, rows, col, row, tileId);
+    bumpGridRevision(bufferId);
+  },
 }));
 
 export type { CelId };

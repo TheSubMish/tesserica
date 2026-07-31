@@ -22,16 +22,26 @@
  */
 
 import { getBuffer, releaseBuffer, setBuffer } from '../model/pixelBuffers';
+import { getGrid, releaseGrid, setGrid } from '../model/tileGridBuffers';
 import { descendantIds, wouldCreateCycle } from '../model/layerTree';
 import type { BlendMode, Cel, CelId, Layer, LayerId } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import type { Command, DocumentApi } from './command';
 
-/** Add and delete are the same operation run in opposite directions. */
+/**
+ * Add and delete are the same operation run in opposite directions.
+ *
+ * A tilemap layer's cels (roadmap Phase 6) hold no pixel buffer — their
+ * content is a grid of packed tile ids in `model/tileGridBuffers.ts` instead
+ * — so `capture`/`add`/`remove` snapshot whichever storage this layer's kind
+ * actually uses, keyed off `layer.kind` exactly once at the top of each
+ * method rather than duplicating this class per layer kind.
+ */
 class LayerExistence {
-  /** Pixels held while the layer is absent from the document. */
-  private saved: Map<CelId, Uint8ClampedArray> | null = null;
+  /** Pixels (raster/conversion) or grids (tilemap) held while the layer is absent. */
+  private savedPixels: Map<CelId, Uint8ClampedArray> | null = null;
+  private savedGrids: Map<CelId, Uint32Array> | null = null;
 
   constructor(
     readonly layer: Layer,
@@ -41,12 +51,13 @@ class LayerExistence {
 
   get retainedBytes(): number {
     let n = 0;
-    if (this.saved) for (const buf of this.saved.values()) n += buf.byteLength;
+    if (this.savedPixels) for (const buf of this.savedPixels.values()) n += buf.byteLength;
+    if (this.savedGrids) for (const g of this.savedGrids.values()) n += g.byteLength;
     return n;
   }
 
   /**
-   * Snapshot the pixels now, before the layer is removed.
+   * Snapshot the pixels/grid now, before the layer is removed.
    *
    * A linked cel (`docs/03-data-model.md` §2.2) has no buffer of its own —
    * `linkedTo` always names another cel *on this same layer*, so its target
@@ -54,20 +65,31 @@ class LayerExistence {
    * itself.
    */
   capture(): void {
-    const saved = new Map<CelId, Uint8ClampedArray>();
+    const savedPixels = new Map<CelId, Uint8ClampedArray>();
+    const savedGrids = new Map<CelId, Uint32Array>();
     for (const cel of this.cels) {
       if (cel.linkedTo) continue;
-      const buf = getBuffer(cel.id);
-      if (buf) saved.set(cel.id, buf);
+      if (this.layer.kind === 'tilemap') {
+        const g = getGrid(cel.id);
+        if (g) savedGrids.set(cel.id, g);
+      } else {
+        const buf = getBuffer(cel.id);
+        if (buf) savedPixels.set(cel.id, buf);
+      }
     }
-    this.saved = saved;
+    this.savedPixels = savedPixels;
+    this.savedGrids = savedGrids;
   }
 
   add(doc: DocumentApi): void {
     doc.insertLayer(this.layer, this.cels, this.index);
-    if (this.saved) {
-      for (const [id, buf] of this.saved) setBuffer(id, buf);
-      this.saved = null;
+    if (this.savedPixels) {
+      for (const [id, buf] of this.savedPixels) setBuffer(id, buf);
+      this.savedPixels = null;
+    }
+    if (this.savedGrids) {
+      for (const [id, g] of this.savedGrids) setGrid(id, g);
+      this.savedGrids = null;
     }
     doc.setActiveLayer(this.layer.id);
     doc.touch();
@@ -80,7 +102,9 @@ class LayerExistence {
     // layer, so it dies in this same cascade — a linked cel never needs its
     // target released separately, and never owned a buffer to release itself.
     for (const cel of this.cels) {
-      if (!cel.linkedTo) releaseBuffer(cel.id);
+      if (cel.linkedTo) continue;
+      if (this.layer.kind === 'tilemap') releaseGrid(cel.id);
+      else releaseBuffer(cel.id);
     }
     doc.touch();
   }

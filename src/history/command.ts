@@ -22,6 +22,10 @@ import type {
   Sprite,
   Tag,
   TagId,
+  TileEntry,
+  TileEntryId,
+  Tileset,
+  TilesetId,
 } from '../model/types';
 
 /**
@@ -60,6 +64,14 @@ export interface DocumentApi {
   insertTag(tag: Tag, index: number): void;
   removeTagMetadata(id: TagId): void;
   updateTag(id: TagId, patch: Partial<Tag>): void;
+
+  // ---- tilesets & tilemap cels (`docs/03-data-model.md` §4, roadmap Phase 6)
+  // ----
+  insertTileset(tileset: Tileset, index: number): void;
+  removeTilesetMetadata(id: TilesetId): void;
+  insertTileEntry(tilesetId: TilesetId, entry: TileEntry, index: number): void;
+  removeTileEntryMetadata(tilesetId: TilesetId, tileEntryId: TileEntryId): void;
+  setTilemapCell(celId: CelId, col: number, row: number, tileId: number): void;
 }
 
 export interface Command {
