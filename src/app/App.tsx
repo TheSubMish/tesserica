@@ -13,6 +13,7 @@ import { listenForImageDrop, SUPPORTED_IMAGE_EXTENSIONS } from '../convert/dropT
 import { handoffToEdit } from '../convert/editHandoff';
 import { loadSourceImage } from '../convert/loadSource';
 import { useUIStore } from '../state/uiStore';
+import { BatchConvertDialog } from './BatchConvertDialog';
 import { ExportDialog } from './ExportDialog';
 import { FileMenu } from './FileMenu';
 import { NewSpriteDialog } from './NewSpriteDialog';
@@ -24,6 +25,7 @@ export function App() {
   const showTimeline = useUIStore((s) => s.showTimeline);
   const [exporting, setExporting] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
+  const [batchConverting, setBatchConverting] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [dropping, setDropping] = useState(false);
   useShortcuts({ onNewSprite: () => setCreatingNew(true) });
@@ -134,6 +136,7 @@ export function App() {
                 }),
             },
             { label: 'Export…', onSelect: () => setExporting(true) },
+            { label: 'Batch Convert…', onSelect: () => setBatchConverting(true) },
           ]}
         />
         <span className="wordmark">Tesserica</span>
@@ -223,6 +226,7 @@ export function App() {
 
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {creatingNew && <NewSpriteDialog onClose={() => setCreatingNew(false)} />}
+      {batchConverting && <BatchConvertDialog onClose={() => setBatchConverting(false)} />}
     </div>
   );
 }

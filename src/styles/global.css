@@ -999,6 +999,33 @@ select:focus-visible {
   margin: 0.6rem 0;
 }
 
+/* ---- Batch Convert progress list (docs/08-roadmap.md Phase 7 W5) ---- */
+
+.batch-progress-list {
+  max-height: 160px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 12px;
+}
+
+.batch-row {
+  padding: 2px 0;
+}
+
+.batch-row-running {
+  color: var(--text);
+}
+
+.batch-row-ok {
+  color: var(--text-muted);
+}
+
+.batch-row-fail {
+  color: var(--danger);
+}
+
 .segment-model-confirm,
 .segment-model-error {
   display: flex;

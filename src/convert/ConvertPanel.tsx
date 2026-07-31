@@ -6,6 +6,7 @@ import { bufferFrom } from '../pipeline/buffer.ts';
 import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
 import { OnnxRuntimeSection } from '../segment/OnnxRuntimeSection.tsx';
 import { SegmentModelSection } from '../segment/SegmentModelSection.tsx';
+import { DITHER_LABELS } from './ditherLabels.ts';
 import {
   MAX_BACKGROUND_REMOVAL_TOLERANCE,
   MAX_MASK_CLOSE,
@@ -29,15 +30,6 @@ import { previewRuntime } from './previewRuntime.ts';
  * the 10-second path (workflow W6) achievable — not a lack of features, but a
  * deliberate ordering of them.
  */
-
-const DITHER_LABELS: ReadonlyArray<{ value: DitherMode; label: string }> = [
-  { value: 'none', label: 'None' },
-  { value: 'floyd-steinberg', label: 'Floyd–Steinberg' },
-  { value: 'atkinson', label: 'Atkinson' },
-  { value: 'bayer2', label: 'Bayer 2×2' },
-  { value: 'bayer4', label: 'Bayer 4×4' },
-  { value: 'bayer8', label: 'Bayer 8×8' },
-];
 
 const DOWNSCALE_LABELS: ReadonlyArray<{ value: DownscaleMode; label: string }> = [
   { value: 'box', label: 'Box average' },
