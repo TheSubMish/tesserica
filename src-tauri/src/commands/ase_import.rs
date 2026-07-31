@@ -697,6 +697,75 @@ mod tests {
         assert!(err.is_err());
     }
 
+    /// End to end against a **real file on disk**, not just in-memory bytes —
+    /// the one thing the unit tests above do not exercise, since `import_ase`
+    /// itself (the actual Tauri command) is `std::fs::read` followed by
+    /// exactly the same `convert()` call. A multi-layer, multi-frame,
+    /// grouped, tagged, linked-cel file, written by the crate's own encoder
+    /// and read back through the same file-path code path the real command
+    /// uses.
+    #[test]
+    fn imports_a_real_multi_feature_aseprite_file_from_disk() {
+        let mut file = AsepriteFile::new(3, 3, AseColorMode::Rgba);
+        let group = file.add_group("Character");
+        let body = file.add_layer_in("body", group);
+        let bg = file.add_layer("background");
+        let f0 = file.add_frame(80);
+        let f1 = file.add_frame(80);
+        let f2 = file.add_frame(80);
+
+        let solid = |v: u8| Pixels::new(vec![v; 3 * 3 * 4], 3, 3, AseColorMode::Rgba).unwrap();
+        file.set_cel(body, f0, solid(10), 0, 0).unwrap();
+        file.set_linked_cel(body, f1, f0).unwrap();
+        file.set_cel(body, f2, solid(20), 0, 0).unwrap();
+        file.set_cel(bg, f0, solid(200), 0, 0).unwrap();
+        file.add_tag("walk", 0..=1, LoopDirection::PingPong)
+            .unwrap();
+
+        let mut bytes = Vec::new();
+        file.write_to(&mut bytes).unwrap();
+
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "tesserica-ase-import-test-{}.aseprite",
+            std::process::id()
+        ));
+        std::fs::write(&path, &bytes).unwrap();
+
+        // Exactly what `import_ase` itself does, minus the `State<Staging>`
+        // wrapper a real Tauri command needs to be constructed from.
+        let read_back = std::fs::read(&path).unwrap();
+        let reopened = AsepriteFile::from_reader(&read_back[..]).unwrap();
+        let staging = Staging::default();
+        let (sprite, cels, warnings) = convert(&reopened, &staging);
+
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(sprite.width, 3);
+        assert_eq!(sprite.height, 3);
+        assert_eq!(sprite.layers.len(), 3); // group + body + background
+        assert_eq!(sprite.frames.len(), 3);
+        // 3 body cels (one linked) + 1 background cel = 4, but only 3 are
+        // staged (the linked one shares its target's buffer).
+        assert_eq!(sprite.cels.len(), 4);
+        assert_eq!(cels.len(), 3);
+        assert_eq!(sprite.tags.len(), 1);
+        assert_eq!(sprite.tags[0].name, "walk");
+        assert!(warnings.iter().any(|w| w.contains("colour"))); // the one expected gap
+
+        let linked = sprite
+            .cels
+            .iter()
+            .find(|c| c.linked_to.is_some())
+            .expect("linked cel present");
+        let canonical_rgba = stage_and_fetch(
+            &staging,
+            &cels,
+            linked.linked_to.as_deref().expect("linked_to set"),
+        );
+        assert_eq!(canonical_rgba[0], 10); // the body layer's frame-0 fill value
+    }
+
     #[test]
     fn skips_a_tilemap_layer_with_an_explicit_warning() {
         let mut file = AsepriteFile::new(4, 4, AseColorMode::Rgba);

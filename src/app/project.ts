@@ -21,17 +21,20 @@ import { celBufferId, type Sprite } from '../model/types';
 import {
   fetchStaged,
   hasBackend,
+  importAse,
   loadProject,
   releaseStaged,
   saveProject,
   stageBytes,
   type CelUpload,
+  type LoadResult,
   type TileUpload,
 } from '../ipc/commands';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 
 export const TESS_FILTER = { name: 'Tesserica project', extensions: ['tess'] };
+export const ASE_FILTER = { name: 'Aseprite file', extensions: ['ase', 'aseprite'] };
 
 export class NoBackendError extends Error {
   constructor() {
@@ -149,20 +152,14 @@ export async function saveCurrentProject(options: { saveAs: boolean }): Promise<
   }
 }
 
-/** Open a `.tess`, replacing the current document. Returns warnings, if any. */
-export async function openProject(): Promise<{ path: string; warnings: string[] } | null> {
-  if (!hasBackend()) throw new NoBackendError();
-
-  const picked = await open({
-    title: 'Open project',
-    multiple: false,
-    directory: false,
-    filters: [TESS_FILTER],
-  });
-  if (!picked || typeof picked !== 'string') return null;
-
-  const result = await loadProject(picked);
-
+/**
+ * Fetch every staged cel/tile buffer a `LoadResult` references and replace
+ * the current document with it. Shared by `openProject` (`.tess`) and
+ * `importAseFile` (`.ase`/`.aseprite`, `docs/10-decisions.md` D17) — Rust
+ * returns the identical wire shape for both, so this is the entire amount of
+ * plumbing an import format needs beyond its own command.
+ */
+async function applyLoadResult(result: LoadResult): Promise<void> {
   // Roadmap Phase 6: a tilemap layer's cel arrives as the same shape as a
   // raster cel's staged bytes (`ipc/commands.ts::LoadedCel`) — which map it
   // belongs in is decided the same way the save path decided how to write
@@ -205,12 +202,55 @@ export async function openProject(): Promise<{ path: string; warnings: string[] 
   useDocumentStore
     .getState()
     .replaceDocument(result.sprite as unknown as Sprite, pixels, grids, tileBuffers);
-  useDocumentStore.getState().setProjectPath(result.path);
 
   // The new document has no shared history with the old one, and every cached
   // composite belongs to a document that no longer exists.
   useHistoryStore.getState().clear();
   invalidateRenderCache();
+}
+
+/** Open a `.tess`, replacing the current document. Returns warnings, if any. */
+export async function openProject(): Promise<{ path: string; warnings: string[] } | null> {
+  if (!hasBackend()) throw new NoBackendError();
+
+  const picked = await open({
+    title: 'Open project',
+    multiple: false,
+    directory: false,
+    filters: [TESS_FILTER],
+  });
+  if (!picked || typeof picked !== 'string') return null;
+
+  const result = await loadProject(picked);
+  await applyLoadResult(result);
+  useDocumentStore.getState().setProjectPath(result.path);
+
+  return { path: result.path, warnings: result.warnings };
+}
+
+/**
+ * Import a `.ase`/`.aseprite` file, replacing the current document
+ * (`docs/08-roadmap.md` Phase 6 "`.ase` import", `docs/10-decisions.md` D17).
+ *
+ * Unlike `openProject`, the resulting document's `projectPath` is left
+ * unset: an imported Aseprite file is a *source*, not this project's own
+ * save format, so the next `Ctrl+S` prompts for where to put a new `.tess`
+ * rather than silently overwriting the `.ase` the user just opened.
+ */
+export async function importAseFile(): Promise<{ path: string; warnings: string[] } | null> {
+  if (!hasBackend()) throw new NoBackendError();
+
+  const picked = await open({
+    title: 'Import Aseprite file',
+    multiple: false,
+    directory: false,
+    filters: [ASE_FILTER],
+  });
+  if (!picked || typeof picked !== 'string') return null;
+
+  const result = await importAse(picked);
+  await applyLoadResult(result);
+  useDocumentStore.getState().setProjectPath(null);
 
   return { path: result.path, warnings: result.warnings };
 }

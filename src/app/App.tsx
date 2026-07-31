@@ -16,7 +16,7 @@ import { useUIStore } from '../state/uiStore';
 import { ExportDialog } from './ExportDialog';
 import { FileMenu } from './FileMenu';
 import { NewSpriteDialog } from './NewSpriteDialog';
-import { openProject, pickImage, saveCurrentProject } from './project';
+import { importAseFile, openProject, pickImage, saveCurrentProject } from './project';
 import { useShortcuts } from './shortcuts';
 
 export function App() {
@@ -93,6 +93,18 @@ export function App() {
               onSelect: () =>
                 void guard('Opened', async () => {
                   const result = await openProject();
+                  if (result?.warnings.length) {
+                    setNotice({ text: result.warnings.join('; '), error: true });
+                    return null;
+                  }
+                  return result?.path ?? null;
+                }),
+            },
+            {
+              label: 'Import Aseprite file…',
+              onSelect: () =>
+                void guard('Imported', async () => {
+                  const result = await importAseFile();
                   if (result?.warnings.length) {
                     setNotice({ text: result.warnings.join('; '), error: true });
                     return null;

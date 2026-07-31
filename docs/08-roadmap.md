@@ -1126,13 +1126,95 @@ done — both are real gaps, stated plainly rather than implied closed.
       confirmed the real UI renders "No repeating grid detected — this
       source doesn't look like an upscaled sprite" instead of a bogus
       value.
-- [ ] `.ase` import; evaluate `aseprite-io` (`01` §9)
+- [x] `.ase` import; evaluate `aseprite-io` (`01` §9) — re-verified `aseprite-io`
+      directly against crates.io (not the doc's 2026-07-26 snapshot): v0.2.0, MIT
+      OR Apache-2.0, two releases in ~3 months (actively maintained), its only
+      dependency `flate2` already resolved transitively via this project's own
+      `zip` dependency (no new entry in the dependency tree). Read its
+      `reader.rs`/`types.rs`/`writer.rs` rather than trusting its README: full
+      chunk coverage this project can use — palette, every layer kind (normal/
+      group/tilemap), every cel kind (raw, zlib-**compressed** — handled, not
+      assumed away — linked, tilemap), tags, tilesets, user data. **Decision:
+      use the crate directly rather than hand-roll a parser** (locked,
+      `10-decisions.md` D17); the one real gap found by reading its source
+      rather than assumed — it discards a tag's own embedded colour outright —
+      is reported through `LoadResult.warnings`, not silently papered over.
+      New `src-tauri/src/commands/ase_import.rs` converts an `AsepriteFile`
+      onto this project's own `Sprite`/`Layer`/`Frame`/`Cel`/`Tag`/`Palette`,
+      reusing `commands::project`'s existing `LoadResult`/`LoadedCel` wire
+      shape so the frontend needed one new command call
+      (`src/ipc/commands.ts::importAse`), not new plumbing — `src/app/
+      project.ts` factors the shared "fetch every staged cel, replace the
+      document" logic into `applyLoadResult`, used by both `openProject` and
+      the new `importAseFile`. Converts nested groups (`parentId`, preserving
+      Aseprite's own child-level nesting), **linked cels** (mapped onto this
+      project's own `Cel.linkedTo`, sharing the canonical cel's staged buffer
+      rather than duplicating it — exactly like a linked cel in a `.tess`),
+      frame durations, tags, and the file's own palette as an importable
+      swatch list; RGBA cels pass through unchanged while grayscale
+      (value+alpha) and indexed (palette index, honouring the transparent
+      index) sources convert to straight-alpha RGBA on the way in (D9 — v1 is
+      RGBA only), never left indexed. **Honest partial, not overclaimed**:
+      `.ase` **tilemap layers are skipped** with a warning — Aseprite's own
+      tile flip/rotate bit layout does not match this project's `model/
+      tileIds.ts` packing (the tileset-export item earlier in this same phase
+      already hit the analogous mismatch against Tiled's bit layout), and
+      repacking it correctly is real work distinct from the rest of this item;
+      Aseprite's three non-W3C blend modes (addition/subtract/divide) import
+      as `normal`; `pingpongReverse` (a fourth tag loop direction Aseprite has
+      and this project's `TagDirection` does not) imports as `pingpong`; both
+      report a warning per occurrence. Per-cel opacity and Aseprite slices
+      have no field in this project's data model at all and are dropped
+      without a warning, since there is nothing here for them to have failed
+      to reach. 12 new Rust unit tests build real binary `.aseprite` byte
+      streams via the crate's own writer (an independent code path from its
+      reader) and round-trip them through `AsepriteFile::from_reader` exactly
+      as a file opened from disk would be — a minimal single-layer/single-
+      frame RGBA file, nested groups with parent pointers, a linked cel
+      sharing its canonical buffer, grayscale/indexed→RGBA conversion
+      (including the transparent-index boundary), tags with range/direction
+      and the missing-colour warning, the file's own palette, an
+      all-defaults/no-content file, a rejected non-Aseprite file, a skipped
+      tilemap layer, locked/hidden/opacity mapping, and — closing the gap the
+      others don't reach — a **real multi-feature file written to and read
+      back from an actual path on disk** (3 layers across a group, 3 frames,
+      a linked cel, a tag), exercising the exact `std::fs::read` +
+      `AsepriteFile::from_reader` + `convert()` sequence the real
+      `import_ase` command itself runs, not just its in-memory `convert()`
+      half. 5 new TS tests (`src/app/project.test.ts`, previously no test file
+      existed for this module at all) cover `openProject`/`importAseFile`
+      sharing `applyLoadResult` and the one behaviour they must *not* share:
+      an imported `.ase` leaves `projectPath` unset (a source, not this
+      project's own save file) rather than inheriting the pattern that opening
+      a `.tess` sets it. Verified live: `tauri dev`'s WebView was unreachable
+      in this container as in every earlier phase's own note here, so the
+      fallback was the real Vite dev bundle over Chrome DevTools Protocol (a
+      headless Chrome launched for this session, driven by Node's native
+      `WebSocket` speaking CDP directly, no new dependency) — opened the real
+      File menu via an actual DOM click, confirmed the real menu item list is
+      `["New…","Open…","Import Aseprite file…","Save","Save As…","Open
+      image…","Export…"]`, clicked "Import Aseprite file…", and confirmed the
+      real `guard()`/`NoBackendError` path surfaced the honest "This needs the
+      desktop app — the Rust backend is not available here." — proof the
+      button, the store dispatch and the IPC boundary are all real and
+      reachable, not a stub, consistent with every other command this
+      container's WebView cannot reach. `cargo test` (223 passed, 5 ignored —
+      the pre-existing `ort`/checksum smoke tests unrelated to this item),
+      `cargo clippy --all-targets -- -D warnings` (clean), `npx tsc --noEmit`
+      (clean), `npm run lint` (clean), `npm run test` (754 passed), `npm run
+      build` (clean), and `npm run test:golden` (17 passed — no pipeline files
+      touched, a sanity check) all pass.
 
-**Exit:** ⚠️ **W4 complete. W7 Case A complete, Case B not yet.** The Exit line
-here previously read "W4, W7 complete" while `.ase` import — W7 Case B, the
-other half of the same workflow — was still unchecked above; corrected in the
-same pass that landed grid detection rather than left standing. Phase 6 is not
-done until `.ase` import lands.
+**Exit:** ✅ **W4, W7 complete.** All four Phase 6 items landed: the tileset/
+tilemap data model with a real panel UI, the tile stamp tool with
+auto-deduplication, tileset+tilemap JSON export, grid detection (W7 Case A),
+and — closing the phase — `.ase` import (W7 Case B), so both halves of the
+same workflow now work. Two things carried forward rather than hidden by this
+exit: `.ase` tilemap layers do not import (Aseprite's tile-flag bit layout
+does not match this project's own packing, `10-decisions.md` D17), and a
+`.ase` file's own tag colours are not recoverable from the `aseprite-io`
+0.2.0 reader itself, so imported tags get a deterministic placeholder colour
+instead of the artist's original.
 
 ---
 

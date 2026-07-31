@@ -267,6 +267,21 @@ export async function loadProject(path: string): Promise<LoadResult> {
 }
 
 // ---------------------------------------------------------------------------
+// `.ase`/`.aseprite` import (`docs/08-roadmap.md` Phase 6 "`.ase` import",
+// `docs/10-decisions.md` D17, `src-tauri/src/commands/ase_import.rs`).
+//
+// Same wire shape as `loadProject` — Rust converts the Aseprite file onto
+// this project's own `Sprite`/`Layer`/`Frame`/`Cel`/`Tag`/`Palette` model
+// and returns the identical `LoadResult` shape, so the frontend's existing
+// staged-cel-fetch + `replaceDocument` plumbing (`app/project.ts`) needs no
+// new code, just a new command to call.
+// ---------------------------------------------------------------------------
+
+export async function importAse(path: string): Promise<LoadResult> {
+  return invoke<LoadResult>('import_ase', { path });
+}
+
+// ---------------------------------------------------------------------------
 // Source handle model (`docs/02-architecture.md` §6.2)
 //
 // Source images are opened by Rust and **stay in Rust**. The frontend holds a
