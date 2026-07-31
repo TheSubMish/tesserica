@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { SliderField } from '../app/SliderField';
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
+import { bufferFrom } from '../pipeline/buffer.ts';
 import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
 import { OnnxRuntimeSection } from '../segment/OnnxRuntimeSection.tsx';
 import { SegmentModelSection } from '../segment/SegmentModelSection.tsx';
@@ -17,6 +18,8 @@ import {
   targetSize,
   useConvertStore,
 } from '../state/convertStore';
+import { detectGrid, type GridDetectionResult } from './gridDetect.ts';
+import { previewRuntime } from './previewRuntime.ts';
 
 /**
  * Convert mode's right rail (`docs/05-ui-design.md` §3).
@@ -53,6 +56,25 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
   const colors = paletteColors(state.paletteId);
   const ready = state.source !== undefined;
 
+  // `undefined` = not run yet this session; `'none'` = ran, found nothing
+  // confident (`docs/04` §3.3's "handle the already pixel-sized case
+  // gracefully" — never fabricate a value).
+  const [gridDetection, setGridDetection] = useState<GridDetectionResult | 'none' | undefined>(
+    undefined,
+  );
+
+  const runGridDetection = () => {
+    const source = previewRuntime.current.source;
+    if (!source) return;
+    const buffer = bufferFrom(source.width, source.height, source.data);
+    setGridDetection(detectGrid(buffer) ?? 'none');
+  };
+
+  const acceptGridDetection = (period: number) => {
+    state.setPixelSize(period);
+    setGridDetection(undefined);
+  };
+
   return (
     <aside className="panels convert-panel" aria-label="Convert settings">
       <section className="panel">
@@ -63,7 +85,10 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
           min={MIN_PIXEL_SIZE}
           max={MAX_PIXEL_SIZE}
           value={state.pixelSize}
-          onChange={(v) => state.setPixelSize(v)}
+          onChange={(v) => {
+            state.setPixelSize(v);
+            setGridDetection(undefined);
+          }}
         />
 
         <p className="field-note">
@@ -72,6 +97,49 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
             {width || '—'} × {height || '—'}
           </strong>
         </p>
+
+        <button type="button" disabled={!ready} onClick={runGridDetection}>
+          Detect grid…
+        </button>
+        <p className="field-note">
+          For a source that is already pixel art saved at some upscale (a screenshot, an
+          AI-generated sprite, a PNG someone scaled up) — recovers the original block size exactly
+          instead of letting the ordinary downscale blur it.
+        </p>
+
+        {gridDetection === 'none' && (
+          <p className="field-note" role="status">
+            No repeating grid detected — this source doesn&apos;t look like an upscaled sprite.
+          </p>
+        )}
+
+        {gridDetection !== undefined && gridDetection !== 'none' && (
+          <div className="field-note" role="status">
+            {gridDetection.agreement ? (
+              <p>
+                Detected <strong>{gridDetection.period}×</strong> — snap to original?
+              </p>
+            ) : (
+              <p>
+                Columns suggest <strong>{gridDetection.column?.period ?? '—'}×</strong>, rows
+                suggest <strong>{gridDetection.row?.period ?? '—'}×</strong> (unconfirmed).
+              </p>
+            )}
+            <button type="button" onClick={() => acceptGridDetection(gridDetection.period)}>
+              Use {gridDetection.period}×
+            </button>
+            <button type="button" onClick={() => setGridDetection(undefined)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {state.source?.isProxy && gridDetection !== undefined && gridDetection !== 'none' && (
+          <p className="field-note">
+            This source is larger than the preview proxy, so detection ran on a downscaled copy and
+            may be less reliable.
+          </p>
+        )}
       </section>
 
       <section className="panel">
