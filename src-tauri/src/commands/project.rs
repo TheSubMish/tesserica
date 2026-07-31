@@ -2,12 +2,23 @@
 //!
 //! ```text
 //! project.tess
-//! ├── manifest.json      format version, app version, sprite metadata
-//! ├── sprite.json        layers, frames, cels, palette — no pixels
-//! ├── cels/<celId>.png   raster cels, compressed and inspectable
-//! ├── sources/           original imported images (Phase 2)
-//! └── thumbnail.png      256×256 preview for file browsers
+//! ├── manifest.json         format version, app version, sprite metadata
+//! ├── sprite.json           layers, frames, cels, tilesets, palette — no pixels
+//! ├── cels/<celId>.png      raster cels, compressed and inspectable
+//! ├── cels/<celId>.bin      tilemap cels, raw packed tile ids (§4)
+//! ├── tiles/<tilesetId>/
+//! │   └── <tileEntryId>.png one tile's RGBA pixels, roadmap Phase 6
+//! ├── sources/              original imported images (Phase 2)
+//! └── thumbnail.png         256×256 preview for file browsers
 //! ```
+//!
+//! A tilemap layer's cel holds no RGBA pixels — its content is a flat array of
+//! packed tile ids (`src/model/tileGridBuffers.ts`) — so it is written raw
+//! rather than PNG-encoded, exactly as §7's own sketch already specified
+//! ("indexed/tilemap cels as raw"). Rust never resolves a grid against a
+//! tileset (it never composites layers at all — see `model::document::Layer`),
+//! so both the cel bytes and each tile's own PNG are opaque payloads here:
+//! staged, persisted, and handed back unchanged.
 //!
 //! ZIP-of-files rather than one binary blob because you can unzip it and look,
 //! PNG gives compression for free, and a reader can pull the thumbnail without
@@ -33,7 +44,7 @@ use tauri::State;
 use zip::write::SimpleFileOptions;
 
 use crate::error::AppError;
-use crate::model::document::{ColorMode, Sprite};
+use crate::model::document::{ColorMode, Layer, Sprite};
 use crate::staging::Staging;
 
 /// Bumped when the archive layout changes in a way older readers cannot handle.
@@ -43,6 +54,8 @@ pub const MANIFEST: &str = "manifest.json";
 pub const SPRITE: &str = "sprite.json";
 pub const THUMBNAIL: &str = "thumbnail.png";
 pub const CEL_DIR: &str = "cels/";
+/// Roadmap Phase 6 — one tile's RGBA pixels live at `tiles/<tilesetId>/<tileId>.png`.
+pub const TILE_DIR: &str = "tiles/";
 
 /// Longest edge of the thumbnail (`docs/03-data-model.md` §7).
 const THUMB_SIZE: u32 = 256;
@@ -59,10 +72,28 @@ pub struct Manifest {
 }
 
 /// One cel's pixels, referenced by a staging handle rather than inlined.
+///
+/// `width`/`height` are pixel dimensions for a raster cel, but for a tilemap
+/// cel (`docs/03-data-model.md` §4) the bytes are an opaque, already-encoded
+/// blob (packed tile ids) this side never validates against them — see
+/// `tilemap_layer_ids`, which is how `write_archive` decides `.png` vs `.bin`
+/// per cel rather than trusting a redundant flag on the upload itself.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CelUpload {
     pub cel_id: String,
+    pub stage_id: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// One tile's RGBA pixels (roadmap Phase 6), referenced by a staging handle —
+/// the tileset-level counterpart to `CelUpload`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TileUpload {
+    pub tileset_id: String,
+    pub tile_id: String,
     pub stage_id: u64,
     pub width: u32,
     pub height: u32,
@@ -76,6 +107,10 @@ pub struct SaveProjectRequest {
     pub cels: Vec<CelUpload>,
     /// Composited RGBA for the thumbnail, at document size.
     pub thumbnail: Option<CelUpload>,
+    /// Every tile entry's own pixels, across every tileset in `sprite`.
+    /// `#[serde(default)]` — a document with no tilesets sends none.
+    #[serde(default)]
+    pub tile_entries: Vec<TileUpload>,
     /// Path of the archive this document was opened from, if any. Unknown
     /// entries in it are carried over.
     #[serde(default)]
@@ -102,18 +137,55 @@ pub struct LoadedCel {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LoadedTile {
+    pub tileset_id: String,
+    pub tile_id: String,
+    pub stage_id: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LoadResult {
     pub path: String,
     pub format_version: u32,
     pub sprite: Sprite,
     pub cels: Vec<LoadedCel>,
+    pub tile_entries: Vec<LoadedTile>,
     pub warnings: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
 
-fn cel_path(cel_id: &str) -> String {
-    format!("{CEL_DIR}{cel_id}.png")
+/// A raster cel's PNG lives at `cels/<id>.png`; a tilemap cel's raw packed
+/// tile ids live at `cels/<id>.bin` instead (`docs/03-data-model.md` §7).
+fn cel_path(cel_id: &str, is_tilemap: bool) -> String {
+    if is_tilemap {
+        format!("{CEL_DIR}{cel_id}.bin")
+    } else {
+        format!("{CEL_DIR}{cel_id}.png")
+    }
+}
+
+fn tile_path(tileset_id: &str, tile_id: &str) -> String {
+    format!("{TILE_DIR}{tileset_id}/{tile_id}.png")
+}
+
+/// Every layer id in `sprite` that is a `Layer::Tilemap` — used to decide,
+/// per cel, whether its content is raw packed tile ids or RGBA pixels
+/// (`docs/03-data-model.md` §4). Rust never resolves a grid against a
+/// tileset itself, so this lookup is the full extent of what it needs to
+/// know about a tilemap layer to save/load it correctly.
+fn tilemap_layer_ids(sprite: &Sprite) -> HashSet<&str> {
+    sprite
+        .layers
+        .iter()
+        .filter_map(|l| match l {
+            Layer::Tilemap { base, .. } => Some(base.id.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn encode_rgba_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, AppError> {
@@ -173,15 +245,37 @@ fn write_archive(request: &SaveProjectRequest, staging: &Staging) -> Result<Save
     let deflated =
         SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
+    // Which of this document's layers are tilemap layers — decides `.png` vs
+    // `.bin` per cel below, purely from `sprite.layers`/`sprite.cels`, not a
+    // redundant flag on the upload itself.
+    let tilemap_layers = tilemap_layer_ids(&request.sprite);
+    let cel_layer_id: std::collections::HashMap<&str, &str> = request
+        .sprite
+        .cels
+        .iter()
+        .map(|c| (c.id.as_str(), c.layer_id.as_str()))
+        .collect();
+    let is_tilemap_cel = |cel_id: &str| -> bool {
+        cel_layer_id
+            .get(cel_id)
+            .is_some_and(|layer_id| tilemap_layers.contains(layer_id))
+    };
+
     let mut owned: HashSet<String> = HashSet::new();
     owned.insert(MANIFEST.to_string());
     owned.insert(SPRITE.to_string());
     owned.insert(THUMBNAIL.to_string());
     for cel in &request.cels {
-        owned.insert(cel_path(&cel.cel_id));
+        owned.insert(cel_path(&cel.cel_id, is_tilemap_cel(&cel.cel_id)));
+    }
+    for tile in &request.tile_entries {
+        owned.insert(tile_path(&tile.tileset_id, &tile.tile_id));
     }
 
-    // Anything a newer build wrote that this one does not understand.
+    // Anything a newer build wrote that this one does not understand. `cels/`
+    // and `tiles/` are both owned prefixes this build always rewrites in full
+    // from the current document, so a stale entry from a deleted cel/tile
+    // must not survive here either.
     let mut preserved = Vec::new();
     if let Some(from) = &request.preserve_from {
         if let Ok(file) = File::open(from) {
@@ -189,7 +283,11 @@ fn write_archive(request: &SaveProjectRequest, staging: &Staging) -> Result<Save
                 for i in 0..archive.len() {
                     let mut entry = archive.by_index(i)?;
                     let name = entry.name().to_string();
-                    if entry.is_dir() || owned.contains(&name) || name.starts_with(CEL_DIR) {
+                    if entry.is_dir()
+                        || owned.contains(&name)
+                        || name.starts_with(CEL_DIR)
+                        || name.starts_with(TILE_DIR)
+                    {
                         continue;
                     }
                     let mut bytes = Vec::new();
@@ -217,10 +315,24 @@ fn write_archive(request: &SaveProjectRequest, staging: &Staging) -> Result<Save
     zip.write_all(serde_json::to_string_pretty(&request.sprite)?.as_bytes())?;
 
     for cel in &request.cels {
-        let rgba = staging.get(cel.stage_id)?;
-        let png = encode_rgba_png(&rgba, cel.width, cel.height)?;
-        // PNG is already deflated; a second pass costs time and saves nothing.
-        zip.start_file(cel_path(&cel.cel_id), stored)?;
+        let bytes = staging.get(cel.stage_id)?;
+        if is_tilemap_cel(&cel.cel_id) {
+            // Raw packed tile ids — an opaque payload this side never
+            // decodes, so no PNG encode and no RGBA length check.
+            zip.start_file(cel_path(&cel.cel_id, true), deflated)?;
+            zip.write_all(&bytes)?;
+        } else {
+            let png = encode_rgba_png(&bytes, cel.width, cel.height)?;
+            // PNG is already deflated; a second pass costs time and saves nothing.
+            zip.start_file(cel_path(&cel.cel_id, false), stored)?;
+            zip.write_all(&png)?;
+        }
+    }
+
+    for tile in &request.tile_entries {
+        let rgba = staging.get(tile.stage_id)?;
+        let png = encode_rgba_png(&rgba, tile.width, tile.height)?;
+        zip.start_file(tile_path(&tile.tileset_id, &tile.tile_id), stored)?;
         zip.write_all(&png)?;
     }
 
@@ -277,17 +389,42 @@ fn read_archive(path: &str, staging: &Staging) -> Result<LoadResult, AppError> {
         ));
     }
 
+    let tilemap_layers = tilemap_layer_ids(&sprite);
+
     let mut cels = Vec::new();
     let mut warnings = Vec::new();
 
     for cel in &sprite.cels {
         // A linked cel (`docs/03-data-model.md` §2.2) shares another cel's
-        // pixels and never had its own `cels/<id>.png` written — nothing to
-        // load, and no warning either, since that is the expected shape.
+        // pixels and never had its own `cels/<id>.png`/`.bin` written —
+        // nothing to load, and no warning either, since that is the expected
+        // shape.
         if cel.linked_to.is_some() {
             continue;
         }
-        let name = cel_path(&cel.id);
+        let is_tilemap = tilemap_layers.contains(cel.layer_id.as_str());
+        let name = cel_path(&cel.id, is_tilemap);
+
+        if is_tilemap {
+            // Raw packed tile ids — read and stage verbatim, no image decode
+            // (`docs/03-data-model.md` §7's own "indexed/tilemap cels as raw").
+            let mut raw = Vec::new();
+            match archive.by_name(&name) {
+                Ok(mut entry) => entry.read_to_end(&mut raw)?,
+                Err(_) => {
+                    warnings.push(format!("missing {name}; layer opens empty"));
+                    continue;
+                }
+            };
+            cels.push(LoadedCel {
+                cel_id: cel.id.clone(),
+                stage_id: staging.put(raw),
+                width: cel.width,
+                height: cel.height,
+            });
+            continue;
+        }
+
         let mut png = Vec::new();
         match archive.by_name(&name) {
             Ok(mut entry) => entry.read_to_end(&mut png)?,
@@ -316,11 +453,46 @@ fn read_archive(path: &str, staging: &Staging) -> Result<LoadResult, AppError> {
         });
     }
 
+    let mut tile_entries = Vec::new();
+    for tileset in &sprite.tilesets {
+        for tile in &tileset.tiles {
+            let name = tile_path(&tileset.id, &tile.id);
+            let mut png = Vec::new();
+            match archive.by_name(&name) {
+                Ok(mut entry) => entry.read_to_end(&mut png)?,
+                Err(_) => {
+                    // A missing tile is recoverable the same way a missing
+                    // cel is: the tileset entry survives with no pixels
+                    // behind it rather than failing the whole document.
+                    warnings.push(format!("missing {name}; tile is blank"));
+                    continue;
+                }
+            };
+            let decoded =
+                image::load_from_memory_with_format(&png, image::ImageFormat::Png)?.to_rgba8();
+            let (w, h) = decoded.dimensions();
+            if w != tileset.tile_width || h != tileset.tile_height {
+                warnings.push(format!(
+                    "{name} is {w}x{h} but tileset {} says {}x{}",
+                    tileset.id, tileset.tile_width, tileset.tile_height
+                ));
+            }
+            tile_entries.push(LoadedTile {
+                tileset_id: tileset.id.clone(),
+                tile_id: tile.id.clone(),
+                stage_id: staging.put(decoded.into_raw()),
+                width: w,
+                height: h,
+            });
+        }
+    }
+
     Ok(LoadResult {
         path: path.to_string(),
         format_version: manifest.format_version,
         sprite,
         cels,
+        tile_entries,
         warnings,
     })
 }
@@ -333,6 +505,9 @@ pub async fn save_project(
     let result = write_archive(&request, &staging)?;
     for cel in &request.cels {
         staging.release(cel.stage_id);
+    }
+    for tile in &request.tile_entries {
+        staging.release(tile.stage_id);
     }
     if let Some(thumb) = &request.thumbnail {
         staging.release(thumb.stage_id);
@@ -424,6 +599,7 @@ mod tests {
                 width: 2,
                 height: 2,
             }),
+            tile_entries: vec![],
             preserve_from,
         };
         write_archive(&request, staging).unwrap();
@@ -510,6 +686,7 @@ mod tests {
                 width: 2,
                 height: 2,
             }),
+            tile_entries: vec![],
             preserve_from: None,
         };
         write_archive(&request, &staging).unwrap();
@@ -692,6 +869,7 @@ mod tests {
                 height: 2,
             }],
             thumbnail: None,
+            tile_entries: vec![],
             preserve_from: None,
         };
         write_archive(&request, &staging).unwrap();
@@ -731,5 +909,281 @@ mod tests {
             }
         }
         assert_eq!(seen.len(), 2);
+    }
+
+    // -- Roadmap Phase 6 "Tileset model, tilemap layers, rect grid" ----------
+    // A tileset's tile pixels are PNGs under `tiles/<tilesetId>/`; a tilemap
+    // layer's cel is raw packed tile ids under `cels/<id>.bin`, never a PNG.
+
+    use crate::model::document::{GridShape, GridSpec, Tileset};
+
+    fn tileset_and_tilemap_sprite() -> Sprite {
+        Sprite {
+            width: 4,
+            height: 4,
+            color_mode: ColorMode::Rgba,
+            layers: vec![Layer::Tilemap {
+                base: LayerBase {
+                    id: "tm1".into(),
+                    name: "Ground".into(),
+                    visible: true,
+                    locked: false,
+                    opacity: 1.0,
+                    blend_mode: BlendMode::Normal,
+                    parent_id: None,
+                    clipping_mask: false,
+                },
+                tileset_id: "ts1".into(),
+                grid: GridSpec {
+                    shape: GridShape::Rect,
+                    tile_width: 2,
+                    tile_height: 2,
+                    offset_x: 0,
+                    offset_y: 0,
+                },
+            }],
+            frames: vec![Frame {
+                id: "f1".into(),
+                duration_ms: 100,
+            }],
+            cels: vec![Cel {
+                id: "cel-tm".into(),
+                layer_id: "tm1".into(),
+                frame_id: "f1".into(),
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 4,
+                linked_to: None,
+            }],
+            palette: None,
+            tags: vec![],
+            tilesets: vec![Tileset {
+                id: "ts1".into(),
+                name: "Ground".into(),
+                tile_width: 2,
+                tile_height: 2,
+                tiles: vec![
+                    crate::model::document::TileEntry { id: "empty".into() },
+                    crate::model::document::TileEntry { id: "grass".into() },
+                ],
+            }],
+        }
+    }
+
+    /// A 2×2 grid (4 cells) of packed `u32` tile ids, little-endian bytes —
+    /// the same wire shape `Uint32Array.buffer` on the TS side produces.
+    fn packed_grid_bytes(ids: &[u32]) -> Vec<u8> {
+        ids.iter().flat_map(|id| id.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn writes_a_tilemap_cel_as_raw_bin_not_png_and_tile_entries_as_png() {
+        let path = temp_path("tilemap-layout.tess");
+        let staging = Staging::default();
+
+        let grid_id = staging.put(packed_grid_bytes(&[0, 1, 1, 0]));
+        let tile_id = staging.put(pixels()); // reuse the 2x2 RGBA fixture
+
+        let request = SaveProjectRequest {
+            path: path.to_string_lossy().into_owned(),
+            sprite: tileset_and_tilemap_sprite(),
+            cels: vec![CelUpload {
+                cel_id: "cel-tm".into(),
+                stage_id: grid_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            tile_entries: vec![TileUpload {
+                tileset_id: "ts1".into(),
+                tile_id: "grass".into(),
+                stage_id: tile_id,
+                width: 2,
+                height: 2,
+            }],
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+
+        let names = entry_names(&path);
+        assert!(names.contains(&"cels/cel-tm.bin".to_string()));
+        assert!(!names.contains(&"cels/cel-tm.png".to_string()));
+        assert!(names.contains(&"tiles/ts1/grass.png".to_string()));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn round_trips_a_tileset_and_a_populated_tilemap_layer() {
+        let path = temp_path("tilemap-roundtrip.tess");
+        let staging = Staging::default();
+
+        let grid_bytes = packed_grid_bytes(&[0, 1, 1, 0]);
+        let grid_id = staging.put(grid_bytes.clone());
+        let tile_pixels = pixels();
+        let tile_id = staging.put(tile_pixels.clone());
+        // Index 0, the mandatory empty tile, also has a real (transparent)
+        // buffer in the live app (`model/tilesets.ts::createTileset`) — upload
+        // it too so this round trip has no missing-tile warning.
+        let empty_id = staging.put(vec![0u8; 2 * 2 * 4]);
+
+        let request = SaveProjectRequest {
+            path: path.to_string_lossy().into_owned(),
+            sprite: tileset_and_tilemap_sprite(),
+            cels: vec![CelUpload {
+                cel_id: "cel-tm".into(),
+                stage_id: grid_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            tile_entries: vec![
+                TileUpload {
+                    tileset_id: "ts1".into(),
+                    tile_id: "empty".into(),
+                    stage_id: empty_id,
+                    width: 2,
+                    height: 2,
+                },
+                TileUpload {
+                    tileset_id: "ts1".into(),
+                    tile_id: "grass".into(),
+                    stage_id: tile_id,
+                    width: 2,
+                    height: 2,
+                },
+            ],
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+
+        let loaded = read_archive(&path.to_string_lossy(), &staging).unwrap();
+        assert!(loaded.warnings.is_empty());
+
+        // The sprite's own tileset metadata round-trips.
+        assert_eq!(loaded.sprite.tilesets.len(), 1);
+        assert_eq!(loaded.sprite.tilesets[0].tiles.len(), 2);
+
+        // The tilemap cel's grid bytes round-trip byte-for-byte — raw, not
+        // reinterpreted as RGBA anywhere on this side.
+        assert_eq!(loaded.cels.len(), 1);
+        assert_eq!(loaded.cels[0].cel_id, "cel-tm");
+        let loaded_grid = staging.take(loaded.cels[0].stage_id).unwrap();
+        assert_eq!(loaded_grid, grid_bytes);
+
+        // Both tiles' own pixels round-trip too (through PNG, so exact for
+        // this fully-opaque-or-transparent-preserving fixture).
+        assert_eq!(loaded.tile_entries.len(), 2);
+        let grass = loaded
+            .tile_entries
+            .iter()
+            .find(|t| t.tile_id == "grass")
+            .expect("grass tile present");
+        assert_eq!(grass.tileset_id, "ts1");
+        let loaded_tile = staging.take(grass.stage_id).unwrap();
+        assert_eq!(loaded_tile, tile_pixels);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_missing_tile_png_warns_rather_than_failing_the_whole_document() {
+        let path = temp_path("missing-tile.tess");
+        let staging = Staging::default();
+
+        let grid_id = staging.put(packed_grid_bytes(&[0, 0, 0, 0]));
+        let request = SaveProjectRequest {
+            path: path.to_string_lossy().into_owned(),
+            sprite: tileset_and_tilemap_sprite(),
+            cels: vec![CelUpload {
+                cel_id: "cel-tm".into(),
+                stage_id: grid_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            // Deliberately omit the "grass" tile's own upload — only "empty"
+            // would be missing anyway, but neither tile is uploaded here.
+            tile_entries: vec![],
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+
+        let loaded = read_archive(&path.to_string_lossy(), &staging).unwrap();
+        assert!(loaded.tile_entries.is_empty());
+        assert_eq!(loaded.warnings.len(), 2); // both "empty" and "grass" missing
+        assert!(loaded
+            .warnings
+            .iter()
+            .any(|w| w.contains("tiles/ts1/empty.png")));
+        assert!(loaded
+            .warnings
+            .iter()
+            .any(|w| w.contains("tiles/ts1/grass.png")));
+        // The tileset metadata itself still loads intact.
+        assert_eq!(loaded.sprite.tilesets[0].tiles.len(), 2);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn stale_tile_and_cel_entries_are_not_preserved_across_a_resave() {
+        // `cels/`/`tiles/` are owned prefixes this build always rewrites in
+        // full — a tile or cel dropped from the document must not survive a
+        // resave just because it was in the archive being opened from.
+        let original = temp_path("tile-preserve-src.tess");
+        let staging = Staging::default();
+
+        let grid_id = staging.put(packed_grid_bytes(&[0, 1, 1, 0]));
+        let tile_id = staging.put(pixels());
+        let request = SaveProjectRequest {
+            path: original.to_string_lossy().into_owned(),
+            sprite: tileset_and_tilemap_sprite(),
+            cels: vec![CelUpload {
+                cel_id: "cel-tm".into(),
+                stage_id: grid_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            tile_entries: vec![TileUpload {
+                tileset_id: "ts1".into(),
+                tile_id: "grass".into(),
+                stage_id: tile_id,
+                width: 2,
+                height: 2,
+            }],
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+        assert!(entry_names(&original).contains(&"tiles/ts1/grass.png".to_string()));
+
+        // Resave with the tileset (and its tile) removed entirely.
+        let resaved = temp_path("tile-preserve-dst.tess");
+        let mut without_tileset = sprite();
+        without_tileset.tilesets = vec![];
+        let stage_id = staging.put(pixels());
+        let request2 = SaveProjectRequest {
+            path: resaved.to_string_lossy().into_owned(),
+            sprite: without_tileset,
+            cels: vec![CelUpload {
+                cel_id: "c1".into(),
+                stage_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            tile_entries: vec![],
+            preserve_from: Some(original.to_string_lossy().into_owned()),
+        };
+        write_archive(&request2, &staging).unwrap();
+
+        let names = entry_names(&resaved);
+        assert!(!names.contains(&"tiles/ts1/grass.png".to_string()));
+        assert!(!names.contains(&"cels/cel-tm.bin".to_string()));
+
+        std::fs::remove_file(&original).ok();
+        std::fs::remove_file(&resaved).ok();
     }
 }
