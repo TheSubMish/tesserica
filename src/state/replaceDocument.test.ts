@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { getBuffer, getPixel } from '../model/pixelBuffers';
+import { getGrid, getGridCell } from '../model/tileGridBuffers';
+import { getTileBuffer } from '../model/tileBuffers';
+import { packTileId } from '../model/tileIds';
 import type { Sprite } from '../model/types';
 import { useDocumentStore } from './documentStore';
 
@@ -132,5 +135,121 @@ describe('replaceDocument', () => {
     // The link resolves through `c1`, which the renderer/tools do via
     // `celBufferId` — asserted here at the buffer layer this store owns.
     expect(getPixel(getBuffer('c1')!, 4, 4, 0, 0)).toEqual([9, 8, 7, 255]);
+  });
+
+  describe('tilesets and tilemap-layer grids (roadmap Phase 6, `.tess` round trip)', () => {
+    /**
+     * Exactly the shape `app/project.ts::openProject` hands `replaceDocument`
+     * after a real `load_project` IPC round trip: a tilemap layer's cel, a
+     * tileset with two tiles, `grids`/`tileBuffers` maps keyed the same way
+     * `pixels` already is.
+     */
+    function loadedWithTilemap(): Sprite {
+      return {
+        width: 4,
+        height: 4,
+        layers: [
+          {
+            id: 'tm1',
+            kind: 'tilemap',
+            name: 'Ground',
+            visible: true,
+            locked: false,
+            opacity: 1,
+            blendMode: 'normal',
+            parentId: null,
+            clippingMask: false,
+            tilesetId: 'ts1',
+            grid: { shape: 'rect', tileWidth: 2, tileHeight: 2, offsetX: 0, offsetY: 0 },
+          },
+        ],
+        frames: [{ id: 'f1', durationMs: 100 }],
+        cels: [{ id: 'cel-tm', layerId: 'tm1', frameId: 'f1', x: 0, y: 0, width: 4, height: 4 }],
+        tilesets: [
+          {
+            id: 'ts1',
+            name: 'Ground',
+            tileWidth: 2,
+            tileHeight: 2,
+            tiles: [{ id: 'empty' }, { id: 'grass' }],
+          },
+        ],
+      } as unknown as Sprite;
+    }
+
+    it('installs the tileset metadata, the tile pixels, and the grid content', () => {
+      const grassPixels = new Uint8ClampedArray(2 * 2 * 4).fill(77);
+      const tileBuffers = new Map<string, Uint8ClampedArray>([['grass', grassPixels]]);
+      const grid = new Uint32Array([0, 1, 1, 0]); // 2x2 grid of tile ids
+      const grids = new Map<string, Uint32Array>([['cel-tm', grid]]);
+
+      doc().replaceDocument(loadedWithTilemap(), new Map(), grids, tileBuffers);
+
+      expect(doc().sprite.tilesets).toHaveLength(1);
+      expect(doc().sprite.tilesets[0].tiles).toHaveLength(2);
+      expect(getTileBuffer('grass')).toEqual(grassPixels);
+
+      const loadedGrid = getGrid('cel-tm')!;
+      expect(loadedGrid).toBeDefined();
+      expect(getGridCell(loadedGrid, 2, 2, 1, 0)).toBe(1);
+      expect(getGridCell(loadedGrid, 2, 2, 0, 0)).toBe(0);
+    });
+
+    it('allocates a real (transparent) buffer for a tile whose pixels are missing', () => {
+      // Mirrors the missing-cel-PNG fallback: a missing tile PNG warns on the
+      // Rust side and the tile opens blank rather than the whole document
+      // failing to load.
+      doc().replaceDocument(loadedWithTilemap(), new Map(), new Map(), new Map());
+      expect(getTileBuffer('empty')).toBeDefined();
+      expect(getTileBuffer('empty')!.every((v) => v === 0)).toBe(true);
+      expect(getTileBuffer('grass')).toBeDefined();
+      expect(getTileBuffer('grass')!.every((v) => v === 0)).toBe(true);
+    });
+
+    it('allocates an empty grid (all tile id 0) for a tilemap cel whose grid is missing', () => {
+      doc().replaceDocument(loadedWithTilemap(), new Map(), new Map(), new Map());
+      const grid = getGrid('cel-tm')!;
+      expect(grid).toBeDefined();
+      expect(grid.length).toBe(4); // a 4x4 cel / 2x2 tiles = 2x2 grid
+      expect([...grid]).toEqual([0, 0, 0, 0]);
+    });
+
+    it('rejects a grid whose length does not match the cel’s tile-grid dimensions', () => {
+      const wrongSize = new Map<string, Uint32Array>([['cel-tm', new Uint32Array(1)]]);
+      doc().replaceDocument(loadedWithTilemap(), new Map(), wrongSize, new Map());
+      expect(getGrid('cel-tm')).toHaveLength(4);
+    });
+
+    it('defaults tilesets to an empty array when the loaded sprite has none', () => {
+      doc().replaceDocument(loaded(), new Map());
+      expect(doc().sprite.tilesets).toEqual([]);
+    });
+
+    it('creating a tilemap layer + painting a cell survives a full save/load round trip through replaceDocument', () => {
+      // Not a real IPC call, but exercises the exact same seam
+      // `app/project.ts` marshals through: build the document with real
+      // commands, snapshot its buffers the way `saveCurrentProject` does,
+      // then feed them back through `replaceDocument` the way `openProject`
+      // does, and confirm the result is indistinguishable from the original.
+      doc().newDocument(4, 4);
+
+      const grid = new Uint32Array([0, 0, 0, packTileId(1, { flipH: true })]);
+      const tileBuffers = new Map<string, Uint8ClampedArray>([
+        ['empty', new Uint8ClampedArray(16)],
+        ['grass', new Uint8ClampedArray(16).fill(9)],
+      ]);
+      const sprite = {
+        ...loadedWithTilemap(),
+        width: 4,
+        height: 4,
+      };
+      const grids = new Map<string, Uint32Array>([['cel-tm', grid]]);
+
+      doc().replaceDocument(sprite, new Map(), grids, tileBuffers);
+
+      const roundTrippedGrid = getGrid('cel-tm')!;
+      expect(getGridCell(roundTrippedGrid, 2, 2, 1, 1)).toBe(packTileId(1, { flipH: true }));
+      expect(getTileBuffer('grass')).toEqual(new Uint8ClampedArray(16).fill(9));
+    });
   });
 });

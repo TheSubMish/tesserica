@@ -140,8 +140,26 @@ export async function exportGif(request: {
 // `.tess` (docs/03-data-model.md §7)
 // ---------------------------------------------------------------------------
 
+/**
+ * One cel's raw bytes, referenced by a staging handle rather than inlined.
+ *
+ * `width`/`height` are pixel dimensions for a raster/conversion cel. For a
+ * tilemap cel (`docs/03-data-model.md` §4, roadmap Phase 6) the staged bytes
+ * are a raw `Uint32Array` (packed tile ids, `model/tileGridBuffers.ts`), not
+ * RGBA — Rust decides which per cel from `sprite.layers` alone (`Layer.kind
+ * === 'tilemap'`), so nothing here has to say which kind it is.
+ */
 export interface CelUpload {
   celId: string;
+  stageId: StageId;
+  width: number;
+  height: number;
+}
+
+/** One tile entry's own RGBA pixels — the tileset-level sibling of `CelUpload`. */
+export interface TileUpload {
+  tilesetId: string;
+  tileId: string;
   stageId: StageId;
   width: number;
   height: number;
@@ -161,6 +179,14 @@ export interface LoadedCel {
   height: number;
 }
 
+export interface LoadedTile {
+  tilesetId: string;
+  tileId: string;
+  stageId: StageId;
+  width: number;
+  height: number;
+}
+
 export interface LoadResult {
   path: string;
   formatVersion: number;
@@ -172,8 +198,10 @@ export interface LoadResult {
     layers: unknown[];
     frames: unknown[];
     cels: unknown[];
+    tilesets?: unknown[];
   };
   cels: LoadedCel[];
+  tileEntries: LoadedTile[];
   warnings: string[];
 }
 
@@ -182,6 +210,8 @@ export async function saveProject(request: {
   sprite: unknown;
   cels: CelUpload[];
   thumbnail?: CelUpload;
+  /** Every tile entry's own pixels, across every tileset in `sprite`. */
+  tileEntries?: TileUpload[];
   /**
    * Path this document was opened from. Rust copies across every entry it does
    * not itself write, so an older build cannot silently delete what a newer

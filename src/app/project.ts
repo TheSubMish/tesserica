@@ -15,7 +15,9 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { flattenSprite } from '../canvas/flatten';
 import { invalidateRenderCache } from '../canvas/renderer';
 import { getBuffer } from '../model/pixelBuffers';
-import type { Sprite } from '../model/types';
+import { getGrid } from '../model/tileGridBuffers';
+import { getTileBuffer } from '../model/tileBuffers';
+import { celBufferId, type Sprite } from '../model/types';
 import {
   fetchStaged,
   hasBackend,
@@ -24,6 +26,7 @@ import {
   saveProject,
   stageBytes,
   type CelUpload,
+  type TileUpload,
 } from '../ipc/commands';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
@@ -38,6 +41,16 @@ export class NoBackendError extends Error {
 
 function asBytes(pixels: Uint8ClampedArray): Uint8Array {
   return new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
+}
+
+/**
+ * A packed-tile-id grid's raw bytes — the `.tess` archive stores a tilemap
+ * cel's content as raw bytes (`docs/03-data-model.md` §7's own "indexed/
+ * tilemap cels as raw"), never RGBA, so this is `asBytes`'s `Uint32Array`
+ * counterpart.
+ */
+function gridAsBytes(grid: Uint32Array): Uint8Array {
+  return new Uint8Array(grid.buffer, grid.byteOffset, grid.byteLength);
 }
 
 /**
@@ -69,11 +82,42 @@ export async function saveCurrentProject(options: { saveAs: boolean }): Promise<
       // needless duplicate at best, and Rust never has to know: `linkedTo`
       // round-trips through `sprite.json` on its own.
       if (cel.linkedTo) continue;
+
+      const layer = doc.sprite.layers.find((l) => l.id === cel.layerId);
+      if (layer?.kind === 'tilemap') {
+        // Roadmap Phase 6: a tilemap cel's content is a grid of packed tile
+        // ids, not RGBA — staged and written raw (`commands::project` writes
+        // it to `cels/<id>.bin`, never through `encode_png`).
+        const grid = getGrid(celBufferId(cel));
+        if (!grid) continue;
+        const stageId = await stageBytes(gridAsBytes(grid));
+        staged.push(stageId);
+        cels.push({ celId: cel.id, stageId, width: cel.width, height: cel.height });
+        continue;
+      }
+
       const buf = getBuffer(cel.id);
       if (!buf) continue;
       const stageId = await stageBytes(asBytes(buf));
       staged.push(stageId);
       cels.push({ celId: cel.id, stageId, width: cel.width, height: cel.height });
+    }
+
+    const tileEntries: TileUpload[] = [];
+    for (const tileset of doc.sprite.tilesets) {
+      for (const entry of tileset.tiles) {
+        const buf = getTileBuffer(entry.id);
+        if (!buf) continue;
+        const stageId = await stageBytes(asBytes(buf));
+        staged.push(stageId);
+        tileEntries.push({
+          tilesetId: tileset.id,
+          tileId: entry.id,
+          stageId,
+          width: tileset.tileWidth,
+          height: tileset.tileHeight,
+        });
+      }
     }
 
     const flat = flattenSprite(doc.sprite, doc.activeFrameId);
@@ -90,6 +134,7 @@ export async function saveCurrentProject(options: { saveAs: boolean }): Promise<
         width: doc.sprite.width,
         height: doc.sprite.height,
       },
+      tileEntries,
       // Only meaningful when re-saving something we opened.
       preserveFrom: existing,
     });
@@ -118,15 +163,48 @@ export async function openProject(): Promise<{ path: string; warnings: string[] 
 
   const result = await loadProject(picked);
 
+  // Roadmap Phase 6: a tilemap layer's cel arrives as the same shape as a
+  // raster cel's staged bytes (`ipc/commands.ts::LoadedCel`) — which map it
+  // belongs in is decided the same way the save path decided how to write
+  // it, by looking up the cel's owning layer.
+  const tilemapLayerIds = new Set(
+    (result.sprite.layers as Array<{ id: string; kind: string }>)
+      .filter((l) => l.kind === 'tilemap')
+      .map((l) => l.id),
+  );
+  const celLayerId = new Map(
+    (result.sprite.cels as Array<{ id: string; layerId: string }>).map((c) => [c.id, c.layerId]),
+  );
+
   const pixels = new Map<string, Uint8ClampedArray>();
+  const grids = new Map<string, Uint32Array>();
   for (const cel of result.cels) {
     const bytes = await fetchStaged(cel.stageId);
-    pixels.set(cel.celId, new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+    const layerId = celLayerId.get(cel.celId);
+    if (layerId && tilemapLayerIds.has(layerId)) {
+      grids.set(cel.celId, new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4));
+    } else {
+      pixels.set(
+        cel.celId,
+        new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+      );
+    }
+  }
+
+  const tileBuffers = new Map<string, Uint8ClampedArray>();
+  for (const tile of result.tileEntries) {
+    const bytes = await fetchStaged(tile.stageId);
+    tileBuffers.set(
+      tile.tileId,
+      new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+    );
   }
 
   // Rust mirrors the TS types exactly (docs/03 §8), so this is the same shape
   // the store already holds — no translation layer.
-  useDocumentStore.getState().replaceDocument(result.sprite as unknown as Sprite, pixels);
+  useDocumentStore
+    .getState()
+    .replaceDocument(result.sprite as unknown as Sprite, pixels, grids, tileBuffers);
   useDocumentStore.getState().setProjectPath(result.path);
 
   // The new document has no shared history with the old one, and every cached
