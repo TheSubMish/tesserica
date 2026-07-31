@@ -1311,7 +1311,92 @@ Ordered by value, not commitment:
       `cargo test` (226 passed, 5 ignored — pre-existing, unrelated), `cargo clippy
       --all-targets -- -D warnings` (clean), `npm run build` (clean), and `npm run
       test:golden` (17 passed — no pipeline files touched, a sanity check) all pass.
-- [ ] Batch conversion + CLI headless mode (W5)
+- [x] Batch conversion + CLI headless mode (W5) — both halves genuinely work
+      end to end. **Batch conversion, Rust-side**
+      (`src-tauri/src/commands/batch_convert.rs`): `batch_convert` reuses
+      `pipeline::convert::convert` and `ConvertSettings` completely unchanged
+      — no parallel settings type — enumerating every regular file directly
+      inside a folder (non-recursive; unfiltered by extension, so a stray
+      non-image file surfaces as a per-file `FileFailed` rather than aborting
+      the batch) and converting each in parallel via `rayon` (`.par_iter()`
+      over files) — this crate's first real dependency on it, since the
+      pipeline's own per-pixel loops remain single-threaded per
+      `07-tech-stack.md`'s still-aspirational entry. Pixel size drives
+      `targetWidth`/`targetHeight` **per file** (each source has its own
+      dimensions, unlike the fixed pair a single `ConvertSettings` normally
+      carries), overwritten after cloning the caller's settings so every other
+      stage — palette, dither, adjustments, background removal, cleanup —
+      applies identically across the batch. Progress streams back over a
+      Tauri **Channel** (`docs/02-architecture.md` §6.2, D13) as `started` /
+      `fileStarted` / `fileSucceeded` / `fileFailed` / `finished` events, never
+      accumulated into the command's own return value. **Cancellable**:
+      `BatchJobs` is a small `AtomicBool`-per-job registry (mirrors
+      `commands::source::Sources`' handle-table shape); the rayon pass runs
+      inside `spawn_blocking` so `cancel_batch_convert(jobId)` — a separate
+      command — is always reachable while a batch is running, and each
+      per-file closure checks the flag before starting (already-converting
+      files still finish; no new ones start). A genuine per-variant wire-shape
+      bug was caught before shipping: an enum-level `#[serde(rename_all =
+      "camelCase")]` only renames the variant tags themselves, not a struct
+      variant's own fields, so `jobId`/`outputPath`/`colorsUsed` would have
+      reached the frontend as snake_case despite `"kind"` reading camelCase —
+      found by asserting the actual serialized bytes rather than trusting the
+      attribute, fixed by repeating `rename_all` on every variant, pinned down
+      by a regression test. **Frontend** (`src/app/BatchConvertDialog.tsx`,
+      wired into the File menu alongside Export…): pick a source folder,
+      configure the same four primary controls Convert mode's own panel
+      exposes (pixel size, palette, dither, strength — `DITHER_LABELS` moved
+      out of `ConvertPanel.tsx` into `convert/ditherLabels.ts` so both share
+      one dropdown definition instead of two) plus export scale, optionally
+      "Use settings from…" an existing conversion layer in the open document
+      (carries its whole `ConvertSettings` in, including the parts with no
+      dedicated control, while leaving the four primaries still editable
+      afterward), Run with a live per-file progress list streamed from the
+      Channel, and Cancel mid-run. Deliberately **not** wired to the live
+      `useConvertStore` singleton — this dialog has its own local state so it
+      cannot fight Convert mode's own interactive session over one global's
+      fields. **CLI headless mode** (`src-tauri/src/cli.rs`): `tesserica
+      --batch-convert <folder> --out <folder> [--settings <path.json>]
+      [--pixel-size <n>] [--scale <1|2|4|8>]` skips the GUI entirely (checked
+      in `run()` before the `tauri::Builder` is ever touched) and exits with a
+      real process code (`0` full success, `1` at least one file failed, `2`
+      usage/setup error) — hand-rolled argument parsing, no new dependency,
+      the same "this binary can do something other than open a window" shape
+      the existing `TESSERICA_BENCH` env-var mode already established, real
+      CLI arguments this time since a headless batch job has real inputs (a
+      folder, a settings file) an env var cannot carry cleanly. `--settings`
+      accepts the same camelCase `ConvertSettings` JSON the interactive app
+      sends over IPC; omitted, it falls back to an auto-palette default.
+      **Verified for real, not just unit-tested**: `cargo test` (240 passed, 5
+      ignored, all pre-existing/unrelated — including 10 new
+      `commands::batch_convert` tests and 6 new `cli` tests covering mixed
+      valid/invalid folders, cancellation actually halting further files
+      rather than accepting an ignored flag, per-file target-dimension
+      override, and a real end-to-end CLI run) and `cargo clippy --all-targets
+      -D warnings` both clean; a real debug binary was built and invoked as a
+      genuine **subprocess** (not through `cargo test`) over a folder mixing
+      two real PNGs and one non-image file — correct per-file stdout, exit
+      code `1` (the one real failure), and the two successful output PNGs
+      independently decoded back with exactly the expected pixels and
+      dimensions at the requested pixel-size/scale combination. The frontend
+      dialog was driven live against the real Vite dev bundle over Chrome
+      DevTools Protocol (this container's Tauri WebView unreachable, as every
+      earlier phase's own note here records; no `__TAURI_INTERNALS__` outside
+      the real shell to exercise the actual IPC leg, which the Rust tests and
+      the CLI subprocess above cover instead): confirmed "Batch Convert…"
+      appears in the real File menu, the dialog opens with every documented
+      field, folder-picker buttons are reachable, Run stays disabled until
+      both folders are chosen, and the dialog unmounts cleanly on Close. That
+      pass caught and fixed one real bug: `pickSourceFolder`/`pickOutFolder`
+      called `open()` with no `try`/`catch`, so outside the Tauri shell (where
+      `open()` genuinely throws rather than resolving `null`) clicking
+      "Choose…" produced an **uncaught exception** instead of the honest
+      in-dialog error every other failure path here already shows; fixed,
+      covered by a new regression test, and re-verified live afterward with no
+      more uncaught exception and the error text rendering in the dialog.
+      `npm run test` (810 passed), `npx tsc --noEmit` (clean), `npm run lint`
+      (clean), `npm run build` (clean), and `npm run test:golden` (17 passed —
+      no pipeline files touched, a sanity check) all pass.
 - [ ] Pixel-art-aware rotate/scale — rotxel, cleanEdge (`04` §7)
 - [ ] **Indexed color mode + live palette swapping** (deferred from v1 by D9 — touches
       every tool, blend mode and effect, so it is a real chunk of work, not a flag)
