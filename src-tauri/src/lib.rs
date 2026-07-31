@@ -11,6 +11,10 @@
 /// benchmark commands and no `bench://` protocol.
 #[cfg(debug_assertions)]
 pub mod bench;
+/// CLI headless mode (`docs/08-roadmap.md` Phase 7 "Batch conversion + CLI
+/// headless mode"). Parsed and dispatched before the GUI ever opens a window
+/// — see `run()` below.
+pub mod cli;
 pub mod commands;
 pub mod error;
 pub mod model;
@@ -42,6 +46,8 @@ macro_rules! all_commands {
             commands::source::release_source,
             commands::source::source_proxy,
             commands::source::export_conversion,
+            commands::batch_convert::batch_convert,
+            commands::batch_convert::cancel_batch_convert,
             commands::segment::segmentation_model_info,
             commands::segment::segmentation_model_status,
             commands::segment::save_downloaded_segmentation_model,
@@ -76,6 +82,8 @@ macro_rules! all_commands {
             commands::source::release_source,
             commands::source::source_proxy,
             commands::source::export_conversion,
+            commands::batch_convert::batch_convert,
+            commands::batch_convert::cancel_batch_convert,
             commands::segment::segmentation_model_info,
             commands::segment::segmentation_model_status,
             commands::segment::save_downloaded_segmentation_model,
@@ -88,6 +96,18 @@ macro_rules! all_commands {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A real CLI invocation (`tesserica --batch-convert <folder> --out
+    // <folder> --settings <path> [--scale N]`) skips the GUI entirely and
+    // exits with a real process exit code — the natural companion to batch
+    // conversion once its pipeline exists (`docs/06-workflows.md` W5), and the
+    // same "this binary can do something other than open a window" shape the
+    // existing `TESSERICA_BENCH` env-var mode already established, just via
+    // real argument parsing rather than an env var since a headless batch job
+    // has real inputs (folders, a settings file) an env var cannot carry.
+    if let Some(args) = cli::CliArgs::parse(std::env::args().skip(1)) {
+        std::process::exit(cli::run_headless(args));
+    }
+
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
 
     // Transport C in the Q7 benchmark: a binary body straight off the WebView's
@@ -108,6 +128,9 @@ pub fn run() {
         // Source images are opened by Rust and stay in Rust; the frontend holds
         // only a `SourceId` (`docs/02-architecture.md` §6.2).
         .manage(commands::source::Sources::default())
+        // Batch conversion's cooperative-cancellation registry (`docs/08-roadmap.md`
+        // Phase 7 "Batch conversion + CLI headless mode").
+        .manage(commands::batch_convert::BatchJobs::default())
         .invoke_handler(all_commands!())
         .run(tauri::generate_context!())
         .expect("error while running Tesserica");

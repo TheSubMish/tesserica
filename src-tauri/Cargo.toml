@@ -101,6 +101,15 @@ tar = "0.4.46"
 # file's own palette is small enough to do by hand in `commands::ase_import`.
 aseprite-io = { version = "0.2.0", default-features = false }
 
+# Batch conversion across files (`docs/08-roadmap.md` Phase 7 "Batch conversion
+# + CLI headless mode", `docs/06-workflows.md` W5: "runs entirely in Rust,
+# `rayon` across files"). The pipeline's own per-pixel loops still run
+# single-threaded (`07-tech-stack.md` §3's long-standing "parallel pixel
+# loops" entry remains aspirational there); this is rayon's first real use,
+# parallelizing one whole-image `convert()` call per file rather than pixels
+# within one call.
+rayon = "1.12.0"
+
 [profile.release]
 codegen-units = 1
 lto = true
