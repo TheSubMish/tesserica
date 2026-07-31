@@ -92,17 +92,19 @@ pub struct BatchConvertRequest {
     pub scale: u32,
 }
 
+// `rename_all` at the enum level only renames the variant tags themselves
+// (`Started` -> `"started"`); it does not cascade into a struct variant's own
+// fields, so each variant repeats `rename_all = "camelCase"` for its fields —
+// confirmed by round-tripping the wire shape in `tests::event_fields_are_camel_case_on_the_wire`
+// below rather than assumed.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BatchConvertEvent {
-    Started {
-        job_id: u64,
-        total: usize,
-    },
-    FileStarted {
-        index: usize,
-        file: String,
-    },
+    #[serde(rename_all = "camelCase")]
+    Started { job_id: u64, total: usize },
+    #[serde(rename_all = "camelCase")]
+    FileStarted { index: usize, file: String },
+    #[serde(rename_all = "camelCase")]
     FileSucceeded {
         index: usize,
         file: String,
@@ -111,11 +113,13 @@ pub enum BatchConvertEvent {
         height: u32,
         colors_used: u32,
     },
+    #[serde(rename_all = "camelCase")]
     FileFailed {
         index: usize,
         file: String,
         error: String,
     },
+    #[serde(rename_all = "camelCase")]
     Finished {
         succeeded: usize,
         failed: usize,
@@ -374,6 +378,38 @@ mod tests {
     }
 
     #[test]
+    fn request_deserializes_the_frontends_camelcase_wire_shape() {
+        let json = r#"{
+            "folder": "/tmp/in",
+            "outFolder": "/tmp/out",
+            "pixelSize": 8,
+            "settings": {
+                "fitToSubject": false,
+                "brightness": 0,
+                "contrast": 0,
+                "saturation": 0,
+                "hueShift": 0,
+                "targetWidth": 1,
+                "targetHeight": 1,
+                "downscaleMode": "box",
+                "palette": { "kind": "auto", "maxColors": 16 },
+                "dither": "none",
+                "ditherStrength": 1,
+                "colorSpace": "oklab",
+                "despeckle": 0,
+                "alphaThreshold": 128,
+                "preserveAlpha": false
+            },
+            "scale": 2
+        }"#;
+        let request: BatchConvertRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.folder, "/tmp/in");
+        assert_eq!(request.out_folder, "/tmp/out");
+        assert_eq!(request.pixel_size, 8.0);
+        assert_eq!(request.scale, 2);
+    }
+
+    #[test]
     fn enumerate_files_lists_regular_files_only_and_sorted() {
         let dir = temp_dir("enumerate");
         std::fs::write(dir.join("b.png"), b"x").unwrap();
@@ -510,5 +546,45 @@ mod tests {
 
         jobs.finish(id);
         assert!(jobs.flags.lock().unwrap().get(&id).is_none());
+    }
+
+    /// `rename_all` at the enum level only renames the variant tags
+    /// themselves; without a per-variant `rename_all` too, `job_id` etc. would
+    /// serialize as snake_case even though `"kind"` reads `"started"` —
+    /// exactly the kind of quiet mismatch the frontend would only discover at
+    /// runtime. Asserted directly against the real wire bytes, not inferred.
+    #[test]
+    fn event_fields_are_camel_case_on_the_wire() {
+        let started = serde_json::to_string(&BatchConvertEvent::Started {
+            job_id: 1,
+            total: 2,
+        })
+        .unwrap();
+        assert_eq!(started, r#"{"kind":"started","jobId":1,"total":2}"#);
+
+        let succeeded = serde_json::to_string(&BatchConvertEvent::FileSucceeded {
+            index: 0,
+            file: "a.png".into(),
+            output_path: "/tmp/a.png".into(),
+            width: 1,
+            height: 1,
+            colors_used: 1,
+        })
+        .unwrap();
+        assert_eq!(
+            succeeded,
+            r#"{"kind":"fileSucceeded","index":0,"file":"a.png","outputPath":"/tmp/a.png","width":1,"height":1,"colorsUsed":1}"#
+        );
+
+        let finished = serde_json::to_string(&BatchConvertEvent::Finished {
+            succeeded: 3,
+            failed: 1,
+            cancelled: false,
+        })
+        .unwrap();
+        assert_eq!(
+            finished,
+            r#"{"kind":"finished","succeeded":3,"failed":1,"cancelled":false}"#
+        );
     }
 }
