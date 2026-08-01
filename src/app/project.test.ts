@@ -9,29 +9,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const openMock = vi.fn();
+const saveMock = vi.fn();
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: (...args: unknown[]) => openMock(...args),
-  save: vi.fn(),
+  save: (...args: unknown[]) => saveMock(...args),
 }));
 
 const loadProjectMock = vi.fn();
 const importAseMock = vi.fn();
 const fetchStagedMock = vi.fn();
+const stageBytesMock = vi.fn();
+const saveProjectMock = vi.fn();
+const releaseStagedMock = vi.fn();
 vi.mock('../ipc/commands', () => ({
   hasBackend: () => true,
   loadProject: (...args: unknown[]) => loadProjectMock(...args),
   importAse: (...args: unknown[]) => importAseMock(...args),
   fetchStaged: (...args: unknown[]) => fetchStagedMock(...args),
-  releaseStaged: vi.fn(),
-  stageBytes: vi.fn(),
-  saveProject: vi.fn(),
+  releaseStaged: (...args: unknown[]) => releaseStagedMock(...args),
+  stageBytes: (...args: unknown[]) => stageBytesMock(...args),
+  saveProject: (...args: unknown[]) => saveProjectMock(...args),
 }));
 
-import { getBuffer } from '../model/pixelBuffers';
+import { getBuffer, setPixel } from '../model/pixelBuffers';
 import { getIndexBuffer } from '../model/indexBuffers';
+import { convertSpriteToIndexed } from '../history/colorModeCommands';
+import type { Palette } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
-import { importAseFile, openProject } from './project';
+import { importAseFile, openProject, saveCurrentProject } from './project';
 
 function minimalSprite() {
   return {
@@ -169,5 +175,90 @@ describe('openProject — indexed color mode (docs/08-roadmap.md Phase 7)', () =
     expect(s.palette).toEqual({ id: 'p1', name: 'P', colors: [[255, 0, 0, 255]] });
     expect(getIndexBuffer(s.cels[0].id)).toEqual(new Uint8Array([1, 0, 0, 1]));
     expect(getBuffer(s.cels[0].id)).toBeUndefined();
+  });
+});
+
+describe('.tess round trip of a sprite converted RGBA -> indexed (colorModeCommands.ts gap-closure)', () => {
+  const palette: Palette = {
+    id: 'p',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255],
+      [0, 255, 0, 255],
+    ],
+  };
+
+  /**
+   * A minimal in-memory stand-in for the Rust staging area `saveCurrentProject`/
+   * `openProject` talk to over IPC: `stageBytes` hands out an id and remembers
+   * the bytes, `fetchStaged` looks them up. Real enough to exercise the actual
+   * `saveCurrentProject` -> `saveProject` -> (this test, standing in for the
+   * archive) -> `loadProject` -> `applyLoadResult` path end to end, without a
+   * real Tauri backend.
+   */
+  function wireFakeStagingArea() {
+    const area = new Map<number, Uint8Array>();
+    let nextId = 1;
+    stageBytesMock.mockImplementation((bytes: Uint8Array) => {
+      const id = nextId++;
+      area.set(id, new Uint8Array(bytes));
+      return Promise.resolve(id);
+    });
+    fetchStagedMock.mockImplementation((id: number) => {
+      const bytes = area.get(id);
+      if (!bytes) throw new Error(`no staged bytes for id ${id}`);
+      return Promise.resolve(bytes);
+    });
+    return area;
+  }
+
+  it('preserves colorMode, palette, and converted pixel indices through save + reopen', async () => {
+    wireFakeStagingArea();
+    saveMock.mockResolvedValue('/tmp/converted.tess');
+
+    const doc = () => useDocumentStore.getState();
+    doc().newDocument(2, 2);
+    doc().setActiveLayer(doc().sprite.layers[0].id);
+    const cel = doc().activeCel()!;
+    const buf = getBuffer(cel.id)!;
+    setPixel(buf, 2, 2, 0, 0, [255, 0, 0, 255]); // exact RED -> index 1
+    setPixel(buf, 2, 2, 1, 0, [0, 255, 0, 255]); // exact GREEN -> index 2
+    setPixel(buf, 2, 2, 0, 1, [250, 3, 3, 255]); // near-RED, out of palette -> index 1
+    doc().touch(cel.id);
+
+    expect(convertSpriteToIndexed(palette)).toEqual({ ok: true });
+    const indicesBeforeSave = new Uint8Array(getIndexBuffer(cel.id)!);
+
+    // Capture exactly what `saveProject` was asked to persist, and hand that
+    // same shape back out of `loadProject` — the real archive's job, stood in
+    // for here by this test.
+    let saved: { sprite: unknown; cels: Array<{ celId: string; stageId: number }> } | undefined;
+    saveProjectMock.mockImplementation((args: typeof saved) => {
+      saved = args;
+      return Promise.resolve();
+    });
+
+    const savedPath = await saveCurrentProject({ saveAs: true });
+    expect(savedPath).toBe('/tmp/converted.tess');
+    expect(saved).toBeDefined();
+
+    loadProjectMock.mockResolvedValue({
+      path: '/tmp/converted.tess',
+      formatVersion: 1,
+      sprite: saved!.sprite,
+      cels: saved!.cels.map((c) => ({ ...c, width: 2, height: 2 })),
+      tileEntries: [],
+      warnings: [],
+    });
+    openMock.mockResolvedValue('/tmp/converted.tess');
+
+    await openProject();
+
+    const reloaded = useDocumentStore.getState().sprite;
+    expect(reloaded.colorMode).toBe('indexed');
+    expect(reloaded.palette?.colors).toEqual(palette.colors);
+    const reloadedCelId = reloaded.cels[0].id;
+    expect([...getIndexBuffer(reloadedCelId)!]).toEqual([...indicesBeforeSave]);
+    expect(getBuffer(reloadedCelId)).toBeUndefined(); // still routed to index storage, not RGBA
   });
 });
