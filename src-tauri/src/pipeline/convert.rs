@@ -3,8 +3,8 @@
 //! Mirrors `src/pipeline/convert.ts`.
 //!
 //! ```text
-//!   [1] background removal   flood-fill fallback, both languages (§8.5);
-//!                            ML segmentation is a later, Rust-only Phase 5 item
+//!   [1] background removal   flood-fill (§8.5) OR ML segmentation (§8);
+//!                            see below — ML runs *outside* this function
 //!   [2] crop / fit-to-subject
 //!   [3] colour adjustments   BEFORE quantization, deliberately (§2.1)
 //!   [4] downscale to grid
@@ -15,6 +15,17 @@
 //! **The order is fixed and identical in both implementations.** It is not a
 //! default that a caller may vary: adjusting after quantization pushes colours
 //! off the palette and forces a second mapping, compounding error.
+//!
+//! **This function only ever runs the flood-fill method itself.** ML
+//! segmentation (`crate::segment::Segmenter`) needs an ONNX Runtime session,
+//! which this module deliberately has no dependency on — `pipeline` stays
+//! free of `ort` the same way `segment`'s own doc comment isolates `ort` from
+//! the rest of the app. `commands::source::export_conversion` (the only
+//! caller with access to the app-managed `Segmenter`) runs stage [1] itself
+//! when `settings.background_removal.method` is `Ml` — segment, mask,
+//! post-process — *before* calling this function with `background_removal`
+//! cleared, so the mask still lands at exactly the same point in the fixed
+//! stage order, just orchestrated one level up.
 
 use super::adjust::{self, AdjustParams};
 use super::autopalette::auto_palette;
@@ -125,8 +136,9 @@ pub fn quantize_with_dither(
 }
 
 pub fn convert(source: &PixelBuffer, settings: &ConvertSettings) -> Result<ConvertResult, String> {
-    // [1] background removal — flood-fill fallback only (§8.5), then mask
-    // post-processing (§8.3 step 5: threshold, close, feather)
+    // [1] background removal — flood-fill only (§8.5); ML runs one level up
+    // in `commands::source::export_conversion`, see the module doc comment
+    // — then mask post-processing (§8.3 step 5: threshold, close, feather)
     let removed = settings.background_removal.as_ref().map(|bg| {
         let mask = remove_background_flood_fill(source, bg);
         post_process_mask(&mask, bg)
@@ -418,6 +430,7 @@ mod tests {
         // With a close radius wide enough to bridge the 1px breach, the
         // pocket is sealed back up before quantization ever sees it.
         settings.background_removal = Some(crate::pipeline::settings::BackgroundRemovalSettings {
+            method: crate::pipeline::settings::BackgroundRemovalMethod::FloodFill,
             tolerance: 0.0,
             threshold: None,
             close: 2,

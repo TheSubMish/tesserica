@@ -35,23 +35,40 @@ export interface OutlineSettings {
 }
 
 /**
- * Stage [1]'s non-ML fallback (`docs/04` §8.5) — flood-fill from the image's
- * four corners. The ONNX segmentation model §8 otherwise describes is a later,
- * Rust-only Phase 5 item; this one needs no model and runs identically on both
- * sides.
+ * Which algorithm produces stage [1]'s mask (`docs/04` §8).
+ *
+ * `'flood-fill'` needs no model and runs identically here and in
+ * `src-tauri/src/pipeline/background_removal.rs`. `'ml'` runs the real
+ * `u2netp` ONNX model (`src-tauri/src/segment/`) — **Rust-only**: there is no
+ * ONNX runtime in the browser/worker, so `convert()` below treats `'ml'` as a
+ * no-op at preview time rather than silently substituting flood-fill, which
+ * would show a result export would not reproduce. `ConvertPanel` surfaces
+ * this explicitly next to the toggle. Undefined means `'flood-fill'`, so
+ * every settings object built before this field existed keeps meaning
+ * exactly what it always meant.
+ */
+export type BackgroundRemovalMethod = 'flood-fill' | 'ml';
+
+/**
+ * Stage [1]'s settings (`docs/04` §8) — which method produces the mask, and,
+ * for flood-fill, its tolerance.
  *
  * `threshold`/`close`/`feather` are the mask post-processing steps §8.3 step 5
- * describes (`pipeline/maskPostProcess.ts`), run in that fixed order after the
- * flood-fill produces its mask. All three are optional/"off by default" — the
- * flood-fill's own output is already a clean binary mask, so none of them are
- * needed until a real segmentation model's softer matte exists.
+ * describes (`pipeline/maskPostProcess.ts`), run in that fixed order after
+ * *either* method produces its mask — one shared post-processing path, not
+ * two. All three are optional/"off by default" — flood-fill's own output is
+ * already a clean binary mask, and they are equally applicable to the ML
+ * method's softer matte when a caller wants to clean it up too.
  */
 export interface BackgroundRemovalSettings {
+  /** Which algorithm produces the mask. Undefined means `'flood-fill'`. */
+  method?: BackgroundRemovalMethod;
   /**
-   * Un-squared Oklab colour distance. A neighbour joins a corner's flood when
-   * it is within this of that corner's own colour. 0 admits only exact
-   * matches; higher values tolerate more variation (soft shadows, mild
-   * gradients) before the flood stops at an edge.
+   * Un-squared Oklab colour distance. Only meaningful for `'flood-fill'`. A
+   * neighbour joins a corner's flood when it is within this of that corner's
+   * own colour. 0 admits only exact matches; higher values tolerate more
+   * variation (soft shadows, mild gradients) before the flood stops at an
+   * edge.
    */
   tolerance: number;
   /**

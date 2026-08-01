@@ -1,17 +1,18 @@
 /**
  * "AI background removal" affordance in Convert mode's Background section
  * (`docs/08-roadmap.md` Phase 5 "on-demand download for larger models with
- * explicit consent"), next to the flood-fill toggle
+ * explicit consent"), next to the method radio group
  * (`src/convert/ConvertPanel.tsx`).
  *
  * **Scope, stated honestly rather than implied:** this component manages the
  * segmentation *model* — showing which one is installed and offering an
- * explicit, consent-gated download of a larger one. It does **not** wire a
- * loaded model into the conversion pipeline yet (`segment::Segmenter` has no
- * caller in the pipeline); that is later Phase 5 work, tracked separately in
- * `docs/08-roadmap.md`. The copy below says so, so a user isn't led to
- * believe clicking "Download" changes what background removal actually does
- * today.
+ * explicit, consent-gated download of a larger one. `ConvertPanel`'s "AI
+ * segmentation" radio uses whichever model `segment::Segmenter` actually
+ * loads (`commands::segment::resolve_model_path` prefers a downloaded larger
+ * model over the bundled `u2netp` once present, since the whole point of
+ * downloading it is better quality) — but only takes effect from the *next*
+ * app start if a session was already loaded from the bundled model this run;
+ * see that function's own doc comment.
  *
  * **The download only ever fires from an explicit confirm click.** Mounting
  * this component calls `segmentationModelInfo`/`segmentationModelStatus`

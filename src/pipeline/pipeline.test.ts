@@ -455,6 +455,26 @@ describe('backgroundRemoval', () => {
 });
 
 describe('convert', () => {
+  it('treats method "ml" as a no-op at preview time rather than substituting flood-fill', () => {
+    // ML segmentation has no TS-side implementation (Rust-only, no ONNX
+    // runtime in the browser/worker). Requesting it here must leave the
+    // background completely untouched — not silently fall back to
+    // flood-fill, which would show a preview export would not reproduce.
+    const src = solid(4, 4, [255, 255, 255, 255]);
+    for (let y = 1; y <= 2; y++) {
+      for (let x = 1; x <= 2; x++) src.data.set([0, 0, 0, 255], (y * 4 + x) * 4);
+    }
+    const settings = {
+      ...defaultSettings(4, 4, BLACK_AND_WHITE),
+      downscaleMode: 'nearest' as const,
+      backgroundRemoval: { tolerance: 0.02, method: 'ml' as const },
+    };
+    const out = convert(src, settings);
+    // Every pixel stays opaque (nothing was cleared) — the white border is
+    // still there as an opaque white index, not transparent.
+    expect([...out.indices].every((i) => i !== TRANSPARENT_INDEX)).toBe(true);
+  });
+
   it('removes the background before crop / fit-to-subject run', () => {
     // A 4x4 opaque white image with a 2x2 black square at its centre. Without
     // background removal, fit-to-subject sees the whole image as opaque and

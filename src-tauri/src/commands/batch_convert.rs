@@ -21,6 +21,18 @@
 //! `FileFailed` event and does not stop the rest of the batch — the folder is
 //! not pre-filtered by extension, so a stray non-image file sitting in the
 //! source folder is exactly this case, not a special one.
+//!
+//! **`backgroundRemoval.method: 'ml'` degrades to flood-fill here.** ML
+//! segmentation needs the app-managed `Mutex<Segmenter>`
+//! (`commands::segment::ensure_loaded`), which only `commands::source::
+//! export_conversion` is wired to reach; this module calls
+//! `pipeline::convert::convert` directly, and `convert`'s own flood-fill stage
+//! does not branch on `method` at all, so a batch or CLI (`cli.rs`) run
+//! requesting ML background removal silently gets flood-fill instead —
+//! honestly documented here as unwired rather than pretended-away. Wiring the
+//! interactive single-image export path (the concrete `[ Edit → ]`/export
+//! product surface) came first; extending the same orchestration to this
+//! `rayon`-parallel path is tracked as follow-up work.
 
 use std::collections::HashMap;
 use std::io::BufWriter;

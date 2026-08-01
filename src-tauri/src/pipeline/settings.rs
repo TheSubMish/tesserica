@@ -58,23 +58,49 @@ pub struct OutlineSettings {
     pub corners: bool,
 }
 
-/// Stage [1]'s non-ML fallback (`docs/04` §8.5) — flood-fill from the image's
-/// four corners. The ONNX segmentation model §8 otherwise describes is a later,
-/// Rust-only Phase 5 item; this one needs no model and runs identically on both
-/// sides.
+/// Which algorithm produces stage [1]'s mask (`docs/04` §8).
+///
+/// `FloodFill` needs no model and runs identically in both the TS preview
+/// worker and the Rust export pipeline (`pipeline::background_removal`).
+/// `Ml` runs the real `u2netp` ONNX model (`crate::segment::Segmenter`) —
+/// Rust-only, since there is no ONNX runtime in the browser/worker; the TS
+/// mirror (`src/pipeline/convert.ts`) treats this variant as a no-op at
+/// preview time rather than silently substituting flood-fill, which would
+/// show a result export would not reproduce (`ConvertPanel` surfaces this
+/// explicitly next to the toggle).
+///
+/// `#[serde(default)]` (below, on `BackgroundRemovalSettings::method`) keeps
+/// every settings blob saved before this field existed loading as
+/// `FloodFill`, its behaviour unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackgroundRemovalMethod {
+    #[default]
+    FloodFill,
+    Ml,
+}
+
+/// Stage [1]'s settings (`docs/04` §8) — which method (flood-fill, always
+/// available, or ML segmentation, `Ml`) and, for flood-fill, its tolerance.
 ///
 /// `threshold`/`close`/`feather` are the mask post-processing steps §8.3 step 5
-/// describes (`pipeline::mask_post_process`), run in that fixed order after the
-/// flood-fill produces its mask. All three are optional/"off by default" — the
-/// flood-fill's own output is already a clean binary mask, so none of them are
-/// needed until a real segmentation model's softer matte exists.
+/// describes (`pipeline::mask_post_process`), run in that fixed order after
+/// *either* method produces its mask — one shared post-processing path, not
+/// two. All three are optional/"off by default" — flood-fill's own output is
+/// already a clean binary mask, and they are equally applicable to the ML
+/// method's softer matte when a caller wants to clean it up too.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundRemovalSettings {
-    /// Un-squared Oklab colour distance. A neighbour joins a corner's flood
-    /// when it is within this of that corner's own colour. 0 admits only exact
-    /// matches; higher values tolerate more variation (soft shadows, mild
-    /// gradients) before the flood stops at an edge.
+    /// Which algorithm produces the mask. Defaults to flood-fill on any
+    /// settings blob saved before this field existed.
+    #[serde(default)]
+    pub method: BackgroundRemovalMethod,
+    /// Un-squared Oklab colour distance. Only meaningful for `FloodFill`. A
+    /// neighbour joins a corner's flood when it is within this of that
+    /// seed's own colour. 0 admits only exact matches; higher values
+    /// tolerate more variation (soft shadows, mild gradients) before the
+    /// flood stops at an edge.
     pub tolerance: f64,
     /// 0..255. When set, re-binarizes the mask at this cutoff before close and
     /// feather run: alpha below the cutoff goes fully transparent, at or above
@@ -97,6 +123,7 @@ impl BackgroundRemovalSettings {
     /// the shape every call site before this change already assumed.
     pub fn new(tolerance: f64) -> Self {
         Self {
+            method: BackgroundRemovalMethod::FloodFill,
             tolerance,
             threshold: None,
             close: 0,

@@ -52,6 +52,7 @@ macro_rules! all_commands {
             commands::segment::segmentation_model_info,
             commands::segment::segmentation_model_status,
             commands::segment::save_downloaded_segmentation_model,
+            commands::segment::segmentation_availability,
             commands::onnx_runtime::onnx_runtime_info,
             commands::onnx_runtime::onnx_runtime_status,
             commands::onnx_runtime::save_downloaded_onnx_runtime,
@@ -90,6 +91,7 @@ macro_rules! all_commands {
             commands::segment::segmentation_model_info,
             commands::segment::segmentation_model_status,
             commands::segment::save_downloaded_segmentation_model,
+            commands::segment::segmentation_availability,
             commands::onnx_runtime::onnx_runtime_info,
             commands::onnx_runtime::onnx_runtime_status,
             commands::onnx_runtime::save_downloaded_onnx_runtime,
@@ -135,6 +137,15 @@ pub fn run() {
         // Batch conversion's cooperative-cancellation registry (`docs/08-roadmap.md`
         // Phase 7 "Batch conversion + CLI headless mode").
         .manage(commands::batch_convert::BatchJobs::default())
+        // At most one loaded ONNX Runtime session for ML background removal
+        // (`segment::Segmenter`). `Mutex` because `Segmenter::segment` takes
+        // `&mut self` (an ONNX Runtime session mutates scratch state on every
+        // `run`) — the same interior-mutability shape `commands::source::
+        // Sources`' own handle table already uses for shared Tauri state.
+        // Empty until `commands::segment::segmentation_availability` (or an
+        // export/convert call) successfully loads a model; never touches the
+        // filesystem or `ort` on its own.
+        .manage(std::sync::Mutex::new(segment::Segmenter::new()))
         .invoke_handler(all_commands!())
         .run(tauri::generate_context!())
         .expect("error while running Tesserica");

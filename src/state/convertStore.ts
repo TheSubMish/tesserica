@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
 import type {
+  BackgroundRemovalMethod,
   ConvertSettings,
   DitherMode,
   DownscaleMode,
@@ -68,6 +69,12 @@ interface ConvertState {
   backgroundRemovalEnabled: boolean;
   /** Un-squared Oklab distance (`pipeline/settings.ts::BackgroundRemovalSettings`). */
   backgroundRemovalTolerance: number;
+  /**
+   * Which algorithm produces the mask. `'flood-fill'` by default; `'ml'` is
+   * gated on `segmentationAvailability()` in `ConvertPanel` — see its own
+   * doc comment for the preview-vs-export split this implies.
+   */
+  backgroundRemovalMethod: BackgroundRemovalMethod;
 
   /**
    * Mask post-processing on the flood-fill's own output (`docs/04` §8.3 step
@@ -125,6 +132,7 @@ export type AdvancedSettings = Pick<
   | 'alphaThreshold'
   | 'backgroundRemovalEnabled'
   | 'backgroundRemovalTolerance'
+  | 'backgroundRemovalMethod'
   | 'maskThresholdEnabled'
   | 'maskThreshold'
   | 'maskClose'
@@ -165,6 +173,7 @@ export const useConvertStore = create<ConvertState>((set) => ({
 
   backgroundRemovalEnabled: false,
   backgroundRemovalTolerance: 0.08,
+  backgroundRemovalMethod: 'flood-fill',
 
   maskThresholdEnabled: false,
   maskThreshold: 128,
@@ -221,6 +230,7 @@ export function buildSettings(state: ConvertState): ConvertSettings {
     backgroundRemoval: state.backgroundRemovalEnabled
       ? {
           tolerance: state.backgroundRemovalTolerance,
+          ...(state.backgroundRemovalMethod === 'ml' ? { method: 'ml' as const } : {}),
           ...(state.maskThresholdEnabled ? { threshold: state.maskThreshold } : {}),
           ...(state.maskClose > 0 ? { close: state.maskClose } : {}),
           ...(state.maskFeather > 0 ? { feather: state.maskFeather } : {}),

@@ -114,6 +114,16 @@ fn runtime_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(dir)
 }
 
+/// Where the extracted ONNX Runtime library would live if
+/// [`save_downloaded_onnx_runtime`] has run — used by `commands::segment`'s
+/// `segmentation_availability` to decide whether ML background removal can
+/// load a session at all. A plain path join, not a filesystem check; callers
+/// check `.is_file()` themselves (`onnx_runtime_status` already does this
+/// for the frontend's own "is it downloaded" query).
+pub(crate) fn runtime_lib_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(runtime_dir(app)?.join(RUNTIME_FILENAME))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OnnxRuntimeStatus {

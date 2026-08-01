@@ -90,6 +90,11 @@ use image::{imageops, ImageBuffer, Luma, Rgb};
 use ort::session::Session;
 use ort::value::{Tensor, ValueType};
 
+use crate::pipeline::background_removal::remove_background_flood_fill;
+use crate::pipeline::buffer::PixelBuffer;
+use crate::pipeline::mask_post_process::post_process_mask;
+use crate::pipeline::settings::{BackgroundRemovalMethod, BackgroundRemovalSettings};
+
 /// ImageNet mean/std U-2-Net's own reference preprocessing uses
 /// (`NathanUA/U-2-Net`'s `data_loader.py::ToTensorLab`, `flag=0`) — verified
 /// 2026-08-01 against both the upstream U-2-Net repository and `rembg`'s
@@ -307,6 +312,64 @@ impl Segmenter {
     }
 }
 
+impl Segmenter {
+    /// Run background removal end-to-end for a [`BackgroundRemovalSettings`]
+    /// whose `method` is [`BackgroundRemovalMethod::Ml`]: segment, apply the
+    /// resulting matte as alpha, then run it through the same
+    /// [`post_process_mask`] the flood-fill fallback already uses
+    /// (`docs/04-image-pipeline.md` §8.3 step 5) — one shared post-processing
+    /// path for both methods, not two.
+    ///
+    /// **Never fails outward.** A missing model, a source/mask dimension
+    /// mismatch, or an ONNX Runtime error during inference all degrade to
+    /// the flood-fill fallback (`pipeline::background_removal::
+    /// remove_background_flood_fill`) — the same "degrade rather than
+    /// block" posture `docs/10-decisions.md` D15/D16 already established for
+    /// this module (a missing runtime/model is an ordinary, recoverable
+    /// state, not a fatal error), now extended to inference failures
+    /// themselves. Also used as the implementation for `FloodFill` settings
+    /// so callers have one entry point regardless of method — see
+    /// `commands::source::export_conversion`.
+    pub fn remove_background(
+        &mut self,
+        source: &PixelBuffer,
+        settings: &BackgroundRemovalSettings,
+    ) -> PixelBuffer {
+        let masked = if settings.method == BackgroundRemovalMethod::Ml {
+            match self.segment(&source.data, source.width, source.height) {
+                Ok(SegmentOutcome::Matte {
+                    width,
+                    height,
+                    alpha,
+                }) if width == source.width && height == source.height => {
+                    apply_alpha_mask(source, &alpha)
+                }
+                _ => remove_background_flood_fill(source, settings),
+            }
+        } else {
+            remove_background_flood_fill(source, settings)
+        };
+        post_process_mask(&masked, settings)
+    }
+}
+
+/// Combine an ML matte with the source's own alpha: `min` rather than an
+/// overwrite, so a source that already had transparency (e.g. a PNG icon)
+/// keeps it, and the mask can only ever remove opacity, never add it back —
+/// the same effect the flood-fill fallback gets "for free" by only ever
+/// setting matched pixels' alpha to 0 and leaving the rest untouched.
+fn apply_alpha_mask(source: &PixelBuffer, mask: &[u8]) -> PixelBuffer {
+    let mut out = source.data.clone();
+    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+        px[3] = px[3].min(mask[i]);
+    }
+    PixelBuffer {
+        width: source.width,
+        height: source.height,
+        data: out,
+    }
+}
+
 /// The model's declared input spatial resolution as `(height, width)`, read
 /// from the loaded session's own metadata rather than assumed. Falls back to
 /// [`FALLBACK_INPUT_SIZE`] only if the graph's declared dimension is dynamic
@@ -386,10 +449,89 @@ fn norm_pred_to_mask_bytes(pred: &[f32]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    fn solid(width: u32, height: u32, color: [u8; 4]) -> PixelBuffer {
+        let mut b = PixelBuffer::new(width, height).unwrap();
+        for px in b.data.chunks_exact_mut(4) {
+            px.copy_from_slice(&color);
+        }
+        b
+    }
+
     #[test]
     fn new_segmenter_has_no_model_and_touches_nothing() {
         let segmenter = Segmenter::new();
         assert!(!segmenter.is_available());
+    }
+
+    #[test]
+    fn remove_background_with_ml_method_and_no_model_loaded_degrades_to_flood_fill() {
+        let mut segmenter = Segmenter::new();
+        let src = solid(4, 4, [200, 200, 200, 255]);
+        let settings = BackgroundRemovalSettings {
+            method: BackgroundRemovalMethod::Ml,
+            tolerance: 0.02,
+            threshold: None,
+            close: 0,
+            feather: 0,
+        };
+
+        let out = segmenter.remove_background(&src, &settings);
+
+        // With no model loaded, `Ml` must degrade to exactly what the
+        // flood-fill fallback alone would produce on a uniform image: fully
+        // cleared, RGB untouched (`background_removal.rs`'s own
+        // `a_uniform_image_is_entirely_cleared` fixture).
+        assert!(out.data.chunks_exact(4).all(|px| px[3] == 0));
+        assert_eq!(&out.data[0..3], &[200, 200, 200]);
+    }
+
+    #[test]
+    fn remove_background_flood_fill_method_runs_post_processing_afterward() {
+        let mut segmenter = Segmenter::new();
+        // Same "breach" fixture as `pipeline::convert`'s own
+        // `mask_post_processing_close_seals_a_flood_fill_breach_before_quantization`:
+        // a black ring with a single 1px gap lets the corner flood leak into
+        // an interior white pocket, clearing it to alpha 0 too. A `close`
+        // wide enough to bridge that 1px gap should reseal the pocket —
+        // proving `remove_background` actually runs `post_process_mask`
+        // after the flood, not just the flood alone.
+        let mut src = solid(12, 12, [255, 255, 255, 255]);
+        for y in 3..=6u32 {
+            for x in 3..=6u32 {
+                let interior = (4..=5).contains(&x) && (4..=5).contains(&y);
+                let gap = x == 3 && y == 4;
+                if !interior && !gap {
+                    let o = src.offset(x, y);
+                    src.data[o..o + 4].copy_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+        let pocket = src.offset(4, 4);
+
+        let without_close = BackgroundRemovalSettings {
+            method: BackgroundRemovalMethod::FloodFill,
+            tolerance: 0.0,
+            threshold: None,
+            close: 0,
+            feather: 0,
+        };
+        let out = segmenter.remove_background(&src, &without_close);
+        assert_eq!(
+            out.data[pocket + 3],
+            0,
+            "the interior pocket must start out transparent, or this test proves nothing"
+        );
+
+        let with_close = BackgroundRemovalSettings {
+            close: 2,
+            ..without_close
+        };
+        let out = segmenter.remove_background(&src, &with_close);
+        assert_eq!(
+            out.data[pocket + 3],
+            255,
+            "close must have sealed the breach after the flood ran"
+        );
     }
 
     #[test]

@@ -131,6 +131,22 @@ describe('convertStore', () => {
       });
     });
 
+    it('defaults the method to flood-fill and omits it from the built settings', () => {
+      withSource();
+      expect(useConvertStore.getState().backgroundRemovalMethod).toBe('flood-fill');
+      useConvertStore.getState().setAdvanced({ backgroundRemovalEnabled: true });
+      expect(buildSettings(useConvertStore.getState()).backgroundRemoval?.method).toBeUndefined();
+    });
+
+    it('includes method: "ml" once selected', () => {
+      withSource();
+      useConvertStore.getState().setAdvanced({
+        backgroundRemovalEnabled: true,
+        backgroundRemovalMethod: 'ml',
+      });
+      expect(buildSettings(useConvertStore.getState()).backgroundRemoval?.method).toBe('ml');
+    });
+
     it('includes threshold only once the re-threshold checkbox is on', () => {
       withSource();
       useConvertStore.getState().setAdvanced({

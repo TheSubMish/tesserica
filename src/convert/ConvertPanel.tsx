@@ -1,6 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { SliderField } from '../app/SliderField';
+import {
+  hasBackend,
+  segmentationAvailability,
+  type SegmentationAvailability,
+} from '../ipc/commands.ts';
 import { BUILTIN_PALETTES } from '../lib/palettes/builtin';
 import { bufferFrom } from '../pipeline/buffer.ts';
 import type { DitherMode, DownscaleMode } from '../pipeline/settings.ts';
@@ -54,6 +59,20 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
   const [gridDetection, setGridDetection] = useState<GridDetectionResult | 'none' | undefined>(
     undefined,
   );
+
+  // Whether ML background removal can actually run (a model + the ONNX
+  // Runtime library are both on disk) — gates the "AI segmentation" method
+  // option below. Both calls this depends on are local (filesystem check +
+  // local model load), not network activity, so it is fine to run on mount
+  // (mirrors `SegmentModelSection`/`OnnxRuntimeSection`'s own "safe on mount"
+  // reasoning).
+  const [mlAvailability, setMlAvailability] = useState<SegmentationAvailability | undefined>();
+  useEffect(() => {
+    if (!hasBackend()) return;
+    segmentationAvailability()
+      .then(setMlAvailability)
+      .catch(() => undefined);
+  }, []);
 
   const runGridDetection = () => {
     const source = previewRuntime.current.source;
@@ -227,19 +246,63 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
             checked={state.backgroundRemovalEnabled}
             onChange={(e) => state.setAdvanced({ backgroundRemovalEnabled: e.target.checked })}
           />
-          Remove background (flood-fill)
+          Remove background
         </label>
-        <p className="field-note">
-          Clears pixels connected to a corner within a colour tolerance — no model, instant. Works
-          on flat or studio backgrounds; a segmentation-based option arrives later.
-        </p>
+
+        {state.backgroundRemovalEnabled && (
+          <div className="field" role="radiogroup" aria-label="Background removal method">
+            <label className="field check">
+              <input
+                type="radio"
+                name="background-removal-method"
+                checked={state.backgroundRemovalMethod === 'flood-fill'}
+                onChange={() => state.setAdvanced({ backgroundRemovalMethod: 'flood-fill' })}
+              />
+              Flood fill
+            </label>
+            <p className="field-note">
+              Clears pixels connected to a corner within a colour tolerance — no model, instant.
+              Works on flat or studio backgrounds; can&apos;t recover a region enclosed by
+              background-coloured pixels it isn&apos;t connected to.
+            </p>
+
+            <label className="field check">
+              <input
+                type="radio"
+                name="background-removal-method"
+                checked={state.backgroundRemovalMethod === 'ml'}
+                disabled={!mlAvailability?.available}
+                onChange={() => state.setAdvanced({ backgroundRemovalMethod: 'ml' })}
+              />
+              AI segmentation (u2net)
+            </label>
+            {mlAvailability?.available ? (
+              <p className="field-note">
+                A real subject/background model — understands shape, not just colour, so it can
+                separate a subject from a same-coloured background behind it.
+              </p>
+            ) : (
+              <p className="field-note" data-testid="ml-segmentation-unavailable">
+                {mlAvailability?.reason ??
+                  'Checking whether AI segmentation is available on this machine…'}
+              </p>
+            )}
+            {state.backgroundRemovalMethod === 'ml' && (
+              <p className="field-note" role="status">
+                Preview isn&apos;t available for AI segmentation yet — it runs when you export. The
+                preview below shows the image without background removal until then.
+              </p>
+            )}
+          </div>
+        )}
+
         <SliderField
           label="Tolerance"
           min={MIN_BACKGROUND_REMOVAL_TOLERANCE}
           max={MAX_BACKGROUND_REMOVAL_TOLERANCE}
           step={0.01}
           value={state.backgroundRemovalTolerance}
-          disabled={!state.backgroundRemovalEnabled}
+          disabled={!state.backgroundRemovalEnabled || state.backgroundRemovalMethod === 'ml'}
           format={(v) => v.toFixed(2)}
           onChange={(backgroundRemovalTolerance) =>
             state.setAdvanced({ backgroundRemovalTolerance })
@@ -248,8 +311,8 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
 
         <hr className="field-divider" />
         <p className="field-note">
-          Mask post-processing: cleans up whatever produced the mask above — today only the
-          flood-fill, later a segmentation model too.
+          Mask post-processing: cleans up whatever produced the mask above, flood-fill or AI
+          segmentation alike.
         </p>
 
         <label className="field check">

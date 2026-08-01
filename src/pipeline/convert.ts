@@ -4,8 +4,11 @@
  * Mirrors `src-tauri/src/pipeline/convert.rs`.
  *
  * ```
- *   [1] background removal   flood-fill fallback, both languages (§8.5);
- *                            ML segmentation is a later, Rust-only Phase 5 item
+ *   [1] background removal   flood-fill runs in both languages (§8.5); ML
+ *                            segmentation is Rust-only (no ONNX runtime in
+ *                            the browser/worker) — this file no-ops on it,
+ *                            see the `settings.backgroundRemoval.method`
+ *                            check below
  *   [2] crop / fit-to-subject
  *   [3] colour adjustments   BEFORE quantization, deliberately (§2.1)
  *   [4] downscale to grid
@@ -111,12 +114,21 @@ export function quantizeWithDither(
 }
 
 export function convert(source: PixelBuffer, settings: ConvertSettings): ConvertResult {
-  // [1] background removal — flood-fill fallback only (§8.5), then mask
-  // post-processing (§8.3 step 5: threshold, close, feather)
+  // [1] background removal (§8.5), then mask post-processing (§8.3 step 5:
+  // threshold, close, feather)
   let image = source;
   if (settings.backgroundRemoval) {
-    image = removeBackgroundFloodFill(image, settings.backgroundRemoval);
-    image = postProcessMask(image, settings.backgroundRemoval);
+    if (settings.backgroundRemoval.method === 'ml') {
+      // ML segmentation has no TS-side implementation — there is no ONNX
+      // runtime in the browser/worker (`src-tauri/src/segment/` is
+      // Rust-only). Preview therefore skips background removal entirely
+      // rather than silently substituting flood-fill, which would show a
+      // result export would not reproduce; `ConvertPanel` shows an explicit
+      // "applies at export only" note next to the toggle instead.
+    } else {
+      image = removeBackgroundFloodFill(image, settings.backgroundRemoval);
+      image = postProcessMask(image, settings.backgroundRemoval);
+    }
   }
 
   // [2] framing

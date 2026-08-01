@@ -21,18 +21,26 @@
 //! verify their checksum against the one the source itself publishes, and
 //! write them to the OS app-data directory.
 //!
-//! **Pipeline integration is out of scope for this dispatch.** Nothing here
-//! wires a downloaded model into `segment::Segmenter` or the background-
-//! removal pipeline; that is later Phase 5 work. This module's contract ends
-//! at "the file is on disk and its checksum is verified."
+//! **Pipeline integration**: [`segmentation_availability`] and
+//! [`ensure_loaded`] are the piece that actually wires a model into
+//! `segment::Segmenter` — checking whether both a model (bundled `u2netp`,
+//! preferred, or a downloaded larger one) and the ONNX Runtime library
+//! (`commands::onnx_runtime`) are present on disk, and loading them into the
+//! app-wide `Mutex<Segmenter>` (`lib.rs`) if so. `commands::source::
+//! export_conversion` calls [`ensure_loaded`] before running ML background
+//! removal; `segmentation_availability` is the same check exposed to the
+//! frontend so Convert mode's UI can show/hide the ML option honestly rather
+//! than offering something that will silently fall back.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use crate::error::AppError;
+use crate::segment::Segmenter;
 
 /// The one larger model this dispatch offers as an on-demand download.
 /// `docs/04-image-pipeline.md` §8.1 lists it as "Best general quality —
@@ -94,6 +102,111 @@ fn models_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
         .map_err(|err| AppError::invalid(format!("could not resolve app data directory: {err}")))?
         .join("models");
     Ok(dir)
+}
+
+/// Where the on-demand-downloaded larger model would live if
+/// [`save_downloaded_segmentation_model`] has run — a plain path join, not a
+/// filesystem check. Used by [`resolve_model_path`] to decide whether ML
+/// background removal has anything to load.
+fn larger_model_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(models_dir(app)?.join(LARGER_MODEL_FILENAME))
+}
+
+/// The model `ensure_loaded`/`segmentation_availability` should try: the
+/// on-demand larger model if the user has explicitly downloaded one — the
+/// entire point of that download is better quality
+/// (`docs/04-image-pipeline.md` §8.1's own "best general quality" note), so
+/// once present it should actually be used, not shadowed by the smaller
+/// bundled default — else the bundled `u2netp` (the common case for a normal
+/// checkout after `npm run models:fetch`), else `None`.
+///
+/// **Not hot-swapped mid-session.** `ensure_loaded` only calls this when no
+/// session is loaded yet; downloading the larger model *after* ML
+/// segmentation has already loaded the bundled one does not retroactively
+/// switch it — the next app restart picks up the change. Documented here
+/// rather than solved, since nothing in this dispatch's scope needs it.
+fn resolve_model_path(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
+    let larger = larger_model_path(app)?;
+    if larger.is_file() {
+        return Ok(Some(larger));
+    }
+    let bundled = crate::segment::bundled_model_path();
+    if bundled.is_file() {
+        return Ok(Some(bundled));
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SegmentationAvailability {
+    pub available: bool,
+    /// A human-readable reason ML segmentation is unavailable — `None` iff
+    /// `available` is `true`. Convert mode's UI shows this next to a
+    /// disabled option rather than just hiding it silently.
+    pub reason: Option<String>,
+}
+
+/// Whether ML background removal can actually run right now: is a model on
+/// disk (bundled or downloaded), is the ONNX Runtime library on disk
+/// (`commands::onnx_runtime`), and does `Segmenter::load` accept them.
+///
+/// A local filesystem check plus (if both files are present and no session
+/// is loaded yet) an attempt to actually load one — never a network call.
+/// Safe to call on mount, mirroring `segmentation_model_status`/
+/// `onnx_runtime_status`, except this one has the side effect of preloading
+/// the session so the first real conversion does not pay that cost.
+#[tauri::command]
+pub fn segmentation_availability(
+    app: AppHandle,
+    segmenter: State<'_, Mutex<Segmenter>>,
+) -> Result<SegmentationAvailability, AppError> {
+    Ok(match ensure_loaded(&app, &segmenter) {
+        Ok(()) => SegmentationAvailability {
+            available: true,
+            reason: None,
+        },
+        Err(reason) => SegmentationAvailability {
+            available: false,
+            reason: Some(reason),
+        },
+    })
+}
+
+/// Make sure `segmenter` has a loaded session, loading one from whatever is
+/// on disk if it does not yet. Idempotent and cheap once loaded (`Segmenter::
+/// is_available` short-circuits). Returns the reason as an `Err(String)`
+/// when unavailable, rather than a `SegmentError`/`AppError`, since every
+/// caller of this function treats "not available" as a fallback signal, not
+/// a fatal error — the same "degrade rather than block" posture
+/// `docs/10-decisions.md` D15/D16 already established.
+pub(crate) fn ensure_loaded(app: &AppHandle, segmenter: &Mutex<Segmenter>) -> Result<(), String> {
+    let mut seg = segmenter.lock().expect("segmenter poisoned");
+    if seg.is_available() {
+        return Ok(());
+    }
+
+    let runtime_lib =
+        crate::commands::onnx_runtime::runtime_lib_path(app).map_err(|err| err.to_string())?;
+    if !runtime_lib.is_file() {
+        return Err(
+            "ONNX Runtime library not downloaded — download it in Convert mode's Background \
+             section to enable ML segmentation."
+                .to_string(),
+        );
+    }
+
+    let model_path = resolve_model_path(app).map_err(|err| err.to_string())?;
+    let Some(model_path) = model_path else {
+        return Err(
+            "no segmentation model available — the bundled model is missing (run `npm run \
+             models:fetch`) and no larger model has been downloaded."
+                .to_string(),
+        );
+    };
+
+    seg.load(&runtime_lib, &model_path)
+        .map_err(|err| err.to_string())
 }
 
 #[derive(Serialize)]

@@ -19,14 +19,15 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Response;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::commands::export::{scale_nearest, ALLOWED_SCALES};
 use crate::error::AppError;
 use crate::pipeline::buffer::PixelBuffer;
 use crate::pipeline::convert::convert;
 use crate::pipeline::downscale::downscale;
-use crate::pipeline::settings::{ConvertSettings, DownscaleMode};
+use crate::pipeline::settings::{BackgroundRemovalMethod, ConvertSettings, DownscaleMode};
+use crate::segment::Segmenter;
 
 /// A source image, decoded once and kept here.
 pub struct SourceImage {
@@ -174,10 +175,24 @@ pub struct ExportConversionResult {
 /// No pixels arrive with this command and none leave it: the source is already
 /// here, and the result goes straight to disk. That is `docs/02` §6.2 rule 4
 /// ("export sends no pixels at all") made concrete.
+///
+/// When `request.settings.backgroundRemoval.method` is `Ml`, stage [1] runs
+/// *outside* `pipeline::convert::convert` — `commands::segment::ensure_loaded`
+/// then `Segmenter::remove_background` — rather than inside it, since only
+/// this command layer (via the app-managed `Mutex<Segmenter>`) has the ONNX
+/// Runtime session and model paths `pipeline::convert` deliberately stays free
+/// of (the same decoupling `segment/mod.rs`'s own doc comment describes for
+/// `ort` itself). The result is handed to `convert` as the source with
+/// `backgroundRemoval` cleared, so the rest of the pipeline runs unchanged
+/// either way. `Segmenter::remove_background` never fails outward — a missing
+/// model/runtime or an inference error all degrade to the flood-fill
+/// fallback — so this never blocks an export.
 #[tauri::command]
 pub fn export_conversion(
     request: ExportConversionRequest,
+    app: AppHandle,
     sources: State<'_, Sources>,
+    segmenter: State<'_, std::sync::Mutex<Segmenter>>,
 ) -> Result<ExportConversionResult, AppError> {
     if !ALLOWED_SCALES.contains(&request.scale) {
         return Err(AppError::invalid(format!(
@@ -187,7 +202,24 @@ pub fn export_conversion(
     }
 
     let converted = sources.with(request.source_id, |source| {
-        convert(&source.buffer, &request.settings)
+        let mut settings = request.settings.clone();
+        if let Some(bg) = settings.background_removal.take() {
+            if bg.method == BackgroundRemovalMethod::Ml {
+                // Best-effort: `ensure_loaded`'s error (no model/runtime on
+                // disk) is ignored here because `remove_background` itself
+                // degrades to flood-fill when no session is loaded — this
+                // call only exists so a *first* ML export pays the load cost
+                // instead of silently running unloaded.
+                let _ = crate::commands::segment::ensure_loaded(&app, &segmenter);
+                let masked = segmenter
+                    .lock()
+                    .expect("segmenter poisoned")
+                    .remove_background(&source.buffer, &bg);
+                return convert(&masked, &settings);
+            }
+            settings.background_removal = Some(bg);
+        }
+        convert(&source.buffer, &settings)
     })??;
 
     let (width, height) = (converted.image.width, converted.image.height);

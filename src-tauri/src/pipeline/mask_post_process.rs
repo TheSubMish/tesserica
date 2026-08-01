@@ -227,6 +227,7 @@ fn with_alpha(image: &PixelBuffer, alpha: &[u8]) -> PixelBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::settings::BackgroundRemovalMethod;
 
     fn solid(width: u32, height: u32, color: [u8; 4]) -> PixelBuffer {
         let mut b = PixelBuffer::new(width, height).unwrap();
@@ -417,6 +418,7 @@ mod tests {
         image.data[hole + 3] = 0;
 
         let settings = BackgroundRemovalSettings {
+            method: BackgroundRemovalMethod::FloodFill,
             tolerance: 0.0,
             threshold: Some(128),
             close: 1,
@@ -441,6 +443,7 @@ mod tests {
         let o = image.offset(1, 1);
         image.data[o + 3] = 0;
         let settings = BackgroundRemovalSettings {
+            method: BackgroundRemovalMethod::FloodFill,
             tolerance: 0.02,
             threshold: None,
             close: 0,

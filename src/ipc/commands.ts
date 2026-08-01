@@ -512,6 +512,24 @@ export async function saveDownloadedSegmentationModel(
   return invoke<SavedSegmentationModel>('save_downloaded_segmentation_model', bytes);
 }
 
+export interface SegmentationAvailability {
+  available: boolean;
+  /** A human-readable reason ML segmentation is unavailable — set iff `!available`. */
+  reason?: string;
+}
+
+/**
+ * Whether ML background removal can actually run right now (a model *and*
+ * the ONNX Runtime library are both on disk) — and, if so, preloads the
+ * session on the Rust side so the first real conversion does not pay that
+ * cost. A local filesystem check plus a local model load, never a network
+ * call — safe to call on mount, the same as `segmentationModelStatus`/
+ * `onnxRuntimeStatus` above.
+ */
+export async function segmentationAvailability(): Promise<SegmentationAvailability> {
+  return invoke<SegmentationAvailability>('segmentation_availability');
+}
+
 // ---------------------------------------------------------------------------
 // On-demand ONNX Runtime native library download (`docs/10-decisions.md`
 // D16, `src/segment/OnnxRuntimeSection.tsx`). Same shape as the segmentation
