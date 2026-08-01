@@ -1574,7 +1574,57 @@ Ordered by value, not commitment:
       recolor test (`PalettePanel.test.tsx`, using the same native-input-setter technique
       this project's `LayerEffectsSection`/`TimelinePanel`/`SliderField` tests already
       established for a React-controlled input under jsdom).
-- [ ] Bead / cross-stitch chart export (W9)
+- [x] Bead / cross-stitch chart export (W9) — `src/model/patternChart.ts`'s
+      `buildPatternChart` is the color-key/legend computation W9 asks for:
+      walks the sprite's flattened composite (`canvas/flatten.ts`) and
+      produces a small indexed grid plus a legend ordered by descending
+      count. **RGBA vs. indexed, decided rather than punted**: an
+      `indexed`-mode sprite's own `sprite.palette` is used verbatim (it is
+      already the "indexed grid plus a palette" W9's own line describes);
+      every other sprite gets a palette *derived* from its flattened pixels
+      via the conversion pipeline's own `pipeline/autopalette.ts::autoPalette`
+      (Wu + k-means in Oklab) and snapped per-pixel with
+      `pipeline/quantize.ts::nearestIndexOklab` — reusing the converter's
+      quantizer rather than a third implementation, and capped at
+      `DEFAULT_MAX_DERIVED_COLORS` (32) so a photo-like RGBA sprite with
+      thousands of anti-aliased colors cannot produce an unprintable legend.
+      A pixel below `PATTERN_CHART_ALPHA_THRESHOLD` (128, the same default
+      `pipeline/settings.ts` already uses) is an empty chart cell, not a
+      quantized "transparent" color. The printable image is
+      `src-tauri/src/commands/pattern_chart.rs::export_pattern_chart` — full-
+      resolution PNG rendering belongs in Rust (`docs/02-architecture.md`
+      §3), taking the grid + legend as plain JSON (small integers, the same
+      "not a pixel buffer" precedent `tilemap_export.rs`'s `tile_ids`
+      already set). It draws coordinate labels (row/column numbers, with an
+      auto-computed label interval so a wide/tall sprite's chart does not
+      overlap its own labels), gridlines (bold every 10 cells), each cell
+      filled with its color, and a legend below with a swatch, RGB value and
+      count per color, all at a configurable `cellSize` (px/cell — validated
+      against its own bounds, not the unrelated `ALLOWED_SCALES` pixel-
+      replication invariant). **Symbols: added, and numeric rather than
+      lettered.** Every cell (and its legend row) is overlaid with the
+      color's 1-based legend position in a hand-authored 3×5 pixel digit
+      font — real printability for a black-and-white printout, the
+      "nice-to-have" the roadmap named — drawn with black or white ink
+      chosen from the color's own Oklab lightness for contrast. No font-
+      rendering dependency was added: every label this chart draws (axis
+      numbers, RGB values, counts, symbols) is digits only, so a full
+      alphabet was never needed — numeric symbol keys are themselves a real
+      cross-stitch/bead-chart convention, not just an implementation
+      shortcut. Wired into `app/ExportDialog.tsx` as a fourth format
+      ("Pattern chart") alongside PNG/Spritesheet/GIF, with a cell-size
+      field and — only for an RGBA-mode sprite, since an indexed sprite's
+      palette is already fixed — a max-colors field. Tests: 6 cases in
+      `patternChart.test.ts` (count-per-color, alpha-threshold-as-empty-
+      cell, the `DEFAULT_MAX_DERIVED_COLORS` cap, an explicit `maxColors`
+      override, and both the indexed-palette and derived-palette paths), 13
+      in `pattern_chart.rs` (font/measurement helpers, label-interval
+      growth, contrast-ink choice, validation, and real PNGs decoded back
+      with `image::load_from_memory` and checked at known cell/legend
+      pixel positions) — plus manual verification rendering an 8×8 heart
+      sprite and a 30×20 multi-color grid to real PNGs and visually
+      confirming the grid, coordinate labels, gridlines and legend all read
+      correctly before those ad hoc renders were discarded.
 - [ ] Lospec URL import (opt-in network)
 - [ ] Isometric and hexagonal tile grids
 
