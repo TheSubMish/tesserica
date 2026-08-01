@@ -14,7 +14,7 @@
  */
 
 import { celBufferId, type Cel, type Layer, type LayerId, type Sprite } from '../model/types';
-import { getBuffer } from '../model/pixelBuffers';
+import { getCelBuffer, resolveRasterToRgba } from '../model/celStorage';
 import { getGrid } from '../model/tileGridBuffers';
 import { renderTilemapCel } from '../model/tilemapRender';
 import { childrenOf } from '../model/layerTree';
@@ -68,8 +68,20 @@ export function leafLayerContent(
     const gridBuffer = getGrid(celBufferId(cel));
     return placeCel(renderTilemapCel(tileset, layer.grid, gridBuffer, cel), cel, width, height);
   }
-  const buf = getBuffer(celBufferId(cel));
-  return buf ? placeCel(buf, cel, width, height) : null;
+  // An indexed-mode raster layer's cel holds palette indices, not RGBA
+  // (`docs/08-roadmap.md` Phase 7, `model/celStorage.ts`) — resolved through
+  // the sprite's own palette here, at composite time, exactly like a tilemap
+  // cel's grid is resolved against its tileset just above. This is also what
+  // makes live palette swapping free: nothing here caches across a palette
+  // change on its own, `canvas/renderer.ts`'s own cache is what does that.
+  const buf = getCelBuffer(sprite, layer, celBufferId(cel));
+  if (!buf) return null;
+  return placeCel(
+    resolveRasterToRgba(sprite, layer, buf, cel.width, cel.height),
+    cel,
+    width,
+    height,
+  );
 }
 
 /** `own`'s alpha scaled by `opacity` — its shape as a future clip base, at its own opacity. */

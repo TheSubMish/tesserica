@@ -7,9 +7,10 @@ import {
   setPixel,
 } from '../model/pixelBuffers';
 import { allocateGrid, bumpGridRevision, getGrid, setGridCell } from '../model/tileGridBuffers';
+import { allocateIndexBuffer, clearAllIndexBuffers } from '../model/indexBuffers';
 import { clearAllTileBuffers, setTileBuffer } from '../model/tileBuffers';
 import { packTileId } from '../model/tileIds';
-import type { Cel, GridSpec, Layer, Sprite, Tileset } from '../model/types';
+import type { Cel, GridSpec, Layer, Palette, Sprite, Tileset } from '../model/types';
 import {
   drawCheckerboard,
   drawGrid,
@@ -132,6 +133,7 @@ function makeSprite(width: number, height: number): Sprite {
 
 beforeEach(() => {
   clearAllBuffers();
+  clearAllIndexBuffers();
   // The renderer caches across calls by design; every test here starts from a
   // cold cache so it measures its own work, not the previous test's.
   invalidateRenderCache();
@@ -817,5 +819,110 @@ describe('drawOnionSkin', () => {
         }),
       ).not.toThrow();
     });
+  });
+});
+
+describe('indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  const palette: Palette = {
+    id: 'p1',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255],
+      [0, 255, 0, 255],
+    ],
+  };
+
+  function makeIndexedSprite(width: number, height: number, indices: number[]): Sprite {
+    allocateIndexBuffer('cel', width, height).set(indices);
+    return {
+      width,
+      height,
+      colorMode: 'indexed',
+      palette,
+      layers: [
+        {
+          id: 'l1',
+          kind: 'raster',
+          name: 'Layer 1',
+          visible: true,
+          locked: false,
+          opacity: 1,
+          blendMode: 'normal',
+          parentId: null,
+          clippingMask: false,
+          effects: [],
+        },
+      ],
+      frames: [{ id: 'f1', durationMs: 100 }],
+      cels: [{ id: 'cel', layerId: 'l1', frameId: 'f1', x: 0, y: 0, width, height }],
+      tags: [],
+      tilesets: [],
+    };
+  }
+
+  it('resolves stored indices through the sprite palette when uploading the cel', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeIndexedSprite(2, 2, [1, 2, 0, 1]);
+    const ctx = stubContext();
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', {
+      zoom: 4,
+      panX: 0,
+      panY: 0,
+    });
+
+    const put = contexts.flatMap((c) => c.calls).find((c) => c.fn === 'putImageData');
+    const image = put!.args[0] as { data: Uint8ClampedArray };
+    expect(Array.from(image.data)).toEqual([
+      255,
+      0,
+      0,
+      255, // index 1 -> red
+      0,
+      255,
+      0,
+      255, // index 2 -> green
+      0,
+      0,
+      0,
+      0, // index 0 -> transparent
+      255,
+      0,
+      0,
+      255,
+    ]);
+  });
+
+  it('live palette swap invalidates the cel cache and re-uploads the newly resolved colour', () => {
+    const contexts = stubCanvasFactory();
+    const sprite = makeIndexedSprite(1, 1, [1]);
+    const ctx = stubContext();
+    const vp = { zoom: 4, panX: 0, panY: 0 };
+
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    const firstPut = contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData');
+    expect(firstPut).toHaveLength(1);
+    expect(Array.from((firstPut[0].args[0] as { data: Uint8ClampedArray }).data)).toEqual([
+      255, 0, 0, 255,
+    ]);
+
+    // Redrawing the unchanged sprite must not re-upload (the existing
+    // dirty-layer-caching contract) — this is the control for the next step.
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, sprite, 'f1', vp);
+    expect(contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData')).toHaveLength(1);
+
+    // The cel's stored index (`1`) is never touched — only the palette entry
+    // it resolves through changes, which is the whole point of "live" swapping.
+    const recolored: Sprite = {
+      ...sprite,
+      palette: { ...palette, colors: [[9, 8, 7, 255], palette.colors[1]] },
+    };
+    drawSprite(ctx as unknown as CanvasRenderingContext2D, recolored, 'f1', vp);
+
+    const allPut = contexts.flatMap((c) => c.calls).filter((c) => c.fn === 'putImageData');
+    expect(allPut).toHaveLength(2); // the swap forced a real re-upload
+    expect(Array.from((allPut[1].args[0] as { data: Uint8ClampedArray }).data)).toEqual([
+      9, 8, 7, 255,
+    ]);
   });
 });

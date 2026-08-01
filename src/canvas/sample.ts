@@ -11,7 +11,8 @@
  * (`docs/02-architecture.md` §9).
  */
 
-import { getBuffer } from '../model/pixelBuffers';
+import { getCelBuffer, isIndexedLayer } from '../model/celStorage';
+import { resolveIndexToRgba } from '../model/indexedColor';
 import { getGrid, getGridCell } from '../model/tileGridBuffers';
 import { resolveTilePixels } from '../model/tilemapRender';
 import { EMPTY_TILE_ID, tileGridDims } from '../model/tileIds';
@@ -29,14 +30,33 @@ import { applyEffects, hasEnabledEffects } from './effects';
 export { compositeOver } from './compositeOver';
 import { compositeOver } from './compositeOver';
 
-/** The layer's own pixel at one document coordinate, or `null` outside its cel. */
-function sampleCel(cel: Cel, x: number, y: number): RGBA | null {
+/**
+ * The layer's own pixel at one document coordinate, or `null` outside its cel.
+ *
+ * For an indexed-mode raster layer (`docs/08-roadmap.md` Phase 7,
+ * `model/celStorage.ts`), resolves the one stored index through the sprite's
+ * palette rather than materializing the whole cel — the eyedropper samples a
+ * single pixel per click, so there is no reason to pay `renderIndexedCel`'s
+ * whole-cel cost here.
+ */
+function sampleCel(
+  sprite: Sprite,
+  layer: Exclude<Layer, { kind: 'group' }>,
+  cel: Cel,
+  x: number,
+  y: number,
+): RGBA | null {
   const lx = x - cel.x;
   const ly = y - cel.y;
   if (lx < 0 || ly < 0 || lx >= cel.width || ly >= cel.height) return null;
 
-  const buf = getBuffer(celBufferId(cel));
+  const buf = getCelBuffer(sprite, layer, celBufferId(cel));
   if (!buf) return null;
+
+  if (isIndexedLayer(sprite, layer)) {
+    const idx = (buf as Uint8Array)[ly * cel.width + lx];
+    return sprite.palette ? resolveIndexToRgba(idx, sprite.palette) : [0, 0, 0, 0];
+  }
 
   const i = (ly * cel.width + lx) * 4;
   return [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
@@ -108,7 +128,7 @@ function leafOwnBuffer(
       const rgba =
         layer.kind === 'tilemap'
           ? sampleTilemapCel(sprite, layer, cel, x, y)
-          : sampleCel(cel, x, y);
+          : sampleCel(sprite, layer, cel, x, y);
       if (!rgba) continue;
       const i = (y * width + x) * 4;
       out[i] = rgba[0];
@@ -160,7 +180,7 @@ function ownContributionAt(
     if (!cel) return null;
     return layer.kind === 'tilemap'
       ? sampleTilemapCel(sprite, layer, cel, x, y)
-      : sampleCel(cel, x, y);
+      : sampleCel(sprite, layer, cel, x, y);
   }
 
   let buffer: Uint8ClampedArray;

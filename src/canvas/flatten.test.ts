@@ -1,9 +1,19 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { allocateBuffer, clearAllBuffers, setPixel } from '../model/pixelBuffers';
+import { allocateIndexBuffer, clearAllIndexBuffers } from '../model/indexBuffers';
 import { allocateGrid, setGridCell } from '../model/tileGridBuffers';
 import { clearAllTileBuffers, setTileBuffer } from '../model/tileBuffers';
 import { packTileId } from '../model/tileIds';
-import type { Cel, Frame, GridSpec, Layer, LayerBase, Sprite, Tileset } from '../model/types';
+import type {
+  Cel,
+  Frame,
+  GridSpec,
+  Layer,
+  LayerBase,
+  Palette,
+  Sprite,
+  Tileset,
+} from '../model/types';
 import { useUIStore } from '../state/uiStore';
 import { flattenSprite } from './flatten';
 
@@ -74,7 +84,10 @@ function makeSprite(layers: Layer[], cels?: Partial<Cel>[]): Sprite {
 const px = (buf: Uint8ClampedArray, x: number, y: number) =>
   Array.from(buf.subarray((y * W + x) * 4, (y * W + x) * 4 + 4));
 
-beforeEach(() => clearAllBuffers());
+beforeEach(() => {
+  clearAllBuffers();
+  clearAllIndexBuffers();
+});
 
 describe('flattenSprite', () => {
   it('is transparent for an empty document', () => {
@@ -334,6 +347,87 @@ describe('flattenSprite', () => {
         tags: [],
         tilesets: [],
       };
+      const out = flattenSprite(sprite, 'f1');
+      expect(Array.from(out)).toEqual(new Array(W * H * 4).fill(0));
+    });
+  });
+
+  describe('indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+    const palette: Palette = {
+      id: 'p1',
+      name: 'P',
+      colors: [
+        [255, 0, 0, 255],
+        [0, 255, 0, 255],
+      ],
+    };
+
+    function indexedSprite(indices: number[]): Sprite {
+      const frame: Frame = { id: 'f1', durationMs: 100 };
+      const l = layer('l1');
+      const cel: Cel = {
+        id: 'cel-l1',
+        layerId: 'l1',
+        frameId: 'f1',
+        x: 0,
+        y: 0,
+        width: W,
+        height: H,
+      };
+      allocateIndexBuffer(cel.id, W, H).set(indices);
+      return {
+        width: W,
+        height: H,
+        colorMode: 'indexed',
+        layers: [l],
+        frames: [frame],
+        cels: [cel],
+        tags: [],
+        tilesets: [],
+        palette,
+      };
+    }
+
+    it('resolves stored indices through the sprite palette', () => {
+      const indices = new Array(W * H).fill(0);
+      indices[0] = 1; // red
+      indices[5] = 2; // green
+      const sprite = indexedSprite(indices);
+      const out = flattenSprite(sprite, 'f1');
+      expect([out[0], out[1], out[2], out[3]]).toEqual([255, 0, 0, 255]);
+      expect([out[5 * 4], out[5 * 4 + 1], out[5 * 4 + 2], out[5 * 4 + 3]]).toEqual([
+        0, 255, 0, 255,
+      ]);
+      // Index 0 (transparent) elsewhere.
+      expect([out[4 * 4], out[4 * 4 + 1], out[4 * 4 + 2], out[4 * 4 + 3]]).toEqual([0, 0, 0, 0]);
+    });
+
+    it('live palette swap: editing a palette colour changes every pixel using that index without touching cel data', () => {
+      const indices = new Array(W * H).fill(1); // every pixel is index 1 (red)
+      const sprite = indexedSprite(indices);
+
+      const before = flattenSprite(sprite, 'f1');
+      expect([before[0], before[1], before[2], before[3]]).toEqual([255, 0, 0, 255]);
+
+      // Swap the palette's own first colour — the cel's stored indices are
+      // completely untouched (`indices` above never changes).
+      const recolored: Sprite = {
+        ...sprite,
+        palette: { ...palette, colors: [[10, 20, 30, 255], palette.colors[1]] },
+      };
+      const after = flattenSprite(recolored, 'f1');
+      expect([after[0], after[1], after[2], after[3]]).toEqual([10, 20, 30, 255]);
+      // Every pixel in the sprite used index 1, so every pixel changed.
+      for (let p = 0; p < W * H; p++) {
+        expect([after[p * 4], after[p * 4 + 1], after[p * 4 + 2], after[p * 4 + 3]]).toEqual([
+          10, 20, 30, 255,
+        ]);
+      }
+    });
+
+    it('renders fully transparent when no palette is assigned', () => {
+      const sprite = { ...indexedSprite([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]) };
+      delete sprite.palette;
       const out = flattenSprite(sprite, 'f1');
       expect(Array.from(out)).toEqual(new Array(W * H * 4).fill(0));
     });

@@ -21,7 +21,8 @@ import {
   type LayerId,
   type Sprite,
 } from '../model/types';
-import { celRevision, getBuffer } from '../model/pixelBuffers';
+import { celBufferRevision, getCelBuffer, resolveRasterToRgba } from '../model/celStorage';
+import { paletteFingerprint } from '../model/indexedColor';
 import { getGrid, gridRevision } from '../model/tileGridBuffers';
 import { tileEntryRevision } from '../model/tileBuffers';
 import { renderTilemapCel } from '../model/tilemapRender';
@@ -156,11 +157,19 @@ function layerContentSignature(sprite: Sprite, frameId: string, layer: Layer): s
   if (!cel) return '-';
   if (layer.kind === 'tilemap') return tilemapSignaturePart(sprite, layer, cel);
   const bufferId = celBufferId(cel);
-  return `${cel.id}@${cel.x},${cel.y}~${bufferId}#${celRevision(bufferId)}`;
+  return `${cel.id}@${cel.x},${cel.y}~${bufferId}#${celBufferRevision(sprite, layer, bufferId)}`;
 }
 
 function signatureOf(sprite: Sprite, frameId: string): string {
-  const parts: string[] = [`${sprite.width}x${sprite.height}@${frameId}`];
+  // The palette fingerprint is folded in unconditionally rather than only for
+  // an indexed sprite: an rgba sprite's pixels never depend on `sprite.palette`
+  // at all, so this costs an unused string comparison on every redraw for
+  // that case and, in exchange, a palette edit or swap
+  // (`docs/08-roadmap.md` Phase 7 "live palette swapping") invalidates every
+  // cache below without each one needing its own colorMode-aware branch.
+  const parts: string[] = [
+    `${sprite.width}x${sprite.height}@${frameId}~pal:${paletteFingerprint(sprite.palette)}`,
+  ];
   const walk = (parentId: LayerId | null): void => {
     for (const layer of childrenOf(sprite.layers, parentId)) {
       // A group's own "content" marker stays the fixed 'G' here (unchanged
@@ -198,16 +207,30 @@ function signatureOf(sprite: Sprite, frameId: string): string {
  * a coincidental match — two single-edit cels both sitting at revision 1,
  * say — which would silently serve the old buffer's stale canvas right
  * after linking. `Unlink Cel` produces the same risk in reverse.
+ *
+ * An indexed-mode raster layer's cel (`docs/08-roadmap.md` Phase 7,
+ * `model/celStorage.ts`) stores palette indices, resolved to RGBA here via
+ * `resolveRasterToRgba` before upload — the cache key folds in
+ * `sprite.palette`'s own fingerprint (`signatureOf`'s job, via
+ * `layerContentSignature` for the per-cel case not covered here — see below)
+ * so a palette swap invalidates this canvas exactly like a pixel edit would.
  */
-function celCanvas(cel: Cel): HTMLCanvasElement | null {
+function celCanvas(
+  sprite: Sprite,
+  layer: Exclude<Layer, { kind: 'group' | 'tilemap' }>,
+  cel: Cel,
+): HTMLCanvasElement | null {
   const bufferId = celBufferId(cel);
-  const buf = getBuffer(bufferId);
-  if (!buf) return null;
+  const stored = getCelBuffer(sprite, layer, bufferId);
+  if (!stored) return null;
 
-  const revision = celRevision(bufferId);
+  const revision = celBufferRevision(sprite, layer, bufferId);
+  const paletteSig = paletteFingerprint(sprite.palette);
+  const cacheKey = `${bufferId}~${paletteSig}`;
   const cached = celCache.get(cel.id);
-  if (cached && cached.bufferId === bufferId && cached.revision === revision) return cached.canvas;
+  if (cached && cached.bufferId === cacheKey && cached.revision === revision) return cached.canvas;
 
+  const buf = resolveRasterToRgba(sprite, layer, stored, cel.width, cel.height);
   const canvas = cached?.canvas ?? document.createElement('canvas');
   if (canvas.width !== cel.width || canvas.height !== cel.height) {
     canvas.width = cel.width;
@@ -220,7 +243,13 @@ function celCanvas(cel: Cel): HTMLCanvasElement | null {
   ctx.clearRect(0, 0, cel.width, cel.height);
   ctx.putImageData(new ImageData(buf, cel.width, cel.height), 0, 0);
 
-  celCache.set(cel.id, { canvas, bufferId, revision, width: cel.width, height: cel.height });
+  celCache.set(cel.id, {
+    canvas,
+    bufferId: cacheKey,
+    revision,
+    width: cel.width,
+    height: cel.height,
+  });
   return canvas;
 }
 
@@ -436,7 +465,10 @@ function compositeScope(
     } else {
       const cel = sprite.cels.find((c) => c.layerId === layer.id && c.frameId === frameId);
       if (!cel) continue;
-      source = layer.kind === 'tilemap' ? tilemapCelCanvas(sprite, layer, cel) : celCanvas(cel);
+      source =
+        layer.kind === 'tilemap'
+          ? tilemapCelCanvas(sprite, layer, cel)
+          : celCanvas(sprite, layer, cel);
       offsetX = cel.x;
       offsetY = cel.y;
     }

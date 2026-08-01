@@ -1,9 +1,19 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { allocateBuffer, setPixel } from '../model/pixelBuffers';
+import { allocateIndexBuffer } from '../model/indexBuffers';
 import { allocateGrid, setGridCell } from '../model/tileGridBuffers';
 import { clearAllTileBuffers, setTileBuffer } from '../model/tileBuffers';
 import { packTileId } from '../model/tileIds';
-import type { Cel, Frame, GridSpec, Layer, LayerBase, Sprite, Tileset } from '../model/types';
+import type {
+  Cel,
+  Frame,
+  GridSpec,
+  Layer,
+  LayerBase,
+  Palette,
+  Sprite,
+  Tileset,
+} from '../model/types';
 import { compositeOver, samplePixel } from './sample';
 import { picker } from '../tools/picker';
 import { harness } from '../tools/testHarness';
@@ -316,5 +326,62 @@ describe('eyedropper', () => {
     c.sampleSource = () => null;
     picker.onPointerDown(c, 99, 99);
     expect(c.picked).toHaveLength(0);
+  });
+});
+
+describe('samplePixel — indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  const palette: Palette = {
+    id: 'p1',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255],
+      [0, 255, 0, 255],
+    ],
+  };
+
+  function indexedSprite(): { sprite: Sprite; frameId: string } {
+    const frame: Frame = { id: 'f1', durationMs: 100 };
+    const l = layer('l1');
+    const cel: Cel = {
+      id: 'cel-l1',
+      layerId: 'l1',
+      frameId: frame.id,
+      x: 0,
+      y: 0,
+      width: 4,
+      height: 4,
+    };
+    allocateIndexBuffer(cel.id, 4, 4).set([1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    return {
+      sprite: {
+        width: 4,
+        height: 4,
+        colorMode: 'indexed',
+        layers: [l],
+        frames: [frame],
+        cels: [cel],
+        tags: [],
+        tilesets: [],
+        palette,
+      },
+      frameId: frame.id,
+    };
+  }
+
+  it('resolves the stored index through the palette', () => {
+    const { sprite, frameId } = indexedSprite();
+    expect(samplePixel(sprite, frameId, 0, 0)).toEqual([255, 0, 0, 255]);
+    expect(samplePixel(sprite, frameId, 1, 0)).toEqual([0, 255, 0, 255]);
+    expect(samplePixel(sprite, frameId, 2, 0)).toEqual([0, 0, 0, 0]); // TRANSPARENT_INDEX
+  });
+
+  it('reflects a live palette swap without touching the stored index', () => {
+    const { sprite, frameId } = indexedSprite();
+    expect(samplePixel(sprite, frameId, 0, 0)).toEqual([255, 0, 0, 255]);
+    const recolored: Sprite = {
+      ...sprite,
+      palette: { ...palette, colors: [[9, 9, 9, 255], palette.colors[1]] },
+    };
+    expect(samplePixel(recolored, frameId, 0, 0)).toEqual([9, 9, 9, 255]);
   });
 });
