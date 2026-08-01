@@ -259,8 +259,22 @@ bit     29 : flip vertical
 bit     30 : transpose (diagonal flip)
 ```
 
-**v1 ships rect only.** Isometric and hex are in the model from the start so adding them
-later is not a migration, but they are not implemented initially.
+**v1 shipped rect only; isometric and hexagonal landed in Phase 7** (roadmap "Isometric
+and hexagonal tile grids"), exactly the extension-not-migration this section originally
+described. Placement/picking math for all three shapes lives in `model/gridGeometry.ts`
+(TS only — Rust never composites layers, `02-architecture.md` §6.2, so it has no
+placement math to mirror, only `GridShape`/`GridSpec` round-tripping through `.tess`).
+Isometric uses the standard 2:1 diamond shear (`(col−row, col+row)`, invertible so
+picking is closed-form exact); hexagonal uses pointy-top, odd-row horizontal offset
+("odd-r" in Red Blob Games' terminology) so it keeps the same row-major dense grid
+buffer every shape shares, with a nearest-bounding-box-centre search for picking since
+offset hex coordinates have no linear closed form. Both new shapes' tile bounding boxes
+legitimately overlap their neighbours (that is what makes the diamonds/hexagons
+interlock) and are alpha-composited back-to-front rather than overwritten the way `rect`
+is; `tileGridDims`'s cols/rows extent is still a plain `cel size / tile size` division for
+every shape, so an isometric/hexagonal grid's usable cell count is not perfectly tuned to
+its actual on-screen footprint — a known, documented limitation rather than an
+oversight (`model/gridGeometry.ts`'s own module doc, `08-roadmap.md`).
 
 ---
 

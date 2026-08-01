@@ -1684,7 +1684,112 @@ Ordered by value, not commitment:
       `invoke()` calls) was proven directly against the live network instead,
       which is a stronger proof of the code path than a UI click-through
       would have given without that gap.
-- [ ] Isometric and hexagonal tile grids
+- [x] Isometric and hexagonal tile grids — extends Phase 6's rect-only tilemap layer
+      (`03-data-model.md` §4's own "v1 ships rect only… not implemented initially").
+      Before this, `GridSpec.shape` was reachable neither from rendering nor from the
+      UI: `renderTilemapCel` and `docPixelToCell` both hardcoded plain
+      `col*tileWidth`/`row*tileHeight` math regardless of `shape`, and no control ever
+      created a layer with anything but `shape: 'rect'` — isometric/hexagonal silently
+      behaved exactly like rect, not "unreachable" or "errors," confirmed by reading the
+      code rather than assumed. `model/gridGeometry.ts` is the new shared home for every
+      shape's placement math: `cellOrigin` (grid cell → cel-local pixel origin, the
+      forward transform) and its exact inverse `pixelToCell` (pixel → grid cell, for
+      stamp-tool picking and the eyedropper), plus `tileDrawOrder` for back-to-front
+      compositing order. **Isometric**: the standard 2:1 diamond shear,
+      `x = offsetX + (col−row)·tileWidth/2`, `y = offsetY + (col+row)·tileHeight/2` — an
+      invertible linear map, so picking is closed-form exact (round to the nearest
+      diamond centre in the sheared coordinate space), not a search. **Hexagonal**:
+      pointy-top, odd-row horizontal offset ("odd-r" in Red Blob Games' terminology,
+      the standard reference for offset-coordinate hex grids), chosen because it keeps
+      the same row-major dense `Uint32Array` grid buffer every shape shares — no new
+      coordinate system to store or round-trip through `.tess`. Offset hex coordinates
+      have no linear closed form, so picking searches the 3×3 neighbourhood of candidate
+      cells and returns whichever bounding-box centre is nearest, which every
+      forward-transform output round-trips through exactly (`gridGeometry.test.ts`, a
+      7×7 window around the origin including a non-zero offset, both shapes). Both new
+      shapes' tile bounding boxes legitimately overlap their neighbours by design (that
+      is what makes the diamonds/hexagons interlock) — `renderTilemapCel` now alpha-
+      composites (`compositeOver`) rather than overwrites for them, walking cells in
+      `tileDrawOrder` (ascending `col+row` for isometric — plain grid-storage order is
+      *not* correct back-to-front order there, proven by a regression test that writes
+      the same two overlapping cells in the opposite order and asserts identical output;
+      plain row-major already suffices for hex, since only adjacent rows overlap); `rect`
+      keeps its original cheap overwrite, unchanged. Because `renderTilemapCel` is the
+      one function `canvas/renderer.ts`, `canvas/flatten.ts`, and now `canvas/sample.ts`
+      all call, every shape reads identically on screen, in an exported PNG, and under
+      the eyedropper "for free" — `sample.ts`'s eyedropper used to re-derive pixel→tile
+      math directly (would have been wrong for overlapping shapes, where a query pixel
+      can fall inside more than one tile's bounding box) and now renders the cel through
+      the same shared function instead; the one caller that samples every sprite pixel in
+      a loop (`leafOwnBuffer`, an effect-bearing tilemap layer) was restructured to render
+      its cel once up front rather than once per pixel, avoiding an O(pixels²)
+      regression. **Stamp tool**: `tools/stampSession.ts`'s picking already flowed through
+      `docPixelToCell`, so it picked up every shape with no code change of its own —
+      proven by a dedicated test (clicking an isometric diamond's true centre targets that
+      diamond, not the cell plain rect division would compute at the same pixel) and live
+      (below). **UI**: `panels/TilesetPanel.tsx`'s "Add tilemap layer" used to hardcode
+      `shape: 'rect'`; a grid-shape `<select>` (rect/isometric/hexagonal, defaulting to
+      rect) now sits next to it, and `model/gridGeometry.ts::defaultGridOffset` supplies a
+      shape-appropriate default offset — isometric is horizontally centred on the
+      sprite's canvas (its diamond otherwise clips itself off-canvas to the left as `row`
+      grows past `col`, since `cellOrigin`'s `(col−row)` term goes negative), rect/hex
+      keep the unchanged canvas-origin default. **Honest limitation, not fixed by this
+      item**: `tileGridDims`'s cols/rows extent is still a plain `cel size / tile size`
+      division for every shape (`gridGeometry.ts`'s own module doc), so an
+      isometric/hexagonal grid's *usable cell count* is not perfectly tuned to its actual
+      on-screen diamond/hex footprint — a real 8×2-tile grid needed a taller cel than a
+      naive `rows × tileHeight` guess to make its second row addressable at all, caught
+      exactly this way by a test, not reasoned about in the abstract. Rust is untouched:
+      `GridShape`/`GridSpec` already round-tripped all three variants through `.tess`
+      since Phase 6 (`model::document::every_grid_shape_round_trips`), and Rust never
+      composites or places tiles at all (`02-architecture.md` §6.2), so there was no
+      placement math to mirror. `tilemap_export.rs`'s Tiled JSON always writes
+      `"orientation": "orthogonal"` regardless of the layer's actual shape — a real,
+      known gap in the *export* schema's completeness, left unfixed; Tiled's hex/iso
+      orientations also need `hexsidelength`/`staggeraxis`/`staggerindex` fields this
+      command has no data for yet, so fixing the label alone would still leave the
+      exported map wrong for a hex layer. New tests: `model/gridGeometry.test.ts` (17
+      cases — forward transform at known coordinates per shape, exact inverse round-trip
+      for both shapes including a non-zero offset, draw-order correctness, default-offset
+      centring), `model/tilemapRender.test.ts` (new isometric/hexagonal placement
+      cases — depth-independent-of-storage-order, a real alpha blend at an overlap rather
+      than "last opaque wins," hex row offset/step), `model/tileIds.test.ts` and
+      `canvas/sample.test.ts` (shape-aware `docPixelToCell`/eyedropper cases, including
+      one with an enabled effect to exercise the restructured `leafOwnBuffer`),
+      `tools/stampSession.test.ts` (isometric pick targeting), and the first automated
+      test file for `TilesetPanel` (`TilesetPanel.test.tsx`, the shape selector's three
+      options and each one's resulting `GridSpec`). **Verified live** against the real
+      Vite dev bundle over Chrome DevTools Protocol (this container's Tauri WebView
+      unreachable, consistent with every earlier phase's own note here; a fresh headless
+      Chrome with its own isolated profile was needed since the shared desktop's existing
+      Chrome session, running continuously since well before this pass, would not open a
+      second debuggable instance): drove the *real* "New tileset" form, the *real*
+      grid-shape `<select>`, and the *real* "Add tilemap layer" button through genuine DOM
+      events (not store calls) and confirmed the resulting layer's `GridSpec` matched
+      (`shape: 'isometric'`, `offsetX: 24` — the exact centred default — for a 64×64
+      canvas and an 8-wide tileset); for both isometric and hexagonal, dispatched genuine
+      `pointerdown`/`pointerup` `PointerEvent`s at the real, computed screen position of a
+      specific diamond/hex cell's true centre (through the real `<canvas>` element's own
+      `getBoundingClientRect`, the real live zoom/pan viewport, and the real `stamp` tool
+      selection — the exact path `CanvasView`'s own `onPointerDown` takes) and confirmed
+      the tile landed at the intended `(col, row)` — for hexagonal, specifically an
+      odd-numbered row, the case that most obviously breaks under plain rect math if the
+      row-shift were ignored — and *not* at the cell plain rect math would have picked at
+      that same pixel. Also confirmed programmatically, in the live app's own store/model
+      instances (not a second, disconnected module copy): stamping two isometric tiles at
+      their true diamond centres placed them at the correct, distinct `(col, row)` pairs,
+      and reading back the rendered cel's actual pixels showed the diamond interlock
+      directly — a pixel inside tile B's bounding box but where plain rect placement would
+      have put nothing came back opaque with tile B's own colour, and the pixel where
+      rect math *would* have placed tile B came back fully transparent.
+
+**Exit:** ✅ **Phase 7, and the roadmap through Phase 7, complete.** All seven items
+landed: non-destructive layer effects, batch conversion + CLI mode, pixel-art-aware
+rotate/scale, indexed colour mode with live palette swapping, bead/cross-stitch chart
+export, Lospec URL import, and — closing the phase and the document — isometric and
+hexagonal tile grids alongside the rect grid Phase 6 shipped. Only the struck-through
+cross-platform verification item (D5, Linux-only by decision) was ever skipped; every
+other checkbox in every phase from 0 through 7 is now `[x]`.
 
 ---
 
