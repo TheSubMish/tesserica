@@ -257,6 +257,21 @@ interface DocumentState {
    * (`history/tilesetCommands.ts::SetTileCellCommand`).
    */
   setTilemapCell(celId: CelId, col: number, row: number, tileId: number): void;
+
+  // ---- indexed color mode (`docs/08-roadmap.md` Phase 7, `docs/10-decisions.md`
+  // D9) ----
+  /**
+   * Assign or recolor the sprite's own embedded `Palette` — a full swap
+   * (a different palette entirely) and an in-place recolor (editing one or
+   * more of the current palette's own swatches) are the same primitive:
+   * both are "replace `sprite.palette`", and every indexed cel resolves
+   * through whatever palette is assigned at composite time
+   * (`model/celStorage.ts::resolveRasterToRgba`), so nothing else needs to
+   * change for either to take effect instantly. A pure metadata patch, like
+   * `setCelLink`/`setTilemapCell` above — `history/paletteCommands.ts` owns
+   * the undo bookkeeping.
+   */
+  setSpritePalette(palette: Palette): void;
 }
 
 function createInitialSprite(
@@ -750,6 +765,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
       revision: s.revision + 1,
     })),
+
+  setSpritePalette: (palette) =>
+    set((s) => ({ sprite: { ...s.sprite, palette }, revision: s.revision + 1 })),
 
   insertTag: (tag, index) =>
     set((s) => {

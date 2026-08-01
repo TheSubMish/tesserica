@@ -570,6 +570,35 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
+/* ---- Sprite palette recolor (docs/08-roadmap.md Phase 7, indexed mode) ---- */
+
+.palette-sprite-section {
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-2);
+}
+
+.palette-swatch-recolor {
+  display: block;
+  /* Docs §8: all targets ≥24×24, even in a dense grid — matches .palette-swatch. */
+  min-width: 24px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.palette-swatch-recolor input[type='color'] {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.palette-swatch-recolor input[type='color']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ---- Tileset panel (docs/08-roadmap.md Phase 6) ---- */
 
 .tileset-create-form {

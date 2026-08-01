@@ -11,9 +11,11 @@
  */
 
 import { useRef, useState } from 'react';
-import { sameRgb, toCss, toHex } from '../lib/color';
+import { fromHex, sameRgb, toCss, toHex } from '../lib/color';
 import { COLOR_BLIND_MODES, simulateColorBlindness, type ColorBlindMode } from '../lib/colorBlind';
 import { parsePaletteFile } from '../lib/formats/palette';
+import { assignSpritePalette, recolorSpritePaletteEntry } from '../history/paletteCommands';
+import { useDocumentStore } from '../state/documentStore';
 import { usePaletteStore } from '../state/paletteStore';
 import { useToolStore } from '../state/toolStore';
 
@@ -24,6 +26,12 @@ export function PalettePanel() {
   const palettes = usePaletteStore((s) => s.palettes);
   const activePaletteId = usePaletteStore((s) => s.activePaletteId);
   const primary = useToolStore((s) => s.primary);
+  // `docs/08-roadmap.md` Phase 7 — an indexed-mode sprite owns its own
+  // embedded palette, distinct from the session picker above (which still
+  // works normally: any colour chosen from it gets snapped to the sprite's
+  // own nearest palette entry when painting, `model/indexedColor.ts`).
+  const spriteColorMode = useDocumentStore((s) => s.sprite.colorMode);
+  const spritePalette = useDocumentStore((s) => s.sprite.palette);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +147,65 @@ export function PalettePanel() {
         <p className="hint error" role="alert">
           {error}
         </p>
+      )}
+
+      {spriteColorMode === 'indexed' && (
+        <div className="palette-sprite-section">
+          <div className="panel-head">
+            <span>This Sprite&rsquo;s Palette</span>
+          </div>
+
+          <label className="field">
+            <span className="sr-only">Assign a different palette to this sprite</span>
+            <select
+              aria-label="Assign a different palette to this sprite"
+              value=""
+              onChange={(e) => {
+                const p = palettes.find((x) => x.id === e.target.value);
+                if (p) assignSpritePalette(p);
+                e.target.value = '';
+              }}
+            >
+              <option value="" disabled>
+                Assign palette…
+              </option>
+              {palettes.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className="hint">
+            Every pixel is one of these colours. Swap the palette above, or click a swatch below to
+            recolor it — the whole sprite updates instantly, no pixels are touched.
+          </p>
+
+          <div
+            className="swatch-grid"
+            role="group"
+            aria-label={`${spritePalette?.name ?? 'Sprite'} colors — click to recolor`}
+          >
+            {(spritePalette?.colors ?? []).map((c, i) => (
+              <label
+                key={i}
+                className="palette-swatch-recolor"
+                title={`${toHex(c)} — click to recolor`}
+              >
+                <span className="sr-only">
+                  Recolor sprite palette entry {i + 1} ({toHex(c)})
+                </span>
+                <input
+                  type="color"
+                  aria-label={`Recolor sprite palette entry ${i + 1}`}
+                  value={toHex(c)}
+                  onChange={(e) => recolorSpritePaletteEntry(i, fromHex(e.target.value, c[3]))}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
       )}
     </section>
   );

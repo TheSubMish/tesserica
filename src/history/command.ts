@@ -19,6 +19,7 @@ import type {
   FrameId,
   Layer,
   LayerId,
+  Palette,
   Sprite,
   Tag,
   TagId,
@@ -72,6 +73,11 @@ export interface DocumentApi {
   insertTileEntry(tilesetId: TilesetId, entry: TileEntry, index: number): void;
   removeTileEntryMetadata(tilesetId: TilesetId, tileEntryId: TileEntryId): void;
   setTilemapCell(celId: CelId, col: number, row: number, tileId: number): void;
+
+  // ---- indexed color mode (`docs/08-roadmap.md` Phase 7, `docs/10-decisions.md`
+  // D9) ----
+  /** Assign or recolor the sprite's own embedded palette — see `model/types.ts::Sprite.palette`. */
+  setSpritePalette(palette: Palette): void;
 }
 
 export interface Command {

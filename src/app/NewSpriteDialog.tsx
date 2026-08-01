@@ -8,6 +8,7 @@
  */
 
 import { useRef, useState } from 'react';
+import type { ColorMode } from '../model/types';
 import { usePaletteStore } from '../state/paletteStore';
 import { createNewSprite, MAX_SPRITE_SIZE, MIN_SPRITE_SIZE } from './newSprite';
 import { useModalFocusTrap } from './useModalFocusTrap';
@@ -25,6 +26,7 @@ export function NewSpriteDialog({ onClose }: { onClose: () => void }) {
   const [width, setWidth] = useState(32);
   const [height, setHeight] = useState(32);
   const [paletteId, setPaletteId] = useState(activePaletteId);
+  const [colorMode, setColorMode] = useState<ColorMode>('rgba');
 
   const clampedWidth = Math.round(Math.max(MIN_SPRITE_SIZE, Math.min(MAX_SPRITE_SIZE, width)));
   const clampedHeight = Math.round(Math.max(MIN_SPRITE_SIZE, Math.min(MAX_SPRITE_SIZE, height)));
@@ -37,7 +39,7 @@ export function NewSpriteDialog({ onClose }: { onClose: () => void }) {
   };
 
   const create = () => {
-    createNewSprite({ width: clampedWidth, height: clampedHeight, paletteId });
+    createNewSprite({ width: clampedWidth, height: clampedHeight, paletteId, colorMode });
     onClose();
   };
 
@@ -112,15 +114,22 @@ export function NewSpriteDialog({ onClose }: { onClose: () => void }) {
 
         <label className="field">
           <span>Color mode</span>
-          {/* D9 — v1 is RGBA only. Shown rather than hidden so the field exists
-              when indexed mode lands in Phase 7, but nothing here implements it. */}
-          <select aria-label="Color mode" value="rgba" disabled>
+          {/* `docs/08-roadmap.md` Phase 7, `docs/10-decisions.md` D9. Indexed
+              mode locks the sprite to `paletteId`'s colours — swapping that
+              palette later, or editing one of its swatches, is the point of
+              the mode (`panels/PalettePanel.tsx`). */}
+          <select
+            aria-label="Color mode"
+            value={colorMode}
+            onChange={(e) => setColorMode(e.target.value as ColorMode)}
+          >
             <option value="rgba">RGBA</option>
+            <option value="indexed">Indexed</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Palette</span>
+          <span>{colorMode === 'indexed' ? 'Palette (the sprite’s colours)' : 'Palette'}</span>
           <select
             aria-label="Starting palette"
             value={paletteId}
@@ -133,6 +142,13 @@ export function NewSpriteDialog({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
+
+        {colorMode === 'indexed' && (
+          <p className="hint">
+            Every pixel will be one of this palette&rsquo;s colours. You can swap the palette or
+            recolor it later — every pixel updates at once.
+          </p>
+        )}
 
         <p className="hint">
           {clampedWidth}×{clampedHeight}

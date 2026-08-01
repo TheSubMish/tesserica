@@ -10,6 +10,7 @@
  */
 
 import { invalidateRenderCache } from '../canvas/renderer';
+import type { ColorMode } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import { usePaletteStore } from '../state/paletteStore';
@@ -24,13 +25,32 @@ export interface NewSpriteOptions {
   height: number;
   /** Palette to make active, e.g. what the dialog's palette picker selected. */
   paletteId?: string;
+  /**
+   * `docs/08-roadmap.md` Phase 7. Defaults to `'rgba'`. When `'indexed'`,
+   * `paletteId` (or the session's current active palette) is embedded as the
+   * sprite's own `Palette` — see `model/types.ts::Sprite.palette` for why a
+   * copy, not a live reference to the session palette list.
+   */
+  colorMode?: ColorMode;
 }
 
 export function createNewSprite(options: NewSpriteOptions): void {
   const width = Math.round(Math.max(MIN_SPRITE_SIZE, Math.min(MAX_SPRITE_SIZE, options.width)));
   const height = Math.round(Math.max(MIN_SPRITE_SIZE, Math.min(MAX_SPRITE_SIZE, options.height)));
+  const colorMode = options.colorMode ?? 'rgba';
 
-  useDocumentStore.getState().newDocument(width, height);
+  if (colorMode === 'indexed') {
+    const paletteState = usePaletteStore.getState();
+    const source =
+      paletteState.palettes.find((p) => p.id === options.paletteId) ?? paletteState.activePalette();
+    // The sprite's own copy — `model/types.ts::Palette`'s doc comment on why
+    // an indexed sprite embeds its palette rather than referencing the
+    // session list by id.
+    const palette = { ...source, colors: [...source.colors] };
+    useDocumentStore.getState().newDocument(width, height, 'indexed', palette);
+  } else {
+    useDocumentStore.getState().newDocument(width, height);
+  }
   // A brand-new document has never been saved anywhere, even if one that came
   // before it had a path.
   useDocumentStore.getState().setProjectPath(null);

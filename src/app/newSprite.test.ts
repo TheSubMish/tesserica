@@ -72,3 +72,31 @@ describe('createNewSprite', () => {
     expect(usePaletteStore.getState().activePaletteId).toBe(target);
   });
 });
+
+describe('createNewSprite — indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  it('creates an indexed-mode sprite embedding the chosen palette', () => {
+    const source = usePaletteStore.getState().palettes[1];
+    createNewSprite({ width: 8, height: 8, colorMode: 'indexed', paletteId: source.id });
+
+    const { sprite } = useDocumentStore.getState();
+    expect(sprite.colorMode).toBe('indexed');
+    expect(sprite.palette).toEqual(source);
+    // Embedded as the sprite's own copy, not a live reference — mutating the
+    // session list's array must not reach into the sprite.
+    expect(sprite.palette).not.toBe(source);
+    expect(sprite.palette?.colors).not.toBe(source.colors);
+  });
+
+  it('embeds the session active palette when no paletteId is given', () => {
+    const active = usePaletteStore.getState().activePalette();
+    createNewSprite({ width: 4, height: 4, colorMode: 'indexed' });
+    expect(useDocumentStore.getState().sprite.palette).toEqual(active);
+  });
+
+  it('defaults to rgba when colorMode is omitted', () => {
+    createNewSprite({ width: 4, height: 4 });
+    const { sprite } = useDocumentStore.getState();
+    expect(sprite.colorMode).toBe('rgba');
+    expect(sprite.palette).toBeUndefined();
+  });
+});
