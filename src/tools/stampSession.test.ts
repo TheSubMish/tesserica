@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { celBufferId } from '../model/types';
 import { getGrid, getGridCell } from '../model/tileGridBuffers';
 import { EMPTY_TILE_ID, packTileId, tileGridDims } from '../model/tileIds';
+import { cellOrigin, defaultGridOffset } from '../model/gridGeometry';
 import { addTilemapLayer, addTileset, addTileToTileset } from '../history/tilesetCommands';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
@@ -151,7 +152,16 @@ function setUpIsometric() {
   const tilesetId = addTileset('Iso Ground', 4, 2);
   const pixels = new Uint8ClampedArray(4 * 2 * 4).fill(200);
   addTileToTileset(tilesetId, pixels); // index 1
-  const grid = { shape: 'isometric' as const, tileWidth: 4, tileHeight: 2, offsetX: 0, offsetY: 0 };
+  // A real "Add tilemap layer" flow always picks an isometric grid's offset
+  // via `defaultGridOffset` (`panels/TilesetPanel.tsx`), centring column 0 so
+  // the diamond can expand both ways as `row` grows — `offsetX: 0` would make
+  // every row past 0 clip off the cel's left edge (`gridGeometry.ts`'s own
+  // module doc), which is a real, gap-closure-verified consequence of
+  // `tileGridDims` now being shape-aware (`tileIds.test.ts`'s own isometric
+  // cases), not something this test is about. Use the same real default.
+  const { width: canvasWidth, height: canvasHeight } = doc().sprite;
+  const { offsetX, offsetY } = defaultGridOffset('isometric', 4, 2, canvasWidth, canvasHeight);
+  const grid = { shape: 'isometric' as const, tileWidth: 4, tileHeight: 2, offsetX, offsetY };
   const layerId = addTilemapLayer(tilesetId, grid)!;
   doc().setActiveLayer(layerId);
   const cel = doc().celsForLayer(layerId)[0];
@@ -163,11 +173,20 @@ function setUpIsometric() {
 describe('beginStamp on an isometric grid', () => {
   it('targets the diamond cell under the pointer, not the rect cell at the same pixel', () => {
     const { cel, grid } = setUpIsometric();
-    // cellOrigin(2, 1) = ((2-1)*4/2, (2+1)*2/2) = (2, 3); its centre is
-    // (2+2, 3+1) = (4, 4) — clicking there must target (col=2, row=1), which
-    // plain rect division at this tile size (floor(4/4)=1, floor(4/2)=2)
-    // would have targeted instead.
-    expect(beginStamp(4, 4)).toBe(true);
+    // Centre of the (2, 1) diamond, from the real forward transform — not a
+    // hand-derived constant, so this stays correct if `defaultGridOffset`'s
+    // centring math ever changes.
+    const origin = cellOrigin(grid, 2, 1);
+    const px = Math.round(origin.x + grid.tileWidth / 2);
+    const py = Math.round(origin.y + grid.tileHeight / 2);
+    // Plain rect division at this tile size/offset would target a different
+    // cell entirely — proving the pick genuinely goes through the isometric
+    // transform, not rect math at the same pixel.
+    const rectCol = Math.floor((px - grid.offsetX) / grid.tileWidth);
+    const rectRow = Math.floor((py - grid.offsetY) / grid.tileHeight);
+    expect([rectCol, rectRow]).not.toEqual([2, 1]);
+
+    expect(beginStamp(px, py)).toBe(true);
     const { cols, rows } = tileGridDims(cel, grid);
     const gridBuffer = getGrid(celBufferId(cel))!;
     expect(getGridCell(gridBuffer, cols, rows, 2, 1)).toBe(packTileId(1));

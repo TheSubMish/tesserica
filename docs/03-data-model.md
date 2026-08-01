@@ -271,10 +271,13 @@ buffer every shape shares, with a nearest-bounding-box-centre search for picking
 offset hex coordinates have no linear closed form. Both new shapes' tile bounding boxes
 legitimately overlap their neighbours (that is what makes the diamonds/hexagons
 interlock) and are alpha-composited back-to-front rather than overwritten the way `rect`
-is; `tileGridDims`'s cols/rows extent is still a plain `cel size / tile size` division for
-every shape, so an isometric/hexagonal grid's usable cell count is not perfectly tuned to
-its actual on-screen footprint — a known, documented limitation rather than an
-oversight (`model/gridGeometry.ts`'s own module doc, `08-roadmap.md`).
+is. `tileGridDims`'s cols/rows extent (`model/tileIds.ts`) is shape-aware: it walks the
+same `cellOrigin` forward transform along each axis (columns at `row = 0`, rows at
+`col = 0`) counting consecutive cells whose full bounding box stays inside the cel,
+rather than a flat `cel size / tile size` guess — isometric packs cells at half a tile's
+step per axis and hexagonal at three-quarters of a tile's height per row, so the rect-only
+formula used to undercount how many cells actually fit (gap-closure fix, `tileIds.test.ts`'s
+shape-aware extent cases).
 
 ---
 

@@ -18,7 +18,7 @@
  * on the wire, with no sign-bit ambiguity to reason about on either side.
  */
 
-import { pixelToCell } from './gridGeometry';
+import { cellOrigin, pixelToCell } from './gridGeometry';
 import type { GridSpec } from './types';
 
 export const TILE_INDEX_BITS = 28;
@@ -69,15 +69,57 @@ export function unpackTileId(id: number): UnpackedTileId {
   };
 }
 
-/** Cols/rows a cel's grid has for a given tile size, clipping any partial edge tile. */
+/**
+ * Cols/rows a cel's grid has for a given tile size and shape, clipping any
+ * partial edge tile.
+ *
+ * Shape-aware (roadmap Phase 7 gap-closure, `model/gridGeometry.ts`'s own
+ * module doc and `docs/03-data-model.md` §4): for `rect`, a tile's forward-
+ * placed bounding box (`cellOrigin`) grows linearly and independently along
+ * each axis, so this reduces to the original plain `floor(cel size / tile
+ * size)` division. For `isometric`/`hexagonal`, tile bounding boxes overlap
+ * their neighbours by design (`shapeOverlaps`) and each shape's own forward
+ * transform packs cells more tightly than a flat "N tiles of tileWidth/
+ * tileHeight each" guess would assume — isometric steps `tileWidth/2`/
+ * `tileHeight/2` per column and row rather than a full tile, and hexagonal
+ * steps rows by `tileHeight * 0.75`, not `tileHeight`. Using the rect-only
+ * formula for those shapes *undercounts* how many cells actually fit: a real
+ * regression, caught by a test needing extra cel height to make row 1
+ * addressable at all (`tilemapRender.test.ts`), even though row 1's actual
+ * pixel footprint already fit in the smaller cel.
+ *
+ * The fix walks the *same* forward transform every renderer/picker already
+ * uses (`cellOrigin`) along each axis in turn — columns at a fixed `row = 0`,
+ * rows at a fixed `col = 0` — counting how many consecutive cells starting
+ * from the origin have their full `tileWidth`×`tileHeight` bounding box
+ * inside `[0, cel.width) × [0, cel.height)`, and stopping at the first one
+ * that does not. Because the dense grid buffer (`model/tileGridBuffers.ts`)
+ * is addressed as one contiguous `cols`×`rows` rectangle starting at
+ * `(0, 0)`, "the first cell along an axis whose box doesn't fit" is exactly
+ * the right stopping rule — there is no way to represent "skip row 1, keep
+ * row 2" in that buffer, so a later cell independently fitting again
+ * (possible for hexagonal, whose odd/even row parity can flip a fit back to
+ * true) must not extend the count.
+ */
 export function tileGridDims(
   cel: { width: number; height: number },
-  grid: { tileWidth: number; tileHeight: number },
+  grid: GridSpec,
 ): { cols: number; rows: number } {
-  return {
-    cols: Math.max(0, Math.floor(cel.width / grid.tileWidth)),
-    rows: Math.max(0, Math.floor(cel.height / grid.tileHeight)),
+  const { tileWidth: tw, tileHeight: th } = grid;
+  if (cel.width <= 0 || cel.height <= 0 || tw <= 0 || th <= 0) {
+    return { cols: 0, rows: 0 };
+  }
+
+  const fitsBox = (col: number, row: number): boolean => {
+    const { x, y } = cellOrigin(grid, col, row);
+    return x >= 0 && y >= 0 && x + tw <= cel.width && y + th <= cel.height;
   };
+
+  let cols = 0;
+  while (fitsBox(cols, 0)) cols++;
+  let rows = 0;
+  while (fitsBox(0, rows)) rows++;
+  return { cols, rows };
 }
 
 /**
