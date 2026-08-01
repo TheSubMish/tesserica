@@ -18,6 +18,7 @@ import { assignSpritePalette, recolorSpritePaletteEntry } from '../history/palet
 import { useDocumentStore } from '../state/documentStore';
 import { usePaletteStore } from '../state/paletteStore';
 import { useToolStore } from '../state/toolStore';
+import { LospecImportSection } from './LospecImportSection';
 
 /** Extensions the parsers understand (`docs/03-data-model.md` §3). */
 const ACCEPT = '.hex,.gpl,.pal,.txt';
@@ -83,6 +84,8 @@ export function PalettePanel() {
         aria-label="Palette file"
         onChange={(e) => void importFiles(e.target.files)}
       />
+
+      <LospecImportSection />
 
       <label className="field">
         <span className="sr-only">Palette</span>

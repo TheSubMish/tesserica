@@ -1062,6 +1062,19 @@ select:focus-visible {
   gap: 0.4rem;
 }
 
+.lospec-import-toggle {
+  width: 100%;
+  margin: 0.3rem 0;
+}
+
+.lospec-import-section,
+.lospec-import-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.3rem 0;
+}
+
 .swatch-strip {
   display: flex;
   flex-wrap: wrap;
