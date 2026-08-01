@@ -27,7 +27,8 @@
 
 import { useRef, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
-import { celBufferId, type GridSpec } from '../model/types';
+import { celBufferId, type GridShape, type GridSpec } from '../model/types';
+import { defaultGridOffset } from '../model/gridGeometry';
 import { getBuffer } from '../model/pixelBuffers';
 import { getTileBuffer } from '../model/tileBuffers';
 import { extractTilePixels } from '../model/tilesets';
@@ -82,6 +83,7 @@ export function TilesetPanel() {
   const [name, setName] = useState('Tileset');
   const [tileWidth, setTileWidth] = useState(16);
   const [tileHeight, setTileHeight] = useState(16);
+  const [gridShape, setGridShape] = useState<GridShape>('rect');
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<{ text: string; error: boolean } | null>(null);
@@ -156,12 +158,19 @@ export function TilesetPanel() {
 
   const createTilemapLayer = () => {
     if (!tileset) return;
+    const { offsetX, offsetY } = defaultGridOffset(
+      gridShape,
+      tileset.tileWidth,
+      tileset.tileHeight,
+      sprite.width,
+      sprite.height,
+    );
     const grid: GridSpec = {
-      shape: 'rect',
+      shape: gridShape,
       tileWidth: tileset.tileWidth,
       tileHeight: tileset.tileHeight,
-      offsetX: 0,
-      offsetY: 0,
+      offsetX,
+      offsetY,
     };
     const layerId = addTilemapLayer(tileset.id, grid);
     if (layerId) useDocumentStore.getState().setActiveLayer(layerId);
@@ -260,6 +269,19 @@ export function TilesetPanel() {
           >
             +
           </button>
+          <label className="grid-shape-select">
+            <span className="sr-only">New tilemap layer's grid shape</span>
+            <select
+              aria-label="New tilemap layer's grid shape"
+              title="Grid shape for the next tilemap layer"
+              value={gridShape}
+              onChange={(e) => setGridShape(e.target.value as GridShape)}
+            >
+              <option value="rect">Rect</option>
+              <option value="isometric">Isometric</option>
+              <option value="hexagonal">Hexagonal</option>
+            </select>
+          </label>
           <button
             title="Add tilemap layer from this tileset"
             aria-label="Add tilemap layer"

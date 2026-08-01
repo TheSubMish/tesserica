@@ -147,6 +147,35 @@ describe('beginStamp / continueStamp / endStamp', () => {
   });
 });
 
+function setUpIsometric() {
+  const tilesetId = addTileset('Iso Ground', 4, 2);
+  const pixels = new Uint8ClampedArray(4 * 2 * 4).fill(200);
+  addTileToTileset(tilesetId, pixels); // index 1
+  const grid = { shape: 'isometric' as const, tileWidth: 4, tileHeight: 2, offsetX: 0, offsetY: 0 };
+  const layerId = addTilemapLayer(tilesetId, grid)!;
+  doc().setActiveLayer(layerId);
+  const cel = doc().celsForLayer(layerId)[0];
+  useTilesetStore.getState().selectTile(tilesetId, 1);
+  useTilesetStore.setState({ flipH: false, flipV: false, transpose: false });
+  return { tilesetId, layerId, cel, grid };
+}
+
+describe('beginStamp on an isometric grid', () => {
+  it('targets the diamond cell under the pointer, not the rect cell at the same pixel', () => {
+    const { cel, grid } = setUpIsometric();
+    // cellOrigin(2, 1) = ((2-1)*4/2, (2+1)*2/2) = (2, 3); its centre is
+    // (2+2, 3+1) = (4, 4) — clicking there must target (col=2, row=1), which
+    // plain rect division at this tile size (floor(4/4)=1, floor(4/2)=2)
+    // would have targeted instead.
+    expect(beginStamp(4, 4)).toBe(true);
+    const { cols, rows } = tileGridDims(cel, grid);
+    const gridBuffer = getGrid(celBufferId(cel))!;
+    expect(getGridCell(gridBuffer, cols, rows, 2, 1)).toBe(packTileId(1));
+    expect(getGridCell(gridBuffer, cols, rows, 1, 2)).toBe(EMPTY_TILE_ID);
+    endStamp();
+  });
+});
+
 describe('abortStamp', () => {
   it('reverts every cell the gesture touched and pushes no undo step', () => {
     const { cel, grid } = setUp();

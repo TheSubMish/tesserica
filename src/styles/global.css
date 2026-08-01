@@ -229,6 +229,18 @@ body {
   color: var(--text);
 }
 
+.grid-shape-select select {
+  height: 20px;
+  padding: 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .panel button:focus-visible,
 .layer-row:focus-visible {
   outline: 2px solid var(--accent);
