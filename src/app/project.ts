@@ -15,6 +15,8 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { flattenSprite } from '../canvas/flatten';
 import { invalidateRenderCache } from '../canvas/renderer';
 import { getBuffer } from '../model/pixelBuffers';
+import { getIndexBuffer } from '../model/indexBuffers';
+import { isIndexedLayer } from '../model/celStorage';
 import { getGrid } from '../model/tileGridBuffers';
 import { getTileBuffer } from '../model/tileBuffers';
 import { celBufferId, type Sprite } from '../model/types';
@@ -99,6 +101,19 @@ export async function saveCurrentProject(options: { saveAs: boolean }): Promise<
         continue;
       }
 
+      // Phase 7 (`docs/08-roadmap.md`, `model/celStorage.ts`): an
+      // indexed-mode raster layer's cel holds one palette index byte per
+      // pixel, not RGBA — staged and written raw exactly like a tilemap
+      // cel's grid above (`commands::project` writes it to `cels/<id>.bin`).
+      if (layer && isIndexedLayer(doc.sprite, layer)) {
+        const indices = getIndexBuffer(celBufferId(cel));
+        if (!indices) continue;
+        const stageId = await stageBytes(indices);
+        staged.push(stageId);
+        cels.push({ celId: cel.id, stageId, width: cel.width, height: cel.height });
+        continue;
+      }
+
       const buf = getBuffer(cel.id);
       if (!buf) continue;
       const stageId = await stageBytes(asBytes(buf));
@@ -160,26 +175,33 @@ export async function saveCurrentProject(options: { saveAs: boolean }): Promise<
  * plumbing an import format needs beyond its own command.
  */
 async function applyLoadResult(result: LoadResult): Promise<void> {
-  // Roadmap Phase 6: a tilemap layer's cel arrives as the same shape as a
-  // raster cel's staged bytes (`ipc/commands.ts::LoadedCel`) — which map it
-  // belongs in is decided the same way the save path decided how to write
-  // it, by looking up the cel's owning layer.
-  const tilemapLayerIds = new Set(
-    (result.sprite.layers as Array<{ id: string; kind: string }>)
-      .filter((l) => l.kind === 'tilemap')
-      .map((l) => l.id),
+  // Roadmap Phase 6/7: a tilemap layer's cel, or (Phase 7) an indexed-mode
+  // raster layer's cel, arrives as the same staged-bytes shape a plain RGBA
+  // cel does (`ipc/commands.ts::LoadedCel`) — which map it belongs in is
+  // decided the same way the save path decided how to write it, by looking
+  // up the cel's owning layer's kind.
+  const layerKind = new Map(
+    (result.sprite.layers as Array<{ id: string; kind: string }>).map((l) => [l.id, l.kind]),
   );
   const celLayerId = new Map(
     (result.sprite.cels as Array<{ id: string; layerId: string }>).map((c) => [c.id, c.layerId]),
   );
+  // A `conversion` layer's cel stays RGBA regardless of `colorMode`
+  // (`model/celStorage.ts`'s scope decision) — excluded here by requiring
+  // `kind === 'raster'` below, not just "not tilemap".
+  const indexedSprite = result.sprite.colorMode === 'indexed';
 
   const pixels = new Map<string, Uint8ClampedArray>();
   const grids = new Map<string, Uint32Array>();
+  const indices = new Map<string, Uint8Array>();
   for (const cel of result.cels) {
     const bytes = await fetchStaged(cel.stageId);
     const layerId = celLayerId.get(cel.celId);
-    if (layerId && tilemapLayerIds.has(layerId)) {
+    const kind = layerId ? layerKind.get(layerId) : undefined;
+    if (kind === 'tilemap') {
       grids.set(cel.celId, new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4));
+    } else if (kind === 'raster' && indexedSprite) {
+      indices.set(cel.celId, new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
     } else {
       pixels.set(
         cel.celId,
@@ -201,7 +223,7 @@ async function applyLoadResult(result: LoadResult): Promise<void> {
   // the store already holds — no translation layer.
   useDocumentStore
     .getState()
-    .replaceDocument(result.sprite as unknown as Sprite, pixels, grids, tileBuffers);
+    .replaceDocument(result.sprite as unknown as Sprite, pixels, grids, tileBuffers, indices);
 
   // The new document has no shared history with the old one, and every cached
   // composite belongs to a document that no longer exists.

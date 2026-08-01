@@ -27,6 +27,8 @@ vi.mock('../ipc/commands', () => ({
   saveProject: vi.fn(),
 }));
 
+import { getBuffer } from '../model/pixelBuffers';
+import { getIndexBuffer } from '../model/indexBuffers';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import { importAseFile, openProject } from './project';
@@ -132,5 +134,40 @@ describe('importAseFile', () => {
     const result = await importAseFile();
     expect(result).toBeNull();
     expect(importAseMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('openProject — indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  function minimalIndexedSprite() {
+    return {
+      ...minimalSprite(),
+      colorMode: 'indexed',
+      palette: { id: 'p1', name: 'P', colors: [[255, 0, 0, 255]] },
+    };
+  }
+
+  it('routes a raster cel to the index store, not the RGBA one, when the sprite is indexed', async () => {
+    openMock.mockResolvedValue('/tmp/indexed.tess');
+    // One index byte per pixel — 4 bytes for a 2x2 cel, not 16. `fetchStaged`
+    // really does resolve a `Uint8Array` (`ipc/commands.ts`), not a plain
+    // `ArrayBuffer` — that distinction matters here because this test checks
+    // actual byte content, not just that *something* loaded.
+    fetchStagedMock.mockResolvedValueOnce(new Uint8Array([1, 0, 0, 1]));
+    loadProjectMock.mockResolvedValue({
+      path: '/tmp/indexed.tess',
+      formatVersion: 1,
+      sprite: minimalIndexedSprite(),
+      cels: [{ celId: 'c1', stageId: 1, width: 2, height: 2 }],
+      tileEntries: [],
+      warnings: [],
+    });
+
+    await openProject();
+
+    const s = useDocumentStore.getState().sprite;
+    expect(s.colorMode).toBe('indexed');
+    expect(s.palette).toEqual({ id: 'p1', name: 'P', colors: [[255, 0, 0, 255]] });
+    expect(getIndexBuffer(s.cels[0].id)).toEqual(new Uint8Array([1, 0, 0, 1]));
+    expect(getBuffer(s.cels[0].id)).toBeUndefined();
   });
 });

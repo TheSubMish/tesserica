@@ -74,10 +74,12 @@ pub struct Manifest {
 /// One cel's pixels, referenced by a staging handle rather than inlined.
 ///
 /// `width`/`height` are pixel dimensions for a raster cel, but for a tilemap
-/// cel (`docs/03-data-model.md` §4) the bytes are an opaque, already-encoded
-/// blob (packed tile ids) this side never validates against them — see
-/// `tilemap_layer_ids`, which is how `write_archive` decides `.png` vs `.bin`
-/// per cel rather than trusting a redundant flag on the upload itself.
+/// cel (`docs/03-data-model.md` §4) or an indexed-mode raster cel
+/// (`docs/08-roadmap.md` Phase 7) the bytes are an opaque, already-encoded
+/// blob (packed tile ids, or palette indices) this side never validates
+/// against them — see `cel_is_raw`, which is how `write_archive` decides
+/// `.png` vs `.bin` per cel rather than trusting a redundant flag on the
+/// upload itself.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CelUpload {
@@ -158,10 +160,10 @@ pub struct LoadResult {
 
 // ---------------------------------------------------------------------------
 
-/// A raster cel's PNG lives at `cels/<id>.png`; a tilemap cel's raw packed
-/// tile ids live at `cels/<id>.bin` instead (`docs/03-data-model.md` §7).
-fn cel_path(cel_id: &str, is_tilemap: bool) -> String {
-    if is_tilemap {
+/// A raster cel's PNG lives at `cels/<id>.png`; a raw cel (see `cel_is_raw`
+/// below) lives at `cels/<id>.bin` instead (`docs/03-data-model.md` §7).
+fn cel_path(cel_id: &str, raw: bool) -> String {
+    if raw {
         format!("{CEL_DIR}{cel_id}.bin")
     } else {
         format!("{CEL_DIR}{cel_id}.png")
@@ -172,20 +174,23 @@ fn tile_path(tileset_id: &str, tile_id: &str) -> String {
     format!("{TILE_DIR}{tileset_id}/{tile_id}.png")
 }
 
-/// Every layer id in `sprite` that is a `Layer::Tilemap` — used to decide,
-/// per cel, whether its content is raw packed tile ids or RGBA pixels
-/// (`docs/03-data-model.md` §4). Rust never resolves a grid against a
-/// tileset itself, so this lookup is the full extent of what it needs to
-/// know about a tilemap layer to save/load it correctly.
-fn tilemap_layer_ids(sprite: &Sprite) -> HashSet<&str> {
-    sprite
-        .layers
-        .iter()
-        .filter_map(|l| match l {
-            Layer::Tilemap { base, .. } => Some(base.id.as_str()),
-            _ => None,
-        })
-        .collect()
+/// Whether the cel belonging to `layer_id` is written raw (`.bin`) rather
+/// than PNG-encoded — true for every tilemap cel (opaque packed tile ids
+/// Rust never decodes) and, as of `docs/08-roadmap.md` Phase 7, every
+/// `raster` cel in an `indexed`-mode sprite (opaque palette indices Rust
+/// never resolves against a palette either — it never composites layers at
+/// all, `docs/02-architecture.md` §6.2). A `conversion` layer's cel is the
+/// one raster case that stays RGBA regardless of `sprite.color_mode`: its
+/// pixels come from the RGBA conversion pipeline, and re-quantizing them
+/// into the sprite's separate indexed palette is out of this dispatch's
+/// scope (`docs/08-roadmap.md` Phase 7's own scope note, mirroring
+/// `src/model/celStorage.ts` on the TS side).
+fn cel_is_raw(sprite: &Sprite, layer_id: &str) -> bool {
+    match sprite.layers.iter().find(|l| l.base().id == layer_id) {
+        Some(Layer::Tilemap { .. }) => true,
+        Some(Layer::Raster { .. }) => sprite.color_mode == ColorMode::Indexed,
+        _ => false,
+    }
 }
 
 fn encode_rgba_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, AppError> {
@@ -230,9 +235,12 @@ pub fn make_thumbnail(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, A
 }
 
 fn write_archive(request: &SaveProjectRequest, staging: &Staging) -> Result<SaveResult, AppError> {
-    if request.sprite.color_mode != ColorMode::Rgba {
+    if !matches!(
+        request.sprite.color_mode,
+        ColorMode::Rgba | ColorMode::Indexed
+    ) {
         return Err(AppError::invalid(
-            "v1 writes RGBA documents only (docs/10-decisions.md D9)",
+            "unsupported color mode (docs/10-decisions.md D9)",
         ));
     }
 
@@ -245,20 +253,20 @@ fn write_archive(request: &SaveProjectRequest, staging: &Staging) -> Result<Save
     let deflated =
         SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    // Which of this document's layers are tilemap layers — decides `.png` vs
-    // `.bin` per cel below, purely from `sprite.layers`/`sprite.cels`, not a
-    // redundant flag on the upload itself.
-    let tilemap_layers = tilemap_layer_ids(&request.sprite);
+    // Which cels are written raw (`.bin`) vs PNG-encoded — `cel_is_raw`
+    // covers both tilemap cels and, as of Phase 7, indexed-mode raster cels
+    // — purely from `sprite.layers`/`sprite.cels`, not a redundant flag on
+    // the upload itself.
     let cel_layer_id: std::collections::HashMap<&str, &str> = request
         .sprite
         .cels
         .iter()
         .map(|c| (c.id.as_str(), c.layer_id.as_str()))
         .collect();
-    let is_tilemap_cel = |cel_id: &str| -> bool {
+    let is_raw_cel = |cel_id: &str| -> bool {
         cel_layer_id
             .get(cel_id)
-            .is_some_and(|layer_id| tilemap_layers.contains(layer_id))
+            .is_some_and(|layer_id| cel_is_raw(&request.sprite, layer_id))
     };
 
     let mut owned: HashSet<String> = HashSet::new();
@@ -266,7 +274,7 @@ fn write_archive(request: &SaveProjectRequest, staging: &Staging) -> Result<Save
     owned.insert(SPRITE.to_string());
     owned.insert(THUMBNAIL.to_string());
     for cel in &request.cels {
-        owned.insert(cel_path(&cel.cel_id, is_tilemap_cel(&cel.cel_id)));
+        owned.insert(cel_path(&cel.cel_id, is_raw_cel(&cel.cel_id)));
     }
     for tile in &request.tile_entries {
         owned.insert(tile_path(&tile.tileset_id, &tile.tile_id));
@@ -316,9 +324,10 @@ fn write_archive(request: &SaveProjectRequest, staging: &Staging) -> Result<Save
 
     for cel in &request.cels {
         let bytes = staging.get(cel.stage_id)?;
-        if is_tilemap_cel(&cel.cel_id) {
-            // Raw packed tile ids — an opaque payload this side never
-            // decodes, so no PNG encode and no RGBA length check.
+        if is_raw_cel(&cel.cel_id) {
+            // Raw bytes — packed tile ids or, for an indexed-mode raster
+            // cel, palette indices. An opaque payload this side never
+            // decodes either way, so no PNG encode and no RGBA length check.
             zip.start_file(cel_path(&cel.cel_id, true), deflated)?;
             zip.write_all(&bytes)?;
         } else {
@@ -383,13 +392,11 @@ fn read_archive(path: &str, staging: &Staging) -> Result<LoadResult, AppError> {
         serde_json::from_reader(entry)?
     };
 
-    if sprite.color_mode != ColorMode::Rgba {
+    if !matches!(sprite.color_mode, ColorMode::Rgba | ColorMode::Indexed) {
         return Err(AppError::invalid(
-            "v1 opens RGBA documents only (docs/10-decisions.md D9)",
+            "unsupported color mode (docs/10-decisions.md D9)",
         ));
     }
-
-    let tilemap_layers = tilemap_layer_ids(&sprite);
 
     let mut cels = Vec::new();
     let mut warnings = Vec::new();
@@ -402,12 +409,14 @@ fn read_archive(path: &str, staging: &Staging) -> Result<LoadResult, AppError> {
         if cel.linked_to.is_some() {
             continue;
         }
-        let is_tilemap = tilemap_layers.contains(cel.layer_id.as_str());
-        let name = cel_path(&cel.id, is_tilemap);
+        let is_raw = cel_is_raw(&sprite, cel.layer_id.as_str());
+        let name = cel_path(&cel.id, is_raw);
 
-        if is_tilemap {
-            // Raw packed tile ids — read and stage verbatim, no image decode
-            // (`docs/03-data-model.md` §7's own "indexed/tilemap cels as raw").
+        if is_raw {
+            // Raw bytes — packed tile ids, or (Phase 7) an indexed-mode
+            // raster cel's palette indices. Read and staged verbatim, no
+            // image decode (`docs/03-data-model.md` §7's own "indexed/
+            // tilemap cels as raw").
             let mut raw = Vec::new();
             match archive.by_name(&name) {
                 Ok(mut entry) => entry.read_to_end(&mut raw)?,
@@ -1187,5 +1196,126 @@ mod tests {
 
         std::fs::remove_file(&original).ok();
         std::fs::remove_file(&resaved).ok();
+    }
+
+    // -----------------------------------------------------------------
+    // Indexed color mode (`docs/08-roadmap.md` Phase 7, `docs/10-decisions.md`
+    // D9). Rust never resolves an index against a palette (it never
+    // composites layers at all), so these tests are only about the wire
+    // shape: raw bytes in, the identical raw bytes out, `.bin` not `.png`.
+    // -----------------------------------------------------------------
+
+    use crate::model::document::Palette;
+
+    fn indexed_sprite() -> Sprite {
+        let mut s = sprite();
+        s.color_mode = ColorMode::Indexed;
+        s.palette = Some(Palette {
+            id: "p1".into(),
+            name: "Test".into(),
+            colors: vec![[255, 0, 0, 255], [0, 255, 0, 255]],
+        });
+        s
+    }
+
+    #[test]
+    fn writes_an_indexed_raster_cel_as_raw_bin_not_png() {
+        let path = temp_path("indexed-layout.tess");
+        let staging = Staging::default();
+        // One byte per pixel — a 2x2 cel is 4 raw index bytes, not 16 RGBA ones.
+        let stage_id = staging.put(vec![1u8, 2, 0, 1]);
+
+        let request = SaveProjectRequest {
+            path: path.to_string_lossy().into_owned(),
+            sprite: indexed_sprite(),
+            cels: vec![CelUpload {
+                cel_id: "c1".into(),
+                stage_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            tile_entries: vec![],
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+
+        let names = entry_names(&path);
+        assert!(names.contains(&"cels/c1.bin".to_string()));
+        assert!(!names.contains(&"cels/c1.png".to_string()));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn round_trips_indexed_cel_bytes_and_the_sprite_palette_exactly() {
+        let path = temp_path("indexed-roundtrip.tess");
+        let staging = Staging::default();
+        let raw_indices = vec![1u8, 2, 0, 1];
+        let stage_id = staging.put(raw_indices.clone());
+
+        let request = SaveProjectRequest {
+            path: path.to_string_lossy().into_owned(),
+            sprite: indexed_sprite(),
+            cels: vec![CelUpload {
+                cel_id: "c1".into(),
+                stage_id,
+                width: 2,
+                height: 2,
+            }],
+            thumbnail: None,
+            tile_entries: vec![],
+            preserve_from: None,
+        };
+        write_archive(&request, &staging).unwrap();
+
+        let loaded = read_archive(&path.to_string_lossy(), &staging).unwrap();
+        assert_eq!(loaded.sprite.color_mode, ColorMode::Indexed);
+        assert_eq!(
+            loaded.sprite.palette.as_ref().unwrap().colors,
+            vec![[255, 0, 0, 255], [0, 255, 0, 255]]
+        );
+        assert!(loaded.warnings.is_empty());
+
+        // Bytes come back byte-for-byte — no PNG encode/decode ever touched
+        // them, unlike the RGBA path (`round_trips_pixels_exactly_including_
+        // straight_alpha` above).
+        let bytes = staging.take(loaded.cels[0].stage_id).unwrap();
+        assert_eq!(bytes, raw_indices);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_conversion_layer_cel_stays_png_even_in_an_indexed_sprite() {
+        // Scope decision (`model/celStorage.ts` on the TS side, mirrored
+        // here): a conversion layer's pixels come from the RGBA conversion
+        // pipeline regardless of the sprite's own colorMode.
+        let mut s = indexed_sprite();
+        s.layers = vec![Layer::Conversion {
+            base: LayerBase {
+                id: "l1".into(),
+                name: "Layer 1".into(),
+                visible: true,
+                locked: false,
+                opacity: 1.0,
+                blend_mode: BlendMode::Normal,
+                parent_id: None,
+                clipping_mask: false,
+                effects: vec![],
+            },
+            source: crate::model::document::ConversionSource {
+                source_id: 1,
+                settings: crate::pipeline::settings::ConvertSettings::new(
+                    2,
+                    2,
+                    crate::pipeline::settings::PaletteSpec::Fixed {
+                        colors: vec![[0, 0, 0, 255]],
+                    },
+                ),
+            },
+        }];
+
+        assert!(!cel_is_raw(&s, "l1"));
     }
 }
