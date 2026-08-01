@@ -27,11 +27,4 @@ pub enum SegmentError {
     /// `docs/10-decisions.md` D9 — no indexed-color paths, ever).
     #[error("expected an RGBA buffer of {expected} bytes, got {actual}")]
     InvalidBuffer { expected: usize, actual: usize },
-
-    /// A session is loaded but inference is not wired up yet — this
-    /// dispatch only scaffolds the module and evaluates the crate choice
-    /// (`docs/08-roadmap.md` Phase 5, "`segment` module; evaluate `rembg-rs`
-    /// vs direct `ort`").
-    #[error("segmentation inference is not implemented yet")]
-    NotImplemented,
 }
