@@ -18,6 +18,9 @@
  * on the wire, with no sign-bit ambiguity to reason about on either side.
  */
 
+import { pixelToCell } from './gridGeometry';
+import type { GridSpec } from './types';
+
 export const TILE_INDEX_BITS = 28;
 export const TILE_INDEX_MASK = (1 << TILE_INDEX_BITS) - 1; // 0x0FFF_FFFF
 
@@ -79,20 +82,19 @@ export function tileGridDims(
 
 /**
  * Document pixel → the tilemap grid cell it falls in (roadmap Phase 6, "Tile
- * stamp tool"). Cel-local, matching `model/tilemapRender.ts::renderTilemapCel`'s
- * own placement math (`ox = col * tileWidth`, no `offsetX`/`offsetY` term —
- * `GridSpec`'s offset fields are not yet wired into rendering anywhere, so the
- * stamp tool's targeting deliberately agrees with the renderer rather than
- * inventing an offset behaviour neither one implements).
+ * stamp tool"; generalized to every `GridShape` in Phase 7). Cel-local, and
+ * the inverse transform is shape-dependent (`model/gridGeometry.ts::
+ * pixelToCell`) — matching `model/tilemapRender.ts::renderTilemapCel`'s own
+ * forward placement (`cellOrigin`) exactly, including `offsetX`/`offsetY`,
+ * which is now wired into every shape's placement math (both functions read
+ * it identically, so a grid with a non-zero offset still targets the same
+ * cell it renders into).
  */
 export function docPixelToCell(
   docX: number,
   docY: number,
   cel: { x: number; y: number },
-  grid: { tileWidth: number; tileHeight: number },
+  grid: GridSpec,
 ): { col: number; row: number } {
-  return {
-    col: Math.floor((docX - cel.x) / grid.tileWidth),
-    row: Math.floor((docY - cel.y) / grid.tileHeight),
-  };
+  return pixelToCell(grid, docX - cel.x, docY - cel.y);
 }

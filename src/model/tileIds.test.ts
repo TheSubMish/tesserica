@@ -10,6 +10,7 @@ import {
   tileGridDims,
   unpackTileId,
 } from './tileIds';
+import type { GridSpec } from './types';
 
 describe('packTileId / unpackTileId', () => {
   it('round-trips a plain index with no flags', () => {
@@ -99,7 +100,7 @@ describe('tileGridDims', () => {
 });
 
 describe('docPixelToCell', () => {
-  const grid = { tileWidth: 8, tileHeight: 16 };
+  const grid: GridSpec = { shape: 'rect', tileWidth: 8, tileHeight: 16, offsetX: 0, offsetY: 0 };
 
   it('maps a document pixel to its containing cell, cel offset at origin', () => {
     expect(docPixelToCell(0, 0, { x: 0, y: 0 }, grid)).toEqual({ col: 0, row: 0 });
@@ -115,5 +116,29 @@ describe('docPixelToCell', () => {
 
   it('floors toward negative infinity above/left of the grid, matching screenToDoc', () => {
     expect(docPixelToCell(-1, -1, { x: 0, y: 0 }, grid)).toEqual({ col: -1, row: -1 });
+  });
+
+  it('delegates to the shape-aware inverse transform for isometric/hexagonal grids', () => {
+    const iso: GridSpec = {
+      shape: 'isometric',
+      tileWidth: 32,
+      tileHeight: 16,
+      offsetX: 0,
+      offsetY: 0,
+    };
+    // Centre of the (2,1) diamond: origin (24,24) + (16,8).
+    expect(docPixelToCell(40, 32, { x: 0, y: 0 }, iso)).toEqual({ col: 2, row: 1 });
+    // A non-zero cel offset shifts the query point the same way rect does.
+    expect(docPixelToCell(50, 42, { x: 10, y: 10 }, iso)).toEqual({ col: 2, row: 1 });
+
+    const hex: GridSpec = {
+      shape: 'hexagonal',
+      tileWidth: 20,
+      tileHeight: 24,
+      offsetX: 0,
+      offsetY: 0,
+    };
+    // Centre of (1,1): origin (30,18) + (10,12).
+    expect(docPixelToCell(40, 30, { x: 0, y: 0 }, hex)).toEqual({ col: 1, row: 1 });
   });
 });
