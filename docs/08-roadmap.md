@@ -1625,7 +1625,65 @@ Ordered by value, not commitment:
       sprite and a 30×20 multi-color grid to real PNGs and visually
       confirming the grid, coordinate labels, gridlines and legend all read
       correctly before those ad hoc renders were discarded.
-- [ ] Lospec URL import (opt-in network)
+- [x] Lospec URL import (opt-in network) — `docs/06-workflows.md` W8 step 4.
+      **URL shape, verified against the live site rather than assumed**: a
+      palette page at `https://lospec.com/palette-list/<slug>` has a
+      documented, stable sibling download at `.../<slug>.hex` (same host and
+      path, `content-disposition: attachment`) — no HTML scraping needed.
+      `www.lospec.com` does not resolve. Mistyped/nonexistent slugs (slugs
+      are case-sensitive) measured to hang 30s+ rather than 404 promptly
+      (real slugs answer in ~1-2s), so a bounded timeout is load-bearing,
+      not polish. `lib/lospecImport.ts::parseLospecUrl`/`importLospecPalette`
+      own URL validation, slug extraction, and parsing — reusing the
+      existing `.hex` parser from Phase 1 rather than new parsing logic, per
+      the workflow's own note that file-format support "covers the entire
+      Lospec catalogue." **Frontend-vs-Rust: the fetch itself ended up in
+      Rust, contradicting the initial plan to mirror the Phase 5
+      segmentation-model download's frontend-`fetch()` pattern** — measured
+      directly (driving the real Vite dev bundle in a real headless browser
+      over CDP): `lospec.com` sends no `Access-Control-Allow-Origin` header,
+      so a WebView-context `fetch()` to it fails with `TypeError: Failed to
+      fetch` before any request reaches the network, while the identical
+      call from plain Node (which does not enforce CORS) succeeds — the
+      kind of gap a Node-only check would miss. `commands::lospec::
+      fetch_lospec_palette` (new `ureq` dependency, chosen for the same
+      minimal-footprint reasoning `Cargo.toml` already documents for its
+      other additions) takes only a bare slug, never a full URL, so it
+      cannot be pointed at an arbitrary host; the response text (a few
+      hundred bytes to a handful of KB) crosses back as an ordinary JSON
+      return value, not through `staging` — nothing like the pixel buffers
+      `docs/02-architecture.md` §6.2 keeps off that path. **Consent**:
+      `panels/LospecImportSection.tsx` follows `SegmentModelSection.tsx`'s
+      established pattern exactly — opening the form only reveals a text
+      field (URL validated locally, no network, as the user types), and the
+      fetch fires only from an explicit "Fetch from lospec.com" click, never
+      on paste or mount. Tests: 18 in `lospecImport.test.ts` (URL parsing/
+      validation, consent-gating — `fetchImpl` is unreachable without an
+      explicit call, mirroring `modelDownload.test.ts`'s pattern — every
+      failure mode, and a JS-side backstop timeout), 7 in
+      `LospecImportSection.test.tsx` (real DOM events proving the toggle
+      reveals the form without fetching, typing never fetches, an invalid
+      host disables Fetch with an inline reason, and only an explicit click
+      calls the import function), 3 Rust unit tests (slug validation) plus 2
+      `#[ignore]`d Rust tests run for real against the live site this
+      session (`cargo test commands::lospec -- --ignored --nocapture`): a
+      known palette (`pear36`, 36 colours) fetched and matched exactly, and
+      a nonexistent slug timed out cleanly in ~20s rather than hanging.
+      **Verified live**: a real, unmocked TS-level fetch against
+      `https://lospec.com/palette-list/pear36` (via `npx tsx`, bypassing
+      only the Rust IPC hop) returned the real 36-colour palette; driving
+      the real Vite dev bundle over CDP confirmed the consent UI (screenshot
+      taken), that no fetch fires before the explicit click, that an invalid
+      host is rejected locally, and that a missing Tauri backend (this
+      container's own long-standing limitation — see Phase 5's own note)
+      fails through the same inline-error path without crashing the app.
+      **Not exercised**: a real `invoke()` round-trip through a running
+      desktop window — `tauri dev` launched a real process on this
+      container's X server but no window ever mapped, consistent with every
+      earlier phase's own note here; the Rust command itself (the exact code
+      `invoke()` calls) was proven directly against the live network instead,
+      which is a stronger proof of the code path than a UI click-through
+      would have given without that gap.
 - [ ] Isometric and hexagonal tile grids
 
 ---
