@@ -8,6 +8,7 @@ pub mod ase_import;
 pub mod batch_convert;
 pub mod export;
 pub mod onnx_runtime;
+pub mod pattern_chart;
 pub mod project;
 pub mod segment;
 pub mod source;
