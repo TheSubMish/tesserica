@@ -302,6 +302,136 @@ describe('samplePixel on a tilemap layer (roadmap Phase 6)', () => {
     // The never-painted bottom-right 2x2 cell is transparent.
     expect(samplePixel(s, 'f1', 2, 2)).toEqual([0, 0, 0, 0]);
   });
+
+  it('reads an isometric tilemap layer at its shape-correct placement, not rect math', () => {
+    const frame: Frame = { id: 'f1', durationMs: 100 };
+    setTileBuffer('red', new Uint8ClampedArray(4 * 2 * 4).fill(0));
+    const redBuf = new Uint8ClampedArray(4 * 2 * 4);
+    for (let i = 0; i < 8; i++) redBuf.set([255, 0, 0, 255], i * 4);
+    setTileBuffer('red', redBuf);
+
+    const tileset: Tileset = {
+      id: 'ts-iso',
+      name: 'Iso',
+      tileWidth: 4,
+      tileHeight: 2,
+      tiles: [{ id: 'empty' }, { id: 'red' }],
+    };
+    const grid: GridSpec = {
+      shape: 'isometric',
+      tileWidth: 4,
+      tileHeight: 2,
+      offsetX: 0,
+      offsetY: 0,
+    };
+    const tilemapLayer: Layer = {
+      id: 'tm-iso',
+      kind: 'tilemap',
+      name: 'iso tiles',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      parentId: null,
+      clippingMask: false,
+      effects: [],
+      tilesetId: 'ts-iso',
+      grid,
+    };
+    const cel: Cel = {
+      id: 'cel-iso',
+      layerId: 'tm-iso',
+      frameId: 'f1',
+      x: 0,
+      y: 0,
+      width: 8,
+      height: 4,
+    };
+    const gridBuf = allocateGrid(cel.id, 2, 2);
+    // Tile (1,0) — cellOrigin puts it at (2, 1), not rect's (4, 0).
+    setGridCell(gridBuf, 2, 2, 1, 0, packTileId(1));
+
+    const s: Sprite = {
+      width: 8,
+      height: 4,
+      colorMode: 'rgba',
+      layers: [tilemapLayer],
+      frames: [frame],
+      cels: [cel],
+      tags: [],
+      tilesets: [tileset],
+    };
+
+    // Inside the isometric placement's actual box (x:[2,6), y:[1,3)).
+    expect(samplePixel(s, 'f1', 3, 1)).toEqual([255, 0, 0, 255]);
+    // Where rect math would have put tile 1 (x:[4,8), y:[0,2)) but the
+    // isometric transform does not — must read as empty/transparent.
+    expect(samplePixel(s, 'f1', 4, 0)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('an effect-bearing isometric tilemap layer still reads its shape-correct pixel (leafOwnBuffer fast path)', () => {
+    const frame: Frame = { id: 'f1', durationMs: 100 };
+    const redBuf = new Uint8ClampedArray(4 * 2 * 4);
+    for (let i = 0; i < 8; i++) redBuf.set([255, 0, 0, 255], i * 4);
+    setTileBuffer('red', redBuf);
+
+    const tileset: Tileset = {
+      id: 'ts-iso2',
+      name: 'Iso',
+      tileWidth: 4,
+      tileHeight: 2,
+      tiles: [{ id: 'empty' }, { id: 'red' }],
+    };
+    const grid: GridSpec = {
+      shape: 'isometric',
+      tileWidth: 4,
+      tileHeight: 2,
+      offsetX: 0,
+      offsetY: 0,
+    };
+    const tilemapLayer: Layer = {
+      id: 'tm-iso2',
+      kind: 'tilemap',
+      name: 'iso tiles',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      parentId: null,
+      clippingMask: false,
+      // An identity hsv-shift (0,0,0) still routes through the
+      // effects-aware `leafOwnBuffer` path (any enabled effect does),
+      // without changing the expected pixel values.
+      effects: [{ id: 'e1', kind: 'hsv-shift', enabled: true, h: 0, s: 0, v: 0 }],
+      tilesetId: 'ts-iso2',
+      grid,
+    };
+    const cel: Cel = {
+      id: 'cel-iso2',
+      layerId: 'tm-iso2',
+      frameId: 'f1',
+      x: 0,
+      y: 0,
+      width: 8,
+      height: 4,
+    };
+    const gridBuf = allocateGrid(cel.id, 2, 2);
+    setGridCell(gridBuf, 2, 2, 1, 0, packTileId(1));
+
+    const s: Sprite = {
+      width: 8,
+      height: 4,
+      colorMode: 'rgba',
+      layers: [tilemapLayer],
+      frames: [frame],
+      cels: [cel],
+      tags: [],
+      tilesets: [tileset],
+    };
+
+    expect(samplePixel(s, 'f1', 3, 1)).toEqual([255, 0, 0, 255]);
+    expect(samplePixel(s, 'f1', 4, 0)).toEqual([0, 0, 0, 0]);
+  });
 });
 
 describe('eyedropper', () => {

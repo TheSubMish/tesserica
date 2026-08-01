@@ -13,9 +13,8 @@
 
 import { getCelBuffer, isIndexedLayer } from '../model/celStorage';
 import { resolveIndexToRgba } from '../model/indexedColor';
-import { getGrid, getGridCell } from '../model/tileGridBuffers';
-import { resolveTilePixels } from '../model/tilemapRender';
-import { EMPTY_TILE_ID, tileGridDims } from '../model/tileIds';
+import { getGrid } from '../model/tileGridBuffers';
+import { renderTilemapCel } from '../model/tilemapRender';
 import { childrenOf } from '../model/layerTree';
 import {
   celBufferId,
@@ -64,10 +63,17 @@ function sampleCel(
 
 /**
  * A tilemap layer's resolved colour at one document coordinate — the
- * eyedropper's equivalent of `sampleCel` above. Resolves the grid cell's
- * packed tile id against the layer's tileset exactly the way
- * `canvas/renderer.ts::tilemapCelCanvas` and `canvas/flatten.ts` do, so all
- * three read the same pixel.
+ * eyedropper's equivalent of `sampleCel` above. Delegates the whole cel to
+ * `renderTilemapCel` (`canvas/renderer.ts::tilemapCelCanvas` and
+ * `canvas/flatten.ts` call the very same function) rather than re-deriving
+ * placement math here a third time — correct by construction for every
+ * `GridShape`, including `isometric`/`hexagonal`, where a pixel can fall
+ * inside more than one tile's overlapping bounding box and the *rendered*
+ * (alpha-composited, back-to-front) result is the only correct source of
+ * truth for "what's actually visible here". Not a hot path — the eyedropper
+ * samples one pixel per click, never in a loop; `leafOwnBuffer` below
+ * special-cases the one genuine loop (an effect-bearing tilemap layer) to
+ * render the cel once rather than once per pixel.
  */
 function sampleTilemapCel(
   sprite: Sprite,
@@ -81,30 +87,10 @@ function sampleTilemapCel(
   if (lx < 0 || ly < 0 || lx >= cel.width || ly >= cel.height) return null;
 
   const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
-  if (!tileset) return null;
   const gridBuffer = getGrid(celBufferId(cel));
-  if (!gridBuffer) return null;
-
-  const { cols, rows } = tileGridDims(cel, layer.grid);
-  const tw = tileset.tileWidth;
-  const th = tileset.tileHeight;
-  if (tw <= 0 || th <= 0) return null;
-
-  const col = Math.floor(lx / tw);
-  const row = Math.floor(ly / th);
-  // Inside the cel but past the last whole tile column/row — never drawn
-  // (`renderTilemapCel` clips a partial trailing tile the same way).
-  if (col >= cols || row >= rows) return [0, 0, 0, 0];
-
-  const tileId = getGridCell(gridBuffer, cols, rows, col, row);
-  if (tileId === undefined || tileId === EMPTY_TILE_ID) return [0, 0, 0, 0];
-  const pixels = resolveTilePixels(tileset, tileId);
-  if (!pixels) return [0, 0, 0, 0];
-
-  const tx = lx - col * tw;
-  const ty = ly - row * th;
-  const i = (ty * tw + tx) * 4;
-  return [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]];
+  const rendered = renderTilemapCel(tileset, layer.grid, gridBuffer, cel);
+  const i = (ly * cel.width + lx) * 4;
+  return [rendered[i], rendered[i + 1], rendered[i + 2], rendered[i + 3]];
 }
 
 /**
@@ -112,9 +98,15 @@ function sampleTilemapCel(
  * than one pixel — needed only when the layer has an enabled effect
  * (`canvas/effects.ts`), since outline/drop-shadow are neighbourhood-
  * dependent and cannot be answered from a single coordinate in isolation.
- * Cheap enough to recompute per query: the eyedropper samples one pixel per
- * click, never in a loop (`CanvasView.tsx`), so this is not a hot path the
- * way `renderer.ts`'s per-redraw compositing is.
+ * Cheap enough to recompute per query for a raster/conversion layer: the
+ * eyedropper samples one pixel per click, never in a loop (`CanvasView.tsx`),
+ * so this is not a hot path the way `renderer.ts`'s per-redraw compositing
+ * is. A tilemap layer is the one genuine loop here (every sprite pixel, not
+ * one) — `sampleTilemapCel` now renders its whole cel per call
+ * (`renderTilemapCel`, correct for overlapping `isometric`/`hexagonal`
+ * bounding boxes), so this renders that cel exactly once up front and reads
+ * pixels back out of it directly rather than calling `sampleTilemapCel`
+ * `width * height` times.
  */
 function leafOwnBuffer(
   sprite: Sprite,
@@ -123,12 +115,31 @@ function leafOwnBuffer(
 ): Uint8ClampedArray {
   const { width, height } = sprite;
   const out = new Uint8ClampedArray(width * height * 4);
+
+  if (layer.kind === 'tilemap') {
+    const tileset = sprite.tilesets.find((t) => t.id === layer.tilesetId);
+    const gridBuffer = getGrid(celBufferId(cel));
+    const rendered = renderTilemapCel(tileset, layer.grid, gridBuffer, cel);
+    for (let y = 0; y < height; y++) {
+      const ly = y - cel.y;
+      if (ly < 0 || ly >= cel.height) continue;
+      for (let x = 0; x < width; x++) {
+        const lx = x - cel.x;
+        if (lx < 0 || lx >= cel.width) continue;
+        const s = (ly * cel.width + lx) * 4;
+        const d = (y * width + x) * 4;
+        out[d] = rendered[s];
+        out[d + 1] = rendered[s + 1];
+        out[d + 2] = rendered[s + 2];
+        out[d + 3] = rendered[s + 3];
+      }
+    }
+    return out;
+  }
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const rgba =
-        layer.kind === 'tilemap'
-          ? sampleTilemapCel(sprite, layer, cel, x, y)
-          : sampleCel(sprite, layer, cel, x, y);
+      const rgba = sampleCel(sprite, layer, cel, x, y);
       if (!rgba) continue;
       const i = (y * width + x) * 4;
       out[i] = rgba[0];

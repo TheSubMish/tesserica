@@ -17,6 +17,8 @@
 import { getGridCell } from './tileGridBuffers';
 import { getTileBuffer } from './tileBuffers';
 import { EMPTY_TILE_ID, tileGridDims, unpackTileId } from './tileIds';
+import { cellOrigin, shapeOverlaps, tileDrawOrder } from './gridGeometry';
+import { compositeOver } from '../canvas/compositeOver';
 import type { GridSpec, Tileset } from './types';
 
 /** Mirror the tile across its vertical centre line (left ↔ right). */
@@ -116,6 +118,16 @@ export function resolveTilePixels(tileset: Tileset, tileId: number): Uint8Clampe
  * deleted from under it) renders as fully transparent rather than throwing —
  * the same "recoverable, not fatal" posture `commands::project`'s missing-cel
  * warning takes on the Rust side.
+ *
+ * `grid.shape` (`model/gridGeometry.ts`) drives two things beyond a `rect`
+ * grid's simple non-overlapping blit: **placement** (`cellOrigin` instead of
+ * `col * tileWidth`/`row * tileHeight`) and, for `isometric`/`hexagonal`
+ * where neighbouring tiles' bounding boxes legitimately overlap,
+ * **compositing order and blend** — `tileDrawOrder` walks cells back-to-front
+ * and each tile is alpha-composited (`compositeOver`) over what is already
+ * there instead of overwriting it, so a tile's transparent corners never
+ * erase a neighbour drawn underneath it. `rect` never overlaps, so it keeps
+ * the original cheap overwrite with no behaviour change.
  */
 export function renderTilemapCel(
   tileset: Tileset | undefined,
@@ -131,28 +143,46 @@ export function renderTilemapCel(
   const th = tileset.tileHeight;
   if (tw <= 0 || th <= 0) return out;
 
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const tileId = getGridCell(gridBuffer, cols, rows, col, row);
-      if (tileId === undefined || tileId === EMPTY_TILE_ID) continue;
-      const pixels = resolveTilePixels(tileset, tileId);
-      if (!pixels) continue;
+  const overlaps = shapeOverlaps(grid.shape);
+  const order = tileDrawOrder(grid.shape, cols, rows);
 
-      const ox = col * tw;
-      const oy = row * th;
-      for (let y = 0; y < th; y++) {
-        const dy = oy + y;
-        if (dy >= cel.height) break;
-        for (let x = 0; x < tw; x++) {
-          const dx = ox + x;
-          if (dx >= cel.width) break;
-          const s = (y * tw + x) * 4;
-          const d = (dy * cel.width + dx) * 4;
+  for (const { col, row } of order) {
+    const tileId = getGridCell(gridBuffer, cols, rows, col, row);
+    if (tileId === undefined || tileId === EMPTY_TILE_ID) continue;
+    const pixels = resolveTilePixels(tileset, tileId);
+    if (!pixels) continue;
+
+    const origin = cellOrigin(grid, col, row);
+    const ox = Math.round(origin.x);
+    const oy = Math.round(origin.y);
+    for (let y = 0; y < th; y++) {
+      const dy = oy + y;
+      if (dy >= cel.height) break;
+      if (dy < 0) continue;
+      for (let x = 0; x < tw; x++) {
+        const dx = ox + x;
+        if (dx >= cel.width) break;
+        if (dx < 0) continue;
+        const s = (y * tw + x) * 4;
+        const d = (dy * cel.width + dx) * 4;
+        if (!overlaps) {
           out[d] = pixels[s];
           out[d + 1] = pixels[s + 1];
           out[d + 2] = pixels[s + 2];
           out[d + 3] = pixels[s + 3];
+          continue;
         }
+        if (pixels[s + 3] === 0) continue; // fully transparent source: no-op
+        const blended = compositeOver([pixels[s], pixels[s + 1], pixels[s + 2], pixels[s + 3]], 1, [
+          out[d],
+          out[d + 1],
+          out[d + 2],
+          out[d + 3],
+        ]);
+        out[d] = blended[0];
+        out[d + 1] = blended[1];
+        out[d + 2] = blended[2];
+        out[d + 3] = blended[3];
       }
     }
   }
