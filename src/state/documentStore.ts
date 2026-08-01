@@ -272,6 +272,19 @@ interface DocumentState {
    * the undo bookkeeping.
    */
   setSpritePalette(palette: Palette): void;
+  /**
+   * Flip `Sprite.colorMode` itself, optionally assigning (or clearing, when
+   * omitted) `Sprite.palette` in the same step.
+   *
+   * Split from `setSpritePalette` because that primitive requires a concrete
+   * `Palette` — right for "assign/recolor the palette of an already-indexed
+   * sprite" — but converting an existing `'rgba'` sprite to `'indexed'`
+   * (`history/colorModeCommands.ts`) needs to set both atomically, and
+   * undoing that conversion needs to go back to `'rgba'` with **no** palette
+   * (an `'rgba'` sprite's `palette` field is `undefined`, not a leftover
+   * value), which `setSpritePalette`'s required parameter cannot express.
+   */
+  setColorMode(mode: Sprite['colorMode'], palette?: Palette): void;
 }
 
 function createInitialSprite(
@@ -768,6 +781,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   setSpritePalette: (palette) =>
     set((s) => ({ sprite: { ...s.sprite, palette }, revision: s.revision + 1 })),
+
+  setColorMode: (mode, palette) =>
+    set((s) => ({ sprite: { ...s.sprite, colorMode: mode, palette }, revision: s.revision + 1 })),
 
   insertTag: (tag, index) =>
     set((s) => {

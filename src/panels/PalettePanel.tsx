@@ -14,6 +14,7 @@ import { useRef, useState } from 'react';
 import { fromHex, sameRgb, toCss, toHex } from '../lib/color';
 import { COLOR_BLIND_MODES, simulateColorBlindness, type ColorBlindMode } from '../lib/colorBlind';
 import { parsePaletteFile } from '../lib/formats/palette';
+import { convertSpriteToIndexed } from '../history/colorModeCommands';
 import { assignSpritePalette, recolorSpritePaletteEntry } from '../history/paletteCommands';
 import { useDocumentStore } from '../state/documentStore';
 import { usePaletteStore } from '../state/paletteStore';
@@ -150,6 +151,33 @@ export function PalettePanel() {
         <p className="hint error" role="alert">
           {error}
         </p>
+      )}
+
+      {spriteColorMode === 'rgba' && (
+        <div className="palette-sprite-section">
+          <div className="panel-head">
+            <span>Color Mode</span>
+          </div>
+          <p className="hint">
+            Convert this sprite to indexed colour, snapping every pixel on every layer to the
+            selected palette above ({palette.name}). Colours not already in the palette snap to
+            their nearest match. Undoable.
+          </p>
+          <button
+            onClick={() => {
+              const result = convertSpriteToIndexed(palette);
+              setError(
+                result.ok
+                  ? null
+                  : result.reason === 'empty-palette'
+                    ? 'Pick a palette with at least one colour first.'
+                    : 'This sprite is already indexed.',
+              );
+            }}
+          >
+            Convert to Indexed…
+          </button>
+        </div>
       )}
 
       {spriteColorMode === 'indexed' && (

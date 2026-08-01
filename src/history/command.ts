@@ -78,6 +78,12 @@ export interface DocumentApi {
   // D9) ----
   /** Assign or recolor the sprite's own embedded palette — see `model/types.ts::Sprite.palette`. */
   setSpritePalette(palette: Palette): void;
+  /**
+   * Flip `Sprite.colorMode` (and, atomically, `Sprite.palette` — `undefined`
+   * clears it). See `state/documentStore.ts::DocumentState.setColorMode` for
+   * why this is a separate primitive from `setSpritePalette`.
+   */
+  setColorMode(mode: Sprite['colorMode'], palette?: Palette): void;
 }
 
 export interface Command {
