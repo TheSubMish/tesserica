@@ -17,9 +17,16 @@
  * `Move` (a pure translation, where the mask maps cell-for-cell) there is no
  * well-defined way to keep the mask's shape through an arbitrary rotation.
  * This is the same rectangular footprint `Move`'s own `bounds` uses.
+ *
+ * Works on an indexed-mode cel exactly as it does an RGBA one: `celStorage.ts`
+ * routes `getCelBuffer`/`bytesPerPixelFor` to the right store (`pixelBuffers`
+ * vs `indexBuffers`) for the active layer, and `transform.ts`'s own algorithms
+ * are generic over `bytesPerPixel` (`docs/08-roadmap.md` Phase 7 follow-up —
+ * this tool used to reach `pixelBuffers.ts::getBuffer` directly, which returns
+ * `undefined` for an indexed cel and made `canApplyTransform` silently false).
  */
 
-import { getBuffer } from '../model/pixelBuffers';
+import { bytesPerPixelFor, getCelBuffer } from '../model/celStorage';
 import { celBufferId } from '../model/types';
 import { intersectRect, type Rect } from '../model/rect';
 import { isEffectivelyLocked, isEffectivelyVisible } from '../model/layerTree';
@@ -47,35 +54,47 @@ export function canApplyTransform(): boolean {
   if (!isEffectivelyVisible(doc.sprite.layers, layer.id)) return false;
   const cel = doc.activeCel();
   if (!cel) return false;
-  return !!getBuffer(celBufferId(cel));
+  return !!getCelBuffer(doc.sprite, layer, celBufferId(cel));
 }
 
 /** Rotate/scale the active cel's selection bounds (or the whole cel). Undoable. */
 export function applyTransform(settings: TransformSettings): void {
   if (!canApplyTransform()) return;
   const doc = useDocumentStore.getState();
+  const layer = doc.sprite.layers.find((l) => l.id === doc.activeLayerId);
+  if (!layer) return;
   const cel = doc.activeCel();
   if (!cel) return;
   const bufferId = celBufferId(cel);
-  const buffer = getBuffer(bufferId);
+  const buffer = getCelBuffer(doc.sprite, layer, bufferId);
   if (!buffer) return;
+  const bpp = bytesPerPixelFor(doc.sprite, layer);
 
   const full: Rect = { x: 0, y: 0, width: cel.width, height: cel.height };
   const selection = useSelectionStore.getState().selection;
   const bounds = intersectRect(selection?.bounds ?? full, full);
   if (bounds.width <= 0 || bounds.height <= 0) return;
 
-  const snapshot = beginStroke(bufferId, buffer, cel.width, cel.height);
+  const snapshot = beginStroke(bufferId, buffer, cel.width, cel.height, bpp);
 
-  const region = extractRegion(buffer, cel.width, bounds);
+  const region = extractRegion(buffer, cel.width, bounds, bpp);
   const angleRad = (settings.angleDegrees * Math.PI) / 180;
   const scale = Math.max(0.01, settings.scalePercent / 100);
   const transformed =
     settings.algorithm === 'rotxel'
-      ? rotxelRotate(region, bounds.width, bounds.height, angleRad)
-      : cleanEdgeTransform(region, bounds.width, bounds.height, angleRad, scale);
+      ? rotxelRotate(region, bounds.width, bounds.height, angleRad, undefined, undefined, bpp)
+      : cleanEdgeTransform(
+          region,
+          bounds.width,
+          bounds.height,
+          angleRad,
+          scale,
+          undefined,
+          undefined,
+          bpp,
+        );
 
-  blitRegion(buffer, cel.width, bounds, transformed);
+  blitRegion(buffer, cel.width, bounds, transformed, bpp);
   doc.touch(bufferId);
 
   const cmd = finishStroke(snapshot, buffer, 'Transform');

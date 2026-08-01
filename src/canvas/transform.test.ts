@@ -276,3 +276,117 @@ describe('cleanEdgeTransform', () => {
     expect(strayPixelCount(cleaned)).toBeLessThanOrEqual(strayPixelCount(naive));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Indexed storage (`bytesPerPixel = 1`) — the generalisation that lets the
+// Transform tool operate on an indexed-mode cel (`model/celStorage.ts`,
+// `docs/08-roadmap.md` Phase 7 follow-up). Mirrors the RGBA "never introduces
+// a colour absent from the source" assertions above, one axis over: "never
+// introduces an index absent from the source".
+// ---------------------------------------------------------------------------
+
+function makeIndexBuffer(w: number, h: number, fill: (x: number, y: number) => number): Uint8Array {
+  const buf = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) buf[y * w + x] = fill(x, y);
+  }
+  return buf;
+}
+
+function indexAt(buf: Uint8Array, w: number, x: number, y: number): number {
+  return buf[y * w + x];
+}
+
+describe('rotxelRotate — indexed storage (bytesPerPixel = 1)', () => {
+  it('returns a Uint8Array (not Uint8ClampedArray) when given one', () => {
+    const buf = makeIndexBuffer(4, 4, () => 1);
+    const out = rotxelRotate(buf, 4, 4, Math.PI / 2, undefined, undefined, 1);
+    expect(out).toBeInstanceOf(Uint8Array);
+    expect(out).not.toBeInstanceOf(Uint8ClampedArray);
+  });
+
+  it('180 degrees is an exact reversal of indices, no rounding ambiguity', () => {
+    const buf = makeIndexBuffer(4, 3, (x, y) => (x === 0 && y === 0 ? 5 : 2));
+    const out = rotxelRotate(buf, 4, 3, Math.PI, undefined, undefined, 1);
+    for (let y = 0; y < 3; y++) {
+      for (let x = 0; x < 4; x++) {
+        expect(indexAt(out, 4, x, y)).toBe(indexAt(buf, 4, 3 - x, 2 - y));
+      }
+    }
+  });
+
+  it('90 degrees is an exact bijective permutation of indices, no smoothing applied', () => {
+    const buf = makeIndexBuffer(4, 4, (x, y) => (y === 0 && (x === 0 || x === 1) ? 5 : 2));
+    const out = rotxelRotate(buf, 4, 4, Math.PI / 2, undefined, undefined, 1);
+    for (let y = 0; y < 4; y++) {
+      for (let x = 0; x < 4; x++) {
+        expect([5, 2]).toContain(indexAt(out, 4, x, y));
+      }
+    }
+    const twice = rotxelRotate(out, 4, 4, Math.PI / 2, undefined, undefined, 1);
+    const thrice = rotxelRotate(twice, 4, 4, Math.PI / 2, undefined, undefined, 1);
+    const full = rotxelRotate(thrice, 4, 4, Math.PI / 2, undefined, undefined, 1);
+    expect([...full]).toEqual([...buf]);
+  });
+
+  it('never introduces an index absent from the source, at an arbitrary angle', () => {
+    const buf = makeIndexBuffer(9, 9, (x) => (x < 3 ? 1 : x < 6 ? 2 : 3));
+    const validIndices = new Set([0, 1, 2, 3]); // 0 = TRANSPARENT_INDEX / off-canvas
+    for (const deg of [15, 30, 45, 60, 73, 137]) {
+      const out = rotxelRotate(buf, 9, 9, (deg * Math.PI) / 180, undefined, undefined, 1);
+      for (let y = 0; y < 9; y++) {
+        for (let x = 0; x < 9; x++) {
+          expect(validIndices.has(indexAt(out, 9, x, y))).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('a solid index stays that one index after an arbitrary rotation', () => {
+    const buf = makeIndexBuffer(10, 10, () => 9);
+    const out = rotxelRotate(buf, 10, 10, (37 * Math.PI) / 180, undefined, undefined, 1);
+    for (const v of out) expect(v === 0 || v === 9).toBe(true);
+  });
+
+  it('does not treat numerically-close indices as interchangeable the way an RGBA tolerance would', () => {
+    // Indices 5 and 6 are one integer apart — well inside `rgbaSimilar`'s
+    // default tolerance, which would wrongly call them "the same colour" if
+    // index bytes were ever run through the RGBA comparator by mistake. Every
+    // output value must still be one of the source's own distinct indices.
+    const buf = makeIndexBuffer(6, 6, (x, y) => {
+      const m = (x + y) % 3;
+      return m === 0 ? 5 : m === 1 ? 6 : 7;
+    });
+    const out = rotxelRotate(buf, 6, 6, (23 * Math.PI) / 180, undefined, undefined, 1);
+    for (const v of out) expect([0, 5, 6, 7]).toContain(v);
+  });
+
+  it('never mutates the input buffer', () => {
+    const buf = makeIndexBuffer(6, 6, (x, y) => ((x + y) % 2 === 0 ? 5 : 2));
+    const before = [...buf];
+    rotxelRotate(buf, 6, 6, (42 * Math.PI) / 180, undefined, undefined, 1);
+    expect([...buf]).toEqual(before);
+  });
+});
+
+describe('cleanEdgeTransform — indexed storage (bytesPerPixel = 1)', () => {
+  it('returns a Uint8Array (not Uint8ClampedArray) when given one', () => {
+    const buf = makeIndexBuffer(4, 4, () => 3);
+    const out = cleanEdgeTransform(buf, 4, 4, 0, 1, undefined, undefined, 1);
+    expect(out).toBeInstanceOf(Uint8Array);
+    expect(out).not.toBeInstanceOf(Uint8ClampedArray);
+  });
+
+  it('a solid index stays that one index at a non-integer scale', () => {
+    const buf = makeIndexBuffer(10, 10, () => 9);
+    const out = cleanEdgeTransform(buf, 10, 10, 0, 1.37, undefined, undefined, 1);
+    for (const v of out) expect(v === 0 || v === 9).toBe(true);
+  });
+
+  it('never introduces an index absent from the source at a combined rotate + non-integer scale', () => {
+    const buf = makeIndexBuffer(9, 9, (x) => (x < 3 ? 1 : x < 6 ? 2 : 3));
+    const validIndices = new Set([0, 1, 2, 3]);
+    const out = cleanEdgeTransform(buf, 9, 9, (23 * Math.PI) / 180, 1.6, undefined, undefined, 1);
+    for (const v of out) expect(validIndices.has(v)).toBe(true);
+  });
+});

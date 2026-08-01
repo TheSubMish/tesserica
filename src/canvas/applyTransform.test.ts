@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getBuffer, getPixel, setPixel } from '../model/pixelBuffers';
+import { getIndexBuffer } from '../model/indexBuffers';
+import type { Palette } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import { useSelectionStore } from '../state/selectionStore';
@@ -89,5 +91,81 @@ describe('applyTransform', () => {
 
     history().undo();
     expect([...activeBuffer()]).toEqual([...before]);
+  });
+});
+
+describe('applyTransform — indexed cel (docs/08-roadmap.md Phase 7 follow-up)', () => {
+  const palette: Palette = {
+    id: 'p',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255],
+      [0, 255, 0, 255],
+    ],
+  };
+
+  beforeEach(() => {
+    history().clear();
+    useSelectionStore.getState().clear();
+    doc().newDocument(8, 8, 'indexed', palette);
+    doc().setActiveLayer(doc().sprite.layers[0].id);
+  });
+
+  function activeIndexBuffer(): Uint8Array {
+    const cel = doc().activeCel();
+    if (!cel) throw new Error('no active cel');
+    const buf = getIndexBuffer(cel.id);
+    if (!buf) throw new Error('no index buffer');
+    return buf;
+  }
+
+  it('canApplyTransform is true for an indexed cel (it used to be false — getBuffer(RGBA) always missed)', () => {
+    expect(canApplyTransform()).toBe(true);
+    expect(getBuffer(doc().activeCel()!.id)).toBeUndefined(); // sanity: really is index storage
+  });
+
+  it('rotates palette-index bytes, never introducing an index absent from the source, and is undoable/redoable', () => {
+    const buf = activeIndexBuffer();
+    setPixel(buf, 8, 8, 0, 0, [1]); // raw index 1 (palette.colors[0], RED)
+    setPixel(buf, 8, 8, 1, 0, [2]); // raw index 2 (palette.colors[1], GREEN)
+    doc().touch(doc().activeCel()!.id);
+
+    const before = new Uint8Array(buf);
+    applyTransform({ algorithm: 'rotxel', angleDegrees: 37, scalePercent: 100 });
+
+    const after = activeIndexBuffer();
+    expect([...after]).not.toEqual([...before]);
+    for (const v of after) expect([0, 1, 2]).toContain(v); // 0 = TRANSPARENT_INDEX
+    expect(history().past).toHaveLength(1);
+    expect(history().past[0].label).toBe('Transform');
+
+    history().undo();
+    expect([...activeIndexBuffer()]).toEqual([...before]);
+    expect(getIndexBuffer(doc().activeCel()!.id)).toBeDefined(); // still indexed storage after undo
+
+    history().redo();
+    expect([...activeIndexBuffer()]).toEqual([...after]);
+  });
+
+  it('cleanEdge also stays within the source indices at a non-integer scale', () => {
+    const buf = activeIndexBuffer();
+    setPixel(buf, 8, 8, 2, 2, [2]);
+    setPixel(buf, 8, 8, 3, 2, [2]);
+    doc().touch(doc().activeCel()!.id);
+
+    applyTransform({ algorithm: 'cleanEdge', angleDegrees: 15, scalePercent: 150 });
+    for (const v of activeIndexBuffer()) expect([0, 2]).toContain(v);
+    expect(history().past).toHaveLength(1);
+  });
+
+  it('only touches the selection bounds, leaving indices outside it untouched', () => {
+    const buf = activeIndexBuffer();
+    setPixel(buf, 8, 8, 7, 7, [2]);
+    doc().touch(doc().activeCel()!.id);
+
+    useSelectionStore.getState().setSelection(rectSelection({ x: 0, y: 0, width: 4, height: 4 }));
+    applyTransform({ algorithm: 'rotxel', angleDegrees: 90, scalePercent: 100 });
+
+    expect(getPixel(activeIndexBuffer(), 8, 8, 7, 7, 1)).toEqual([2]);
   });
 });

@@ -55,30 +55,67 @@
  * single-pixel-wide diagonal line (`similar(c, df) && higher(c, f)`, "don't
  * flip"). It is an adaptation of a real, cited heuristic, not a byte-exact
  * port — unlike `rotxel`, which is.
+ *
+ * **Indexed-mode generalization** (gap-closure follow-up to
+ * `docs/08-roadmap.md` Phase 7's indexed color mode: the Transform tool only
+ * ever worked on RGBA cels, silently no-op'ing on an indexed one via
+ * `canvas/applyTransform.ts`'s `getBuffer` returning `undefined`). Every
+ * function below is generic over `bytesPerPixel` — 4 for a straight-alpha
+ * RGBA quadruple (the original, still-default behaviour, byte-identical to
+ * before), 1 for an indexed cel's raw palette-index byte
+ * (`model/celStorage.ts`, `model/indexBuffers.ts`). Both algorithms only ever
+ * *select* one of the source's own pixel values per destination pixel — they
+ * never blend two values into a third — so the exact same selection logic
+ * generalizes to indices for free, as long as "are these two pixels the same
+ * colour" (`similarColors`, keyed on a tolerance because sRGB channels are
+ * ordinal) is swapped for "are these two pixels the same index"
+ * (`indexEquals`, exact — a palette index is a categorical label, not an
+ * ordinate, so index 5 sitting one integer away from index 6 says nothing
+ * about how close their actual colours are; a numeric tolerance would be
+ * meaningless). `indexEquals`'s plain `===` already treats two
+ * `TRANSPARENT_INDEX` (0) pixels as equal, for free — the same "both
+ * transparent" case `similarColors` special-cases explicitly for RGBA's own
+ * alpha channel.
  */
 
-import type { RGBA } from '../model/types';
+type PixelBuf = Uint8ClampedArray | Uint8Array;
+
+/** One pixel's raw stored values — 4 numbers for RGBA, 1 for a palette index. */
+type Px = readonly number[];
 
 // ---------------------------------------------------------------------------
 // Shared plumbing
 // ---------------------------------------------------------------------------
 
-const TRANSPARENT: RGBA = [0, 0, 0, 0];
-
-/** Out-of-bounds reads transparent — there is nothing there to sample. */
-function readPx(buf: Uint8ClampedArray, width: number, height: number, x: number, y: number): RGBA {
-  if (x < 0 || y < 0 || x >= width || y >= height) return TRANSPARENT;
-  const i = (y * width + x) * 4;
-  return [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
+/** A same-concrete-type, zero-filled output buffer — mirrors `history/pixelDelta.ts::extractRegion`'s own `T extends CelBuffer` pattern, so a `Uint8Array` caller gets a `Uint8Array` back, never the widened union. */
+function sameTypeBuffer<T extends PixelBuf>(buf: T, length: number): T {
+  return (
+    buf instanceof Uint8ClampedArray ? new Uint8ClampedArray(length) : new Uint8Array(length)
+  ) as T;
 }
 
-function writePx(buf: Uint8ClampedArray, width: number, x: number, y: number, c: RGBA): void {
-  const i = (y * width + x) * 4;
-  buf[i] = c[0];
-  buf[i + 1] = c[1];
-  buf[i + 2] = c[2];
-  buf[i + 3] = c[3];
+/** Out-of-bounds reads all-zero (transparent RGBA, or `TRANSPARENT_INDEX`) — there is nothing there to sample. */
+function readPx(
+  buf: PixelBuf,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  bpp: number,
+): Px {
+  if (x < 0 || y < 0 || x >= width || y >= height) return new Array(bpp).fill(0);
+  const i = (y * width + x) * bpp;
+  const out = new Array(bpp);
+  for (let k = 0; k < bpp; k++) out[k] = buf[i + k];
+  return out;
 }
+
+function writePx(buf: PixelBuf, width: number, x: number, y: number, c: Px, bpp: number): void {
+  const i = (y * width + x) * bpp;
+  for (let k = 0; k < bpp; k++) buf[i + k] = c[k];
+}
+
+type PixelEquals = (a: Px, b: Px) => boolean;
 
 /**
  * `similar_colors()` from `DrawingAlgos.gd`, default tolerance (0.392157 on a
@@ -88,7 +125,7 @@ function writePx(buf: Uint8ClampedArray, width: number, x: number, y: number, c:
  */
 const DEFAULT_TOLERANCE_255 = 0.392157 * 255;
 
-function similarColors(a: RGBA, b: RGBA, tol = DEFAULT_TOLERANCE_255): boolean {
+function rgbaSimilar(a: Px, b: Px, tol = DEFAULT_TOLERANCE_255): boolean {
   if (a[3] === 0 && b[3] === 0) return true;
   return (
     Math.abs(a[0] - b[0]) <= tol &&
@@ -96,6 +133,15 @@ function similarColors(a: RGBA, b: RGBA, tol = DEFAULT_TOLERANCE_255): boolean {
     Math.abs(a[2] - b[2]) <= tol &&
     Math.abs(a[3] - b[3]) <= tol
   );
+}
+
+/** Indexed storage's own "similarity": exact index equality — see the module doc comment's "Indexed-mode generalization" section for why a tolerance is meaningless here. */
+function indexEquals(a: Px, b: Px): boolean {
+  return a[0] === b[0];
+}
+
+function equalsFor(bytesPerPixel: number): PixelEquals {
+  return bytesPerPixel === 1 ? indexEquals : rgbaSimilar;
 }
 
 function normalizeAngle(angleRad: number): number {
@@ -115,11 +161,18 @@ function nearAngle(a: number, target: number): boolean {
 // ---------------------------------------------------------------------------
 
 /** Exact 180°: reversing both axes never needs rounding or a pivot. */
-function flip180(buf: Uint8ClampedArray, width: number, height: number): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(buf.length);
+function flip180<T extends PixelBuf>(buf: T, width: number, height: number, bpp: number): T {
+  const out = sameTypeBuffer(buf, buf.length);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      writePx(out, width, x, y, readPx(buf, width, height, width - 1 - x, height - 1 - y));
+      writePx(
+        out,
+        width,
+        x,
+        y,
+        readPx(buf, width, height, width - 1 - x, height - 1 - y, bpp),
+        bpp,
+      );
     }
   }
   return out;
@@ -131,13 +184,14 @@ function flip180(buf: Uint8ClampedArray, width: number, height: number): Uint8Cl
  * `Image.rotate_180()` fast path makes for 180°, generalised to 90°/270°.
  * `sign` is `+1` for 90°, `-1` for 270°.
  */
-function rotateExact90(
-  buf: Uint8ClampedArray,
+function rotateExact90<T extends PixelBuf>(
+  buf: T,
   width: number,
   height: number,
   sign: 1 | -1,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(buf.length);
+  bpp: number,
+): T {
+  const out = sameTypeBuffer(buf, buf.length);
   const px2 = width - 1; // 2 × pivot.x, kept as an integer
   const py2 = height - 1; // 2 × pivot.y
   for (let y = 0; y < height; y++) {
@@ -145,7 +199,7 @@ function rotateExact90(
       // cos = 0, sin = sign: ox = px - sign*(y - py); oy = py + sign*(x - px)
       const ox = Math.round((px2 - sign * (2 * y - py2)) / 2);
       const oy = Math.round((py2 + sign * (2 * x - px2)) / 2);
-      writePx(out, width, x, y, readPx(buf, width, height, ox, oy));
+      writePx(out, width, x, y, readPx(buf, width, height, ox, oy, bpp), bpp);
     }
   }
   return out;
@@ -160,17 +214,18 @@ function rotateExact90(
  */
 function pickBySubcell(
   index: number,
-  a: RGBA,
-  b: RGBA,
-  c: RGBA,
-  d: RGBA,
-  e: RGBA,
-  f: RGBA,
-  g: RGBA,
-  h: RGBA,
-  i: RGBA,
-): RGBA {
-  const s = similarColors;
+  a: Px,
+  b: Px,
+  c: Px,
+  d: Px,
+  e: Px,
+  f: Px,
+  g: Px,
+  h: Px,
+  i: Px,
+  equals: PixelEquals,
+): Px {
+  const s = equals;
   switch (index) {
     case 0:
       return s(d, b) && !s(d, h) && !s(b, f) ? d : e;
@@ -215,15 +270,17 @@ function pickBySubcell(
  * correction (`+1` to both `ox` and `oy`, checked against *width* only —
  * that is what the original does, not a transcription slip).
  */
-function rotxelGeneral(
-  buf: Uint8ClampedArray,
+function rotxelGeneral<T extends PixelBuf>(
+  buf: T,
   width: number,
   height: number,
   angleRad: number,
   pivotX: number,
   pivotY: number,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(buf.length);
+  bpp: number,
+  equals: PixelEquals,
+): T {
+  const out = sameTypeBuffer(buf, buf.length);
   const w3 = width * 3;
   const h3 = height * 3;
   const oddWidth = width % 2 !== 0;
@@ -254,7 +311,7 @@ function rotxelGeneral(
       }
 
       if (!found) {
-        writePx(out, width, x, y, TRANSPARENT);
+        writePx(out, width, x, y, new Array(bpp).fill(0), bpp);
         continue;
       }
 
@@ -266,21 +323,21 @@ function rotxelGeneral(
       const sy = Math.round((oy - 1) / 3);
 
       if (sx === 0 || sx === width - 1 || sy === 0 || sy === height - 1) {
-        writePx(out, width, x, y, readPx(buf, width, height, sx, sy));
+        writePx(out, width, x, y, readPx(buf, width, height, sx, sy, bpp), bpp);
         continue;
       }
 
-      const a = readPx(buf, width, height, sx - 1, sy - 1);
-      const b = readPx(buf, width, height, sx, sy - 1);
-      const c = readPx(buf, width, height, sx + 1, sy - 1);
-      const d = readPx(buf, width, height, sx - 1, sy);
-      const e = readPx(buf, width, height, sx, sy);
-      const f = readPx(buf, width, height, sx + 1, sy);
-      const g = readPx(buf, width, height, sx - 1, sy + 1);
-      const h = readPx(buf, width, height, sx, sy + 1);
-      const i = readPx(buf, width, height, sx + 1, sy + 1);
+      const a = readPx(buf, width, height, sx - 1, sy - 1, bpp);
+      const b = readPx(buf, width, height, sx, sy - 1, bpp);
+      const c = readPx(buf, width, height, sx + 1, sy - 1, bpp);
+      const d = readPx(buf, width, height, sx - 1, sy, bpp);
+      const e = readPx(buf, width, height, sx, sy, bpp);
+      const f = readPx(buf, width, height, sx + 1, sy, bpp);
+      const g = readPx(buf, width, height, sx - 1, sy + 1, bpp);
+      const h = readPx(buf, width, height, sx, sy + 1, bpp);
+      const i = readPx(buf, width, height, sx + 1, sy + 1, bpp);
 
-      writePx(out, width, x, y, pickBySubcell(index, a, b, c, d, e, f, g, h, i));
+      writePx(out, width, x, y, pickBySubcell(index, a, b, c, d, e, f, g, h, i, equals), bpp);
     }
   }
 
@@ -288,28 +345,48 @@ function rotxelGeneral(
 }
 
 /**
- * Rotate `buf` (`width`×`height`, straight-alpha RGBA) by `angleRad` about
- * `(pivotX, pivotY)` (defaults to the buffer's own centre), staying inside
- * the same `width`×`height` footprint — content that rotates outside it is
- * clipped, exactly as Pixelorama's own CPU `rotxel()` does (it mutates the
- * cel's `Image` in place rather than growing the canvas). Every output pixel
- * is either fully transparent or a colour that already existed somewhere in
- * `buf`.
+ * Rotate `buf` (`width`×`height`) by `angleRad` about `(pivotX, pivotY)`
+ * (defaults to the buffer's own centre), staying inside the same
+ * `width`×`height` footprint — content that rotates outside it is clipped,
+ * exactly as Pixelorama's own CPU `rotxel()` does (it mutates the cel's
+ * `Image` in place rather than growing the canvas). Every output pixel is
+ * either fully transparent/`TRANSPARENT_INDEX` or a value that already
+ * existed somewhere in `buf`.
+ *
+ * `bytesPerPixel` defaults to 4 (straight-alpha RGBA) — every pre-indexed-mode
+ * call site is unaffected; an indexed cel (`model/celStorage.ts`) passes 1.
+ * `T` is inferred from `buf`, so a `Uint8ClampedArray` in gets a
+ * `Uint8ClampedArray` out and a `Uint8Array` in gets a `Uint8Array` out.
  */
-export function rotxelRotate(
-  buf: Uint8ClampedArray,
+export function rotxelRotate<T extends PixelBuf>(
+  buf: T,
   width: number,
   height: number,
   angleRad: number,
   pivotX = width / 2,
   pivotY = height / 2,
-): Uint8ClampedArray {
+  bytesPerPixel = 4,
+): T {
   const angle = normalizeAngle(angleRad);
-  if (nearAngle(angle, 0)) return new Uint8ClampedArray(buf);
-  if (nearAngle(angle, Math.PI)) return flip180(buf, width, height);
-  if (nearAngle(angle, Math.PI / 2)) return rotateExact90(buf, width, height, 1);
-  if (nearAngle(angle, (3 * Math.PI) / 2)) return rotateExact90(buf, width, height, -1);
-  return rotxelGeneral(buf, width, height, angleRad, pivotX, pivotY);
+  if (nearAngle(angle, 0)) {
+    const out = sameTypeBuffer(buf, buf.length);
+    out.set(buf);
+    return out;
+  }
+  if (nearAngle(angle, Math.PI)) return flip180(buf, width, height, bytesPerPixel);
+  if (nearAngle(angle, Math.PI / 2)) return rotateExact90(buf, width, height, 1, bytesPerPixel);
+  if (nearAngle(angle, (3 * Math.PI) / 2))
+    return rotateExact90(buf, width, height, -1, bytesPerPixel);
+  return rotxelGeneral(
+    buf,
+    width,
+    height,
+    angleRad,
+    pivotX,
+    pivotY,
+    bytesPerPixel,
+    equalsFor(bytesPerPixel),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -321,17 +398,23 @@ export function rotxelRotate(
  * (integers are exact pixel centres). Falls back to plain nearest-neighbour
  * whenever there is no 45° diagonal edge to reason about — the adapted
  * heuristic only ever changes the answer when one is genuinely present.
+ *
+ * `bytesPerPixel` defaults to 4 (RGBA); an indexed cel passes 1 — see the
+ * module doc comment's "Indexed-mode generalization" section.
  */
 export function cleanEdgeSample(
-  buf: Uint8ClampedArray,
+  buf: PixelBuf,
   width: number,
   height: number,
   sx: number,
   sy: number,
-): RGBA {
+  bytesPerPixel = 4,
+): Px {
+  const bpp = bytesPerPixel;
+  const equals = equalsFor(bpp);
   const nx = Math.round(sx);
   const ny = Math.round(sy);
-  const c = readPx(buf, width, height, nx, ny);
+  const c = readPx(buf, width, height, nx, ny, bpp);
 
   const lx = sx - nx;
   const ly = sy - ny;
@@ -339,17 +422,17 @@ export function cleanEdgeSample(
 
   const dirX = lx >= 0 ? 1 : -1;
   const dirY = ly >= 0 ? 1 : -1;
-  const f = readPx(buf, width, height, nx + dirX, ny); // orthogonal neighbour toward the quadrant
-  const d = readPx(buf, width, height, nx, ny + dirY);
-  const corner = readPx(buf, width, height, nx + dirX, ny + dirY);
+  const f = readPx(buf, width, height, nx + dirX, ny, bpp); // orthogonal neighbour toward the quadrant
+  const d = readPx(buf, width, height, nx, ny + dirY, bpp);
+  const corner = readPx(buf, width, height, nx + dirX, ny + dirY, bpp);
 
   // No same-colour diagonal run between the two orthogonal neighbours: no
   // edge to slice through, so this degrades to nearest-neighbour exactly.
-  if (!similarColors(f, d)) return c;
+  if (!equals(f, d)) return c;
 
   // `similar(c, df) && higher(c, f)` in the source — protects a single-pixel-
   // wide diagonal line from being eaten by its own neighbours' agreement.
-  if (!similarColors(c, f) && !similarColors(c, d) && similarColors(c, corner)) return c;
+  if (!equals(c, f) && !equals(c, d) && equals(c, corner)) return c;
 
   const ax = Math.abs(lx);
   const ay = Math.abs(ly);
@@ -364,18 +447,23 @@ export type TransformAlgorithm = 'rotxel' | 'cleanEdge';
  * `height` footprint (mirrors `rotxelRotate`'s own contract). Every output
  * pixel is `cleanEdgeSample`'s answer for that destination's inverse-mapped
  * source position, so — same as `rotxelRotate` — the result is always either
- * transparent or a colour that already existed in `buf`.
+ * transparent/`TRANSPARENT_INDEX` or a value that already existed in `buf`.
+ *
+ * `bytesPerPixel` defaults to 4 (RGBA); an indexed cel passes 1, same
+ * `T`-inferred-from-`buf` shape `rotxelRotate` uses.
  */
-export function cleanEdgeTransform(
-  buf: Uint8ClampedArray,
+export function cleanEdgeTransform<T extends PixelBuf>(
+  buf: T,
   width: number,
   height: number,
   angleRad: number,
   scale: number,
   pivotX = width / 2,
   pivotY = height / 2,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(buf.length);
+  bytesPerPixel = 4,
+): T {
+  const bpp = bytesPerPixel;
+  const out = sameTypeBuffer(buf, width * height * bpp);
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);
 
@@ -390,7 +478,7 @@ export function cleanEdgeTransform(
       const syr = (dx * sin + dy * cos) / scale;
       const sx = pivotX + sxr;
       const sy = pivotY + syr;
-      writePx(out, width, x, y, cleanEdgeSample(buf, width, height, sx, sy));
+      writePx(out, width, x, y, cleanEdgeSample(buf, width, height, sx, sy, bpp), bpp);
     }
   }
 
