@@ -466,11 +466,17 @@ export async function cancelBatchConvert(jobId: number): Promise<void> {
 // "on-demand download for larger models with explicit consent",
 // `src/segment/modelDownload.ts`).
 //
-// The actual network fetch happens in the frontend (plain `fetch()`, gated
-// on an explicit user confirmation — never here). These wrappers are what
-// gets the resulting bytes into Rust once that has happened: the same raw
-// invoke body `stageBytes` uses above, not a JSON argument, since a ~170 MB
-// model is even less appropriate there than a pixel buffer.
+// **The network fetch happens in Rust, not the frontend** — like
+// `fetchLospecPalette` below, and for the same reason: GitHub's release-asset
+// URL redirects to `release-assets.githubusercontent.com`, which sends no
+// `Access-Control-Allow-Origin` header, so a WebView `fetch()` to it is
+// rejected by CORS before it reaches the network (confirmed live the same
+// way as the Lospec case — a real headless-browser `fetch()` to the real
+// model URL failed with `TypeError: Failed to fetch`, while plain Node and
+// `commands::segment::download_segmentation_model`'s own `ureq` call both
+// succeeded). `downloadSegmentationModel` below is gated on an explicit user
+// confirmation exactly as the old frontend `fetch()` was — only *where* the
+// network call happens changed.
 // ---------------------------------------------------------------------------
 
 export interface SegmentationModelInfo {
@@ -502,14 +508,14 @@ export interface SavedSegmentationModel {
 }
 
 /**
- * Hand already-downloaded model bytes to Rust for checksum verification and
- * persistence. Call only after the frontend's own `fetch()` has succeeded —
- * this function itself makes no network call.
+ * Fetch the larger segmentation model, verify its checksum and persist it —
+ * entirely in Rust (see the module-level comment above for why). Call only
+ * after the user has explicitly confirmed the download in the UI; this is
+ * itself the network call, gated the same way the old frontend `fetch()`
+ * was.
  */
-export async function saveDownloadedSegmentationModel(
-  bytes: ArrayBuffer,
-): Promise<SavedSegmentationModel> {
-  return invoke<SavedSegmentationModel>('save_downloaded_segmentation_model', bytes);
+export async function downloadSegmentationModel(): Promise<SavedSegmentationModel> {
+  return invoke<SavedSegmentationModel>('download_segmentation_model');
 }
 
 export interface SegmentationAvailability {
@@ -538,6 +544,9 @@ export async function segmentationAvailability(): Promise<SegmentationAvailabili
 // `07-tech-stack.md` §6 raised was "download the runtime on first use", and
 // this is the "fetch" half of that; `segment::Segmenter` still needs a
 // caller to actually load the extracted library (separate, later work).
+//
+// **The network fetch happens in Rust**, for the same CORS reason as the
+// segmentation model above — see that section's comment.
 // ---------------------------------------------------------------------------
 
 export interface OnnxRuntimeInfo {
@@ -570,20 +579,20 @@ export interface SavedOnnxRuntime {
 }
 
 /**
- * Hand an already-downloaded `.tar.gz` archive's bytes to Rust for checksum
- * verification, extraction of the single shared-object entry it needs, and
- * persistence. Call only after the frontend's own `fetch()` has succeeded —
- * this function itself makes no network call.
+ * Fetch the ONNX Runtime `.tar.gz` archive, verify its checksum, extract the
+ * single shared-object entry it needs, and persist it — entirely in Rust.
+ * Call only after the user has explicitly confirmed the download in the UI;
+ * this is itself the network call.
  */
-export async function saveDownloadedOnnxRuntime(bytes: ArrayBuffer): Promise<SavedOnnxRuntime> {
-  return invoke<SavedOnnxRuntime>('save_downloaded_onnx_runtime', bytes);
+export async function downloadOnnxRuntime(): Promise<SavedOnnxRuntime> {
+  return invoke<SavedOnnxRuntime>('download_onnx_runtime');
 }
 
 // ---------------------------------------------------------------------------
 // Lospec URL import (`docs/08-roadmap.md` Phase 7 "Lospec URL import
-// (opt-in network)", `src/lib/lospecImport.ts`). **Unlike every other
-// network feature above, the fetch itself happens in Rust, not the
-// frontend** — measured directly: `lospec.com` sends no
+// (opt-in network)", `src/lib/lospecImport.ts`). Like the segmentation-model
+// and ONNX-runtime downloads above, the fetch itself happens in Rust, not
+// the frontend — measured directly: `lospec.com` sends no
 // `Access-Control-Allow-Origin` header, so a WebView `fetch()` to it is
 // rejected by CORS before any request leaves the browser engine (reproduced
 // live: a real headless-browser `fetch()` to a real Lospec URL failed with

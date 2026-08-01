@@ -1,92 +1,58 @@
 /**
- * On-demand, consent-gated download of a large file whose bytes must be
- * verified and persisted on the Rust side — the larger segmentation model
- * (`docs/08-roadmap.md` Phase 5 "on-demand download for larger models with
- * explicit consent") and, since `docs/10-decisions.md` D16, the ONNX Runtime
- * native library itself (`src/segment/OnnxRuntimeSection.tsx`). Both share
- * this one implementation rather than two parallel ones, per D16's own
- * "reuse it, don't build a parallel one" instruction — the shape (fetch a
- * URL, hand the bytes to a Rust `save` command that verifies a checksum and
- * writes to disk, report every failure as data rather than a throw) does not
- * care what kind of file is on the other end.
+ * Consent-gated wrapper around a single Rust download command — the larger
+ * segmentation model (`docs/08-roadmap.md` Phase 5 "on-demand download for
+ * larger models with explicit consent") and, since `docs/10-decisions.md`
+ * D16, the ONNX Runtime native library itself (`src/segment/
+ * OnnxRuntimeSection.tsx`). Both share this one implementation rather than
+ * two parallel ones.
  *
- * **This module never calls `fetch` on its own.** [`downloadConsentedFile`]
- * only runs when a component calls it, which only happens after the user has
- * seen a confirm dialog stating the size and source and clicked an explicit
- * "Download" button — never on mount, mode switch, or app startup.
- * `fetchImpl`/`save` are injected so that invariant, and the
- * success/failure/offline paths, can be unit tested without a real network
- * call (`scripts/lib/modelFetch.ts` uses the same dependency-injection shape
- * for the same reason, on the build-time side of this feature).
+ * **The network fetch itself now happens in Rust, not here.** This module
+ * originally called `fetch()` directly, on the assumption that an unset CSP
+ * meant the WebView had unrestricted network access. That assumption missed
+ * CORS: GitHub's release-asset URLs redirect to
+ * `release-assets.githubusercontent.com`, which sends no
+ * `Access-Control-Allow-Origin` header, so a same-origin `fetch()` from
+ * inside the WebView is rejected by CORS before the request ever leaves the
+ * browser engine — confirmed live by driving the real Vite dev bundle in a
+ * real headless browser over CDP: `fetch()` to the real model/runtime URLs
+ * failed with `TypeError: Failed to fetch`, while the identical request from
+ * plain Node (which does not enforce CORS) succeeded. This is the same
+ * failure `commands::lospec` found for `lospec.com`. The fix mirrors that
+ * one: `commands::segment::download_segmentation_model` and
+ * `commands::onnx_runtime::download_onnx_runtime` now do the fetch,
+ * checksum-verify and persist entirely on the Rust side
+ * (`src-tauri/src/commands/segment.rs`, `.../onnx_runtime.rs`).
+ *
+ * **This module never calls the download command on its own.**
+ * [`downloadConsentedFile`] only runs when a component calls it, which only
+ * happens after the user has seen a confirm dialog stating the size and
+ * source and clicked an explicit "Download" button — never on mount, mode
+ * switch, or app startup. `download` is injected so that invariant, and the
+ * success/failure paths, can be unit tested without a real network call.
  */
-
-import type { SavedSegmentationModel } from '../ipc/commands.ts';
-
-export type DownloadFetchImpl = (url: string) => Promise<{
-  ok: boolean;
-  status: number;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}>;
-
-/** `TSaved` defaults to the segmentation-model shape so existing call sites
- * that never named the type parameter keep compiling unchanged; other
- * downloads (e.g. the ONNX Runtime library) supply their own `TSaved`. */
-export type SaveImpl<TSaved extends { path: string; bytes: number } = SavedSegmentationModel> = (
-  bytes: ArrayBuffer,
-) => Promise<TSaved>;
 
 export type DownloadOutcome =
   { kind: 'success'; path: string; bytes: number } | { kind: 'error'; message: string };
 
-/** The only field this function itself needs from the info object. */
-export type ConsentedDownloadInfo = { sourceUrl: string };
+/** The one thing a caller injects: a function that invokes the Rust command
+ * which does the real fetch, checksum-verify and persist. Takes no
+ * arguments — the URL and checksum are constants known only to Rust. */
+export type DownloadImpl<TSaved extends { path: string; bytes: number }> = () => Promise<TSaved>;
 
 /**
- * Fetch `info.sourceUrl` and, if it succeeds, hand the bytes to `save` (which
- * verifies the checksum and writes to disk on the Rust side). Every failure
- * mode — network unreachable, non-2xx response, a checksum rejected by
- * `save` — resolves to `{ kind: 'error' }` with a readable message rather
+ * Run `deps.download()` (a Rust IPC call that fetches, verifies and persists
+ * a file) and translate its outcome into a `DownloadOutcome`. Every failure
+ * mode — network unreachable, non-2xx response, a checksum rejected on the
+ * Rust side — resolves to `{ kind: 'error' }` with a readable message rather
  * than throwing, since this is a nice-to-have feature and the caller (a
  * React component) should be able to show it inline and let the user retry,
  * not crash anything.
  */
-export async function downloadConsentedFile<
-  TInfo extends ConsentedDownloadInfo,
-  TSaved extends { path: string; bytes: number },
->(
-  info: TInfo,
-  deps: { fetchImpl: DownloadFetchImpl; save: SaveImpl<TSaved> },
-): Promise<DownloadOutcome> {
-  let response: Awaited<ReturnType<DownloadFetchImpl>>;
+export async function downloadConsentedFile<TSaved extends { path: string; bytes: number }>(deps: {
+  download: DownloadImpl<TSaved>;
+}): Promise<DownloadOutcome> {
   try {
-    response = await deps.fetchImpl(info.sourceUrl);
-  } catch (cause) {
-    return {
-      kind: 'error',
-      message: `could not reach ${info.sourceUrl} — check your network connection. (${
-        cause instanceof Error ? cause.message : String(cause)
-      })`,
-    };
-  }
-
-  if (!response.ok) {
-    return { kind: 'error', message: `download failed: HTTP ${response.status}` };
-  }
-
-  let bytes: ArrayBuffer;
-  try {
-    bytes = await response.arrayBuffer();
-  } catch (cause) {
-    return {
-      kind: 'error',
-      message: `download was interrupted before it finished. (${
-        cause instanceof Error ? cause.message : String(cause)
-      })`,
-    };
-  }
-
-  try {
-    const saved = await deps.save(bytes);
+    const saved = await deps.download();
     return { kind: 'success', path: saved.path, bytes: saved.bytes };
   } catch (cause) {
     return {

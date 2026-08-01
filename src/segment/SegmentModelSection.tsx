@@ -26,7 +26,7 @@ import {
   hasBackend,
   segmentationModelInfo,
   segmentationModelStatus,
-  saveDownloadedSegmentationModel,
+  downloadSegmentationModel,
   type SegmentationModelInfo,
   type SegmentationModelStatus,
 } from '../ipc/commands.ts';
@@ -62,10 +62,7 @@ export function SegmentModelSection() {
   const confirmDownload = async () => {
     if (!info) return;
     setPhase('downloading');
-    const outcome = await downloadConsentedFile(info, {
-      fetchImpl: (url) => fetch(url),
-      save: saveDownloadedSegmentationModel,
-    });
+    const outcome = await downloadConsentedFile({ download: downloadSegmentationModel });
     if (outcome.kind === 'success') {
       setPhase('success');
       setStatus({ present: true, path: outcome.path });

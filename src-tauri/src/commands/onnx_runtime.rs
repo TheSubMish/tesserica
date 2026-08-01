@@ -9,13 +9,23 @@
 //! `.so`. This module is that piece, and it deliberately mirrors
 //! `commands::segment`'s on-demand *model* download almost exactly: a static
 //! info command (no network, safe on mount), a local status check (no
-//! network), and a save command that verifies an already-downloaded byte
-//! buffer and persists it — the actual `fetch()` happens in the frontend
-//! (`src/segment/modelDownload.ts`'s `downloadConsentedFile`, generalized in
-//! this same change so both downloads share one implementation rather than
-//! two parallel ones), and the bytes cross into Rust over the same
-//! raw-invoke-body transport (`docs/10-decisions.md` D13) `save_downloaded_
-//! segmentation_model` already uses.
+//! network), and a download command that fetches, verifies and persists.
+//!
+//! **The fetch happens in Rust, not the frontend.** This originally used a
+//! plain frontend `fetch()` on the assumption that an unset CSP meant the
+//! WebView had unrestricted network access — but that misses CORS: GitHub's
+//! release-asset URL redirects to `release-assets.githubusercontent.com`,
+//! which sends no `Access-Control-Allow-Origin` header, so a same-origin
+//! `fetch()` from inside the WebView is rejected by CORS before it reaches
+//! the network — confirmed live the same way `commands::segment` and
+//! `commands::lospec` confirmed it for their own URLs: driving the real Vite
+//! dev bundle in a real headless browser over CDP, where `fetch()` to the
+//! real runtime URL failed with `TypeError: Failed to fetch` while plain
+//! Node and this module's own `ureq` call both succeeded. `commands::segment`
+//! and this module now share the same shape (`fetch_bytes` in each, and the
+//! generalized `downloadConsentedFile` on the frontend side, `src/segment/
+//! modelDownload.ts`) — just with the network call itself in Rust instead of
+//! the frontend.
 //!
 //! **One real wrinkle the model download does not have.** Upstream
 //! (`microsoft/onnxruntime` GitHub Releases) ships the runtime as a
@@ -35,11 +45,11 @@
 //! verified." Nothing here calls `Segmenter::load`.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
@@ -92,7 +102,7 @@ pub struct OnnxRuntimeInfo {
 /// Reading this is **not** a network call, mirroring
 /// `segmentation_model_info` exactly — safe to call whenever the Background
 /// section mounts. What must stay gated on explicit consent is
-/// [`save_downloaded_onnx_runtime`].
+/// [`download_onnx_runtime`].
 #[tauri::command]
 pub fn onnx_runtime_info() -> OnnxRuntimeInfo {
     OnnxRuntimeInfo {
@@ -115,7 +125,7 @@ fn runtime_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
 }
 
 /// Where the extracted ONNX Runtime library would live if
-/// [`save_downloaded_onnx_runtime`] has run — used by `commands::segment`'s
+/// [`download_onnx_runtime`] has run — used by `commands::segment`'s
 /// `segmentation_availability` to decide whether ML background removal can
 /// load a session at all. A plain path join, not a filesystem check; callers
 /// check `.is_file()` themselves (`onnx_runtime_status` already does this
@@ -150,40 +160,87 @@ pub struct SavedOnnxRuntime {
     pub bytes: usize,
 }
 
-/// Accept the raw bytes of an already-downloaded `.tar.gz` archive — fetched
-/// by the frontend only after explicit user confirmation — verify its
-/// sha256 against the checksum this project computed, extract the single
-/// real shared-object entry it contains, and persist *that* to the app-data
-/// runtime directory.
-///
-/// A checksum mismatch, or an archive missing the expected entry, is
-/// reported as an `AppError` and **nothing is ever written to the final
-/// path** in either case — the same "verify before install" discipline
-/// `commands::segment::verify_and_persist` already uses. Overwriting a
-/// previous download is fine: a re-download after a failed/partial attempt
-/// should always win.
-#[tauri::command]
-pub fn save_downloaded_onnx_runtime(
-    request: Request<'_>,
-    app: AppHandle,
-) -> Result<SavedOnnxRuntime, AppError> {
-    let bytes = match request.body() {
-        InvokeBody::Raw(bytes) => bytes,
-        InvokeBody::Json(_) => {
-            return Err(AppError::invalid(
-                "save_downloaded_onnx_runtime expects a raw ArrayBuffer body, not JSON",
-            ));
-        }
-    };
+/// Generous bound for the real ~9 MB archive download — smaller than
+/// `commands::segment`'s model bound since the archive itself is much
+/// smaller, but the same "finite, not infinite" reasoning applies.
+const RUNTIME_DOWNLOAD_TIMEOUT_SECS: u64 = 180;
 
-    let dir = runtime_dir(&app)?;
+/// Real `Content-Length` of the archive (`RUNTIME_ARCHIVE_APPROX_BYTES`)
+/// plus generous headroom — see `commands::segment::MODEL_DOWNLOAD_MAX_BYTES`
+/// for why this is necessary at all: `ureq`'s `read_to_vec()` defaults to a
+/// 10 MB body cap.
+const RUNTIME_DOWNLOAD_MAX_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Fetch `url` and return its raw bytes, or a readable `AppError` for every
+/// failure mode a frontend `fetch()` used to surface as a rejected promise —
+/// identical shape to `commands::segment::fetch_bytes`, kept as a separate
+/// small copy in each module rather than a shared helper, matching how
+/// `commands::lospec` also keeps its own network call self-contained.
+fn fetch_bytes(url: &str, timeout_secs: u64, max_bytes: u64) -> Result<Vec<u8>, AppError> {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(timeout_secs)))
+        .build();
+    let agent: ureq::Agent = config.into();
+
+    match agent.get(url).call() {
+        Ok(mut response) => response
+            .body_mut()
+            .with_config()
+            .limit(max_bytes)
+            .read_to_vec()
+            .map_err(|e| {
+                AppError::invalid(format!(
+                    "download was interrupted before it finished. ({e})"
+                ))
+            }),
+        Err(ureq::Error::StatusCode(code)) => {
+            Err(AppError::invalid(format!("download failed: HTTP {code}")))
+        }
+        Err(ureq::Error::Timeout(_)) => Err(AppError::invalid(format!(
+            "timed out waiting for {url} (after {timeout_secs}s) — check your network connection."
+        ))),
+        Err(e) => Err(AppError::invalid(format!(
+            "could not reach {url} — check your network connection. ({e})"
+        ))),
+    }
+}
+
+/// The real fetch-verify-extract-persist pipeline, taking a plain directory
+/// so it can be exercised in a test against a real temp directory without
+/// needing a live `AppHandle` — same factoring reason `verify_and_extract`
+/// itself already has.
+fn download_and_verify_runtime(dir: &Path) -> Result<SavedOnnxRuntime, AppError> {
+    let bytes = fetch_bytes(
+        RUNTIME_ARCHIVE_URL,
+        RUNTIME_DOWNLOAD_TIMEOUT_SECS,
+        RUNTIME_DOWNLOAD_MAX_BYTES,
+    )?;
     verify_and_extract(
-        bytes,
+        &bytes,
         RUNTIME_ARCHIVE_SHA256,
         RUNTIME_ARCHIVE_ENTRY,
         RUNTIME_FILENAME,
-        &dir,
+        dir,
     )
+}
+
+/// Fetch [`RUNTIME_ARCHIVE_URL`], verify its sha256 against the checksum
+/// this project computed, extract the single real shared-object entry it
+/// contains, and persist *that* to the app-data runtime directory.
+///
+/// **This is the network call `CLAUDE.md`'s "opt-in network" invariant
+/// gates.** Reachable only after the frontend has shown the user the exact
+/// size and source (`onnx_runtime_info`) and they clicked "Download"
+/// (`src/segment/OnnxRuntimeSection.tsx`) — the consent gate is unchanged
+/// from before this moved here, only *where* the fetch happens changed. A
+/// checksum mismatch, or an archive missing the expected entry, is reported
+/// as an `AppError` and **nothing is ever written to the final path** in
+/// either case. Overwriting a previous download is fine: a re-download
+/// after a failed/partial attempt should always win.
+#[tauri::command]
+pub fn download_onnx_runtime(app: AppHandle) -> Result<SavedOnnxRuntime, AppError> {
+    let dir = runtime_dir(&app)?;
+    download_and_verify_runtime(&dir)
 }
 
 /// The verify-decompress-extract-write logic, factored out so it can be
@@ -447,44 +504,31 @@ mod tests {
         );
     }
 
-    /// A manually-run, real end-to-end proof against the actual production
-    /// constants — not part of ordinary `cargo test` since it needs a real
-    /// ~9 MB archive on disk, which this repo never bundles or checks in.
-    ///
-    /// Point `TESSERICA_TEST_ORT_ARCHIVE` at a real downloaded copy of
-    /// `onnxruntime-linux-x64-1.28.0.tgz` (in this dispatch, one was fetched
-    /// via a real `curl` against the real GitHub Releases URL and
-    /// independently checksummed with `sha256sum` before this test existed —
-    /// see the dispatch report) to confirm the exact code path a real
-    /// runtime download would take (`verify_and_extract` with
-    /// `RUNTIME_ARCHIVE_SHA256`/`RUNTIME_ARCHIVE_ENTRY`) succeeds against the
-    /// real payload, not just a small fixture. Run with:
-    /// `TESSERICA_TEST_ORT_ARCHIVE=/path/to/onnxruntime-linux-x64-1.28.0.tgz cargo test commands::onnx_runtime -- --ignored --nocapture`
+    /// A real end-to-end proof against the live URL — this is the Rust half
+    /// of the same proof `commands::lospec`'s own
+    /// `real_fetch_of_a_known_palette_succeeds` gives for `lospec.com`:
+    /// that [`download_and_verify_runtime`] really can fetch the real
+    /// ~9 MB archive from outside the WebView (the whole reason it moved
+    /// here), and that the downloaded, extracted library still passes
+    /// checksum verification. Not run by default — needs real network
+    /// access. Run with:
+    /// `cargo test --manifest-path src-tauri/Cargo.toml commands::onnx_runtime -- --ignored --nocapture`
     #[test]
-    #[ignore = "requires a real ~9 MB onnxruntime-linux-x64-1.28.0.tgz on disk, never bundled or checked in"]
-    fn smoke_test_the_real_archive_passes_checksum_and_extracts() {
-        let path = std::env::var("TESSERICA_TEST_ORT_ARCHIVE")
-            .expect("set TESSERICA_TEST_ORT_ARCHIVE to a real onnxruntime-linux-x64-1.28.0.tgz");
-        let bytes = std::fs::read(&path).expect("real archive file should be readable");
-        assert_eq!(
-            bytes.len(),
-            RUNTIME_ARCHIVE_APPROX_BYTES as usize,
-            "unexpected archive size"
-        );
-
-        let dir = TempDir::new("real-archive");
-        let saved = verify_and_extract(
-            &bytes,
-            RUNTIME_ARCHIVE_SHA256,
-            RUNTIME_ARCHIVE_ENTRY,
-            RUNTIME_FILENAME,
-            &dir.0,
-        )
-        .unwrap();
+    #[ignore = "requires real network access; downloads the real ~9 MB ONNX Runtime archive"]
+    fn real_download_of_the_runtime_archive_succeeds_and_verifies() {
+        let dir = TempDir::new("real-archive-download");
+        let saved = download_and_verify_runtime(&dir.0)
+            .expect("a real download of the runtime archive should succeed and pass checksum");
 
         assert_eq!(saved.bytes, RUNTIME_EXTRACTED_APPROX_BYTES as usize);
+        assert_eq!(
+            std::fs::metadata(dir.0.join(RUNTIME_FILENAME))
+                .unwrap()
+                .len(),
+            RUNTIME_EXTRACTED_APPROX_BYTES
+        );
         println!(
-            "verified checksum and extracted {} real bytes from {path} to {:?}",
+            "fetched, verified, extracted and persisted {} real bytes to {:?}",
             saved.bytes, dir.0
         );
     }

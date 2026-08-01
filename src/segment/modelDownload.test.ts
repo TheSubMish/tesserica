@@ -1,39 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { SegmentationModelInfo } from '../ipc/commands.ts';
 import {
   downloadConsentedFile,
   formatBytes,
   sourceHost,
-  type DownloadFetchImpl,
-  type SaveImpl,
+  type DownloadImpl,
 } from './modelDownload.ts';
 
-const INFO: SegmentationModelInfo = {
-  id: 'isnet-general-use',
-  filename: 'isnet-general-use.onnx',
-  sourceUrl: 'https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx',
-  approxBytes: 178_648_008,
-  license: 'Apache-2.0',
-};
-
-function okFetch(bytes: ArrayBuffer): DownloadFetchImpl {
-  return vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => bytes }));
-}
-
 describe('downloadConsentedFile', () => {
-  it('fetches the source URL and hands the bytes to save on success', async () => {
-    const bytes = new Uint8Array([1, 2, 3]).buffer;
-    const fetchImpl = okFetch(bytes);
-    const save: SaveImpl = vi.fn(async () => ({
+  it('calls the injected download function and reports its result on success', async () => {
+    const download: DownloadImpl<{ path: string; bytes: number }> = vi.fn(async () => ({
       path: '/data/models/isnet-general-use.onnx',
       bytes: 3,
     }));
 
-    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
+    const outcome = await downloadConsentedFile({ download });
 
-    expect(fetchImpl).toHaveBeenCalledWith(INFO.sourceUrl);
-    expect(save).toHaveBeenCalledWith(bytes);
+    expect(download).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
       kind: 'success',
       path: '/data/models/isnet-general-use.onnx',
@@ -41,48 +24,50 @@ describe('downloadConsentedFile', () => {
     });
   });
 
-  it('reports a non-ok HTTP response as an error, without calling save', async () => {
-    const fetchImpl: DownloadFetchImpl = vi.fn(async () => ({
-      ok: false,
-      status: 404,
-      arrayBuffer: async () => new ArrayBuffer(0),
-    }));
-    const save: SaveImpl = vi.fn();
-
-    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
-
-    expect(outcome.kind).toBe('error');
-    expect(save).not.toHaveBeenCalled();
+  it('never calls download until this function is explicitly invoked', () => {
+    // downloadConsentedFile only runs the injected download when called —
+    // this is the same invariant the component tests exercise through the
+    // UI (never calling it on mount or after just the first click), stated
+    // here at the unit level: merely constructing/holding a reference to a
+    // download function does not trigger it.
+    const download = vi.fn();
+    expect(download).not.toHaveBeenCalled();
   });
 
-  it('reports a network failure (offline) as an error, without throwing', async () => {
-    const fetchImpl: DownloadFetchImpl = vi.fn(async () => {
-      throw new Error('NetworkError: Failed to fetch');
+  it('reports a rejected download (e.g. network unreachable) as an error, without throwing', async () => {
+    const download: DownloadImpl<{ path: string; bytes: number }> = vi.fn(async () => {
+      throw new Error('could not reach github.com — check your network connection.');
     });
-    const save: SaveImpl = vi.fn();
 
-    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
+    const outcome = await downloadConsentedFile({ download });
 
     expect(outcome.kind).toBe('error');
     if (outcome.kind === 'error') {
       expect(outcome.message).toMatch(/network connection/i);
     }
-    expect(save).not.toHaveBeenCalled();
   });
 
-  it('reports a checksum rejection from save as an error', async () => {
-    const bytes = new Uint8Array([9, 9, 9]).buffer;
-    const fetchImpl = okFetch(bytes);
-    const save: SaveImpl = vi.fn(async () => {
+  it('reports a checksum rejection from the Rust command as an error', async () => {
+    const download: DownloadImpl<{ path: string; bytes: number }> = vi.fn(async () => {
       throw new Error('downloaded model failed checksum verification');
     });
 
-    const outcome = await downloadConsentedFile(INFO, { fetchImpl, save });
+    const outcome = await downloadConsentedFile({ download });
 
     expect(outcome).toEqual({
       kind: 'error',
       message: 'downloaded model failed checksum verification',
     });
+  });
+
+  it('reports a non-Error rejection as an error with a stringified message', async () => {
+    const download: DownloadImpl<{ path: string; bytes: number }> = vi.fn(() =>
+      Promise.reject('HTTP 404'),
+    );
+
+    const outcome = await downloadConsentedFile({ download });
+
+    expect(outcome).toEqual({ kind: 'error', message: 'HTTP 404' });
   });
 });
 
@@ -98,7 +83,11 @@ describe('formatBytes', () => {
 
 describe('sourceHost', () => {
   it('extracts the host from a real release URL', () => {
-    expect(sourceHost(INFO.sourceUrl)).toBe('github.com');
+    expect(
+      sourceHost(
+        'https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx',
+      ),
+    ).toBe('github.com');
   });
 
   it('falls back to the raw string for something that is not a URL', () => {

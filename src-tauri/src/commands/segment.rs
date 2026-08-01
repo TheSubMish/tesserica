@@ -9,17 +9,25 @@
 //! Convert mode's Background section and confirms a dialog that states the
 //! size and source first (`src/segment/modelDownload.ts`).
 //!
-//! **Rust makes no network call of its own here.** The actual HTTP fetch
-//! happens in the frontend with a plain `fetch()` — the WebView already has
-//! full network access and this app's CSP is unset — because that is the
-//! one piece that is genuinely "network activity" and the thing consent has
-//! to gate. This module's job starts *after* that: receive the
-//! already-downloaded bytes over the same raw-invoke-body transport
-//! `crate::staging` uses for editor layers (`docs/02-architecture.md` §6.2,
-//! D13) — never a JSON command argument, which would be even more
-//! inappropriate here than for a pixel buffer given this file is ~170 MB —
-//! verify their checksum against the one the source itself publishes, and
-//! write them to the OS app-data directory.
+//! **The HTTP fetch happens in Rust, not the frontend.** Originally this
+//! module only received already-downloaded bytes from a frontend `fetch()`,
+//! on the assumption that an unset CSP meant the WebView had unrestricted
+//! network access. That assumption missed CORS: GitHub's release-asset URL
+//! redirects (302) to `release-assets.githubusercontent.com`, which sends no
+//! `Access-Control-Allow-Origin` header, so a same-origin `fetch()` from
+//! inside the WebView is rejected by CORS before the request ever leaves the
+//! browser engine — confirmed live by driving the real Vite dev bundle in a
+//! real headless browser over CDP: `fetch()` to the real model URL failed
+//! with `TypeError: Failed to fetch`, while the identical request from plain
+//! Node (which does not enforce CORS) and from this module's `ureq` call
+//! both succeed. This is exactly the failure mode `commands::lospec`
+//! documented for `lospec.com` — it turns out the "GitHub precedent" that
+//! module's own doc comment once cited as *not* having this problem was
+//! never actually measured the same way, and does have it. [`fetch_bytes`]
+//! is the fix: the GET itself moves to Rust, gated on the same explicit
+//! consent click (`src/segment/SegmentModelSection.tsx`) as before. This
+//! module's other job — verify the checksum against the one the source
+//! itself publishes and write to the OS app-data directory — is unchanged.
 //!
 //! **Pipeline integration**: [`segmentation_availability`] and
 //! [`ensure_loaded`] are the piece that actually wires a model into
@@ -32,11 +40,11 @@
 //! frontend so Convert mode's UI can show/hide the ML option honestly rather
 //! than offering something that will silently fall back.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
-use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::AppError;
@@ -81,7 +89,7 @@ pub struct SegmentationModelInfo {
 /// Reading this is **not** a network call — it is a plain, always-safe
 /// query over data baked into the binary — so it is fine to call whenever
 /// the Background section mounts. What must stay gated on explicit consent
-/// is [`save_downloaded_segmentation_model`], which only runs after the
+/// is [`download_segmentation_model`], which only runs after the
 /// frontend has both shown this info to the user *and* received an explicit
 /// confirmation click.
 #[tauri::command]
@@ -105,7 +113,7 @@ fn models_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
 }
 
 /// Where the on-demand-downloaded larger model would live if
-/// [`save_downloaded_segmentation_model`] has run — a plain path join, not a
+/// [`download_segmentation_model`] has run — a plain path join, not a
 /// filesystem check. Used by [`resolve_model_path`] to decide whether ML
 /// background removal has anything to load.
 fn larger_model_path(app: &AppHandle) -> Result<PathBuf, AppError> {
@@ -236,32 +244,85 @@ pub struct SavedSegmentationModel {
     pub bytes: usize,
 }
 
-/// Accept the raw bytes of an already-downloaded model — fetched by the
-/// frontend only after explicit user confirmation — verify their MD5 against
-/// the checksum the source publishes, and persist them to the app-data
-/// models directory.
+/// Generous bound for the real ~170 MB download — far larger than
+/// `commands::lospec`'s 20s bound for a few KB of palette text, but still
+/// finite so a stalled connection eventually surfaces as a reported error
+/// in the "Downloading…" UI rather than hanging it forever.
+const MODEL_DOWNLOAD_TIMEOUT_SECS: u64 = 600;
+
+/// Real `Content-Length` of the model (`LARGER_MODEL_APPROX_BYTES`) plus
+/// generous headroom — `ureq`'s `read_to_vec()` defaults to a 10 MB body
+/// cap (to protect callers reading arbitrary bodies from memory exhaustion),
+/// which is far too small for this ~170 MB file and silently truncated the
+/// very first real download attempt in this environment. This URL is a
+/// hardcoded constant, not attacker-controlled, so the cap only needs to be
+/// a sanity bound, not a tight one.
+const MODEL_DOWNLOAD_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Fetch `url` and return its raw bytes, or a readable `AppError` for every
+/// failure mode a frontend `fetch()` used to surface as a rejected promise
+/// (unreachable host, timeout, non-2xx status, a body that never finishes) —
+/// same message shapes `src/segment/modelDownload.ts` used to produce
+/// itself, so the UI's error copy did not need to change.
+fn fetch_bytes(url: &str, timeout_secs: u64, max_bytes: u64) -> Result<Vec<u8>, AppError> {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(timeout_secs)))
+        .build();
+    let agent: ureq::Agent = config.into();
+
+    match agent.get(url).call() {
+        Ok(mut response) => response
+            .body_mut()
+            .with_config()
+            .limit(max_bytes)
+            .read_to_vec()
+            .map_err(|e| {
+                AppError::invalid(format!(
+                    "download was interrupted before it finished. ({e})"
+                ))
+            }),
+        Err(ureq::Error::StatusCode(code)) => {
+            Err(AppError::invalid(format!("download failed: HTTP {code}")))
+        }
+        Err(ureq::Error::Timeout(_)) => Err(AppError::invalid(format!(
+            "timed out waiting for {url} (after {timeout_secs}s) — check your network connection."
+        ))),
+        Err(e) => Err(AppError::invalid(format!(
+            "could not reach {url} — check your network connection. ({e})"
+        ))),
+    }
+}
+
+/// The real fetch-verify-persist pipeline, taking a plain directory so it can
+/// be exercised in a test against a real temp directory without needing a
+/// live `AppHandle` (`app_data_dir()` only resolves inside a running Tauri
+/// app) — same factoring reason `verify_and_persist` itself already has.
+fn download_and_verify_model(dir: &Path) -> Result<SavedSegmentationModel, AppError> {
+    let bytes = fetch_bytes(
+        LARGER_MODEL_URL,
+        MODEL_DOWNLOAD_TIMEOUT_SECS,
+        MODEL_DOWNLOAD_MAX_BYTES,
+    )?;
+    verify_and_persist(&bytes, LARGER_MODEL_MD5, LARGER_MODEL_FILENAME, dir)
+}
+
+/// Fetch [`LARGER_MODEL_URL`], verify its MD5 against the checksum the
+/// source publishes, and persist it to the app-data models directory.
 ///
-/// A checksum mismatch is reported as an `AppError` and **nothing is ever
+/// **This is the network call `CLAUDE.md`'s "opt-in network" invariant
+/// gates.** Reachable only after the frontend has shown the user the exact
+/// size and source (`segmentation_model_info`) and they clicked "Download"
+/// (`src/segment/SegmentModelSection.tsx`) — the consent gate is unchanged
+/// from before this moved here, only *where* the fetch happens changed. A
+/// checksum mismatch is reported as an `AppError` and **nothing is ever
 /// written to the final path** in that case, the same "verify before
 /// install" discipline `scripts/fetch-model.ts`'s build-time fetch already
 /// uses. Overwriting an existing file is fine — a re-download after a
 /// previous failed/partial attempt should always win.
 #[tauri::command]
-pub fn save_downloaded_segmentation_model(
-    request: Request<'_>,
-    app: AppHandle,
-) -> Result<SavedSegmentationModel, AppError> {
-    let bytes = match request.body() {
-        InvokeBody::Raw(bytes) => bytes,
-        InvokeBody::Json(_) => {
-            return Err(AppError::invalid(
-                "save_downloaded_segmentation_model expects a raw ArrayBuffer body, not JSON",
-            ));
-        }
-    };
-
+pub fn download_segmentation_model(app: AppHandle) -> Result<SavedSegmentationModel, AppError> {
     let dir = models_dir(&app)?;
-    verify_and_persist(bytes, LARGER_MODEL_MD5, LARGER_MODEL_FILENAME, &dir)
+    download_and_verify_model(&dir)
 }
 
 /// The verify-then-write logic, factored out so it can be exercised in a
@@ -332,42 +393,31 @@ mod tests {
         assert_eq!(digest, "900150983cd24fb0d6963f7d28e17f72");
     }
 
-    /// A manually-run, real end-to-end proof against the actual production
-    /// constants — not part of ordinary `cargo test` since it needs a real
-    /// ~170 MB file on disk, which this repo never bundles or checks in.
-    ///
-    /// Point `TESSERICA_TEST_LARGER_MODEL` at a real downloaded copy of
-    /// `isnet-general-use.onnx` (in this dispatch, one was fetched via a
-    /// real `curl` earlier in the session and independently checksummed
-    /// with `md5sum` before this test existed — see the dispatch report) to
-    /// confirm the exact code path a real runtime download would take
-    /// (`verify_and_persist` with `LARGER_MODEL_MD5`/`LARGER_MODEL_FILENAME`)
-    /// succeeds against the real payload, not just a small fixture. Run
+    /// A real end-to-end proof against the live URL — this is the Rust half
+    /// of the same proof `commands::lospec`'s own
+    /// `real_fetch_of_a_known_palette_succeeds` gives for `lospec.com`: that
+    /// [`download_and_verify_model`] really can fetch the real ~170 MB
+    /// model from outside the WebView (the whole reason it moved here) and
+    /// that the downloaded bytes still pass checksum verification. Not run
+    /// by default — real network access and a real ~170 MB transfer. Run
     /// with:
-    /// `TESSERICA_TEST_LARGER_MODEL=/path/to/isnet-general-use.onnx cargo test commands::segment -- --ignored --nocapture`
+    /// `cargo test --manifest-path src-tauri/Cargo.toml commands::segment -- --ignored --nocapture`
     #[test]
-    #[ignore = "requires a real ~170 MB isnet-general-use.onnx on disk, never bundled or checked in"]
-    fn smoke_test_the_real_larger_model_passes_checksum_and_persists() {
-        let path = std::env::var("TESSERICA_TEST_LARGER_MODEL")
-            .expect("set TESSERICA_TEST_LARGER_MODEL to a real isnet-general-use.onnx path");
-        let bytes = std::fs::read(&path).expect("real model file should be readable");
-        assert_eq!(
-            bytes.len(),
-            LARGER_MODEL_APPROX_BYTES as usize,
-            "unexpected file size"
-        );
+    #[ignore = "requires real network access; downloads the real ~170 MB model"]
+    fn real_download_of_the_larger_model_succeeds_and_verifies() {
+        let dir = TempDir::new("real-larger-model-download");
+        let saved = download_and_verify_model(&dir.0)
+            .expect("a real download of the larger model should succeed and pass checksum");
 
-        let dir = TempDir::new("real-larger-model");
-        let saved =
-            verify_and_persist(&bytes, LARGER_MODEL_MD5, LARGER_MODEL_FILENAME, &dir.0).unwrap();
-
-        assert_eq!(saved.bytes, bytes.len());
+        assert_eq!(saved.bytes, LARGER_MODEL_APPROX_BYTES as usize);
         assert_eq!(
-            std::fs::read(dir.0.join(LARGER_MODEL_FILENAME)).unwrap(),
-            bytes
+            std::fs::metadata(dir.0.join(LARGER_MODEL_FILENAME))
+                .unwrap()
+                .len(),
+            LARGER_MODEL_APPROX_BYTES
         );
         println!(
-            "verified checksum and persisted {} real bytes from {path} to {:?}",
+            "fetched, verified and persisted {} real bytes to {:?}",
             saved.bytes, dir.0
         );
     }

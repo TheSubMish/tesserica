@@ -25,7 +25,7 @@ import {
   hasBackend,
   onnxRuntimeInfo,
   onnxRuntimeStatus,
-  saveDownloadedOnnxRuntime,
+  downloadOnnxRuntime,
   type OnnxRuntimeInfo,
   type OnnxRuntimeStatus,
 } from '../ipc/commands.ts';
@@ -61,10 +61,7 @@ export function OnnxRuntimeSection() {
   const confirmDownload = async () => {
     if (!info) return;
     setPhase('downloading');
-    const outcome = await downloadConsentedFile(info, {
-      fetchImpl: (url) => fetch(url),
-      save: saveDownloadedOnnxRuntime,
-    });
+    const outcome = await downloadConsentedFile({ download: downloadOnnxRuntime });
     if (outcome.kind === 'success') {
       setPhase('success');
       setStatus({ present: true, path: outcome.path });
