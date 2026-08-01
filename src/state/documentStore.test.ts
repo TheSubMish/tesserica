@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getBuffer } from '../model/pixelBuffers';
+import { getIndexBuffer } from '../model/indexBuffers';
+import type { Palette } from '../model/types';
 import { useDocumentStore } from './documentStore';
 
 /**
@@ -32,10 +34,11 @@ describe('initial document', () => {
     expect(s.activeCel()).toBe(s.sprite.cels[0]);
   });
 
-  it('is RGBA — D9 leaves no indexed path to fall into', () => {
-    // Four bytes per pixel, not one index per pixel. The `indexed` variants stay
-    // out of the union until Phase 7 (docs/10-decisions.md D9).
+  it('defaults to RGBA — newDocument only produces indexed storage on request (Phase 7)', () => {
+    // Four bytes per pixel, not one index per pixel, unless newDocument was
+    // asked for `'indexed'` (docs/08-roadmap.md Phase 7).
     const { sprite } = useDocumentStore.getState();
+    expect(sprite.colorMode).toBe('rgba');
     expect(getBuffer(sprite.cels[0].id)!.length % 4).toBe(0);
   });
 });
@@ -127,6 +130,64 @@ describe('newDocument', () => {
     useDocumentStore.getState().newDocument(4, 4);
     const freshIds = useDocumentStore.getState().sprite.layers.map((l) => l.id);
     expect(staleIds.some((id) => freshIds.includes(id))).toBe(false);
+  });
+});
+
+describe('indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  const palette: Palette = {
+    id: 'p1',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255],
+      [0, 255, 0, 255],
+    ],
+  };
+
+  it('newDocument("indexed") allocates a one-byte-per-pixel index buffer, not RGBA', () => {
+    useDocumentStore.getState().newDocument(6, 5, 'indexed', palette);
+    const s = useDocumentStore.getState();
+    expect(s.sprite.colorMode).toBe('indexed');
+    expect(s.sprite.palette).toEqual(palette);
+    expect(getBuffer(s.sprite.cels[0].id)).toBeUndefined(); // not in the RGBA store
+    expect(getIndexBuffer(s.sprite.cels[0].id)?.length).toBe(6 * 5);
+  });
+
+  it('addLayer on an indexed sprite allocates an index buffer for the new layer too', () => {
+    useDocumentStore.getState().newDocument(4, 4, 'indexed', palette);
+    const before = useDocumentStore.getState().sprite.cels.length;
+
+    useDocumentStore.getState().addLayer();
+
+    const s = useDocumentStore.getState();
+    expect(s.sprite.cels.length).toBeGreaterThan(before);
+    for (const cel of s.sprite.cels) {
+      expect(getIndexBuffer(cel.id)).toBeDefined();
+      expect(getBuffer(cel.id)).toBeUndefined();
+    }
+  });
+
+  it('removeLayer on an indexed sprite releases the index buffer, not the RGBA one', () => {
+    useDocumentStore.getState().newDocument(4, 4, 'indexed', palette);
+    useDocumentStore.getState().addLayer();
+    const doomed = useDocumentStore.getState().activeLayerId;
+    const celIds = useDocumentStore
+      .getState()
+      .sprite.cels.filter((c) => c.layerId === doomed)
+      .map((c) => c.id);
+
+    useDocumentStore.getState().removeLayer(doomed);
+
+    for (const id of celIds) {
+      expect(getIndexBuffer(id)).toBeUndefined();
+    }
+  });
+
+  it('newDocument("rgba") (the default) is unaffected by ever having created an indexed document', () => {
+    useDocumentStore.getState().newDocument(4, 4, 'indexed', palette);
+    useDocumentStore.getState().newDocument(4, 4);
+    const s = useDocumentStore.getState();
+    expect(s.sprite.colorMode).toBe('rgba');
+    expect(getBuffer(s.sprite.cels[0].id)?.length).toBe(4 * 4 * 4);
   });
 });
 

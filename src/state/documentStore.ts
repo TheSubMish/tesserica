@@ -23,6 +23,7 @@ import type {
   Layer,
   LayerBase,
   LayerId,
+  Palette,
   Sprite,
   Tag,
   TagId,
@@ -43,6 +44,14 @@ import {
   releaseBuffer,
   setBuffer,
 } from '../model/pixelBuffers';
+import {
+  allocateCelBuffer,
+  getCelBuffer,
+  isIndexedLayer,
+  releaseCelBuffer,
+  setCelBuffer,
+} from '../model/celStorage';
+import { clearAllIndexBuffers } from '../model/indexBuffers';
 import {
   allocateGrid,
   bumpGridRevision,
@@ -84,23 +93,34 @@ interface DocumentState {
   /**
    * Replace the whole document, e.g. after opening a `.tess`.
    *
-   * `grids`/`tileBuffers` are optional — every caller before Phase 6 (and
-   * every document with no tilemap layers) has nothing to pass for either.
+   * `grids`/`tileBuffers`/`indices` are optional — every caller with nothing
+   * of that kind to restore (no tilemap layers, an `'rgba'`-mode sprite)
+   * passes nothing. `indices` (`docs/08-roadmap.md` Phase 7) holds a raw
+   * palette-index buffer per indexed-mode raster cel, the same shape `pixels`
+   * already has for RGBA ones.
    */
   replaceDocument(
     sprite: Sprite,
     pixels: Map<CelId, Uint8ClampedArray>,
     grids?: Map<CelId, Uint32Array>,
     tileBuffers?: Map<TileEntryId, Uint8ClampedArray>,
+    indices?: Map<CelId, Uint8Array>,
   ): void;
   /**
    * Start a fresh document — `Ctrl+N` (`docs/06-workflows.md` W2 step 1).
    *
    * One raster layer, one frame, blank. Routed through `replaceDocument` so it
    * gets the same buffer-release and id-reservation guarantees as opening a
-   * `.tess`, rather than a second copy of that bookkeeping.
+   * `.tess`, rather than a second copy of that bookkeeping. `colorMode`/
+   * `palette` default to `'rgba'`/none — `docs/08-roadmap.md` Phase 7's New
+   * Sprite dialog is the only caller that passes `'indexed'`.
    */
-  newDocument(width: number, height: number): void;
+  newDocument(
+    width: number,
+    height: number,
+    colorMode?: Sprite['colorMode'],
+    palette?: Palette,
+  ): void;
 
   /**
    * Signal a change. Passing the cel that changed lets the renderer re-upload
@@ -298,13 +318,24 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   setProjectPath: (path) => set({ projectPath: path }),
 
-  replaceDocument: (sprite, pixels, grids = new Map(), tileBuffers = new Map()) => {
+  replaceDocument: (
+    sprite,
+    pixels,
+    grids = new Map(),
+    tileBuffers = new Map(),
+    indices = new Map(),
+  ) => {
     // The old document's buffers are unreachable the moment the sprite is
     // swapped, so drop them rather than leaking them for the process lifetime.
     clearAllBuffers();
+    clearAllIndexBuffers();
     clearAllGrids();
     clearAllTileBuffers();
     const tilesets = sprite.tilesets ?? [];
+    // `docs/08-roadmap.md` Phase 7 — a `.tess` saved before `colorMode`
+    // existed has no such field on the wire, same reasoning as `tags`/
+    // `tilesets` below.
+    const colorMode = sprite.colorMode ?? 'rgba';
     reserveIds([
       ...sprite.layers.map((l) => l.id),
       ...sprite.frames.map((f) => f.id),
@@ -334,6 +365,19 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         else allocateGrid(cel.id, cols, rows);
         continue;
       }
+      // Indexed-mode raster storage (`docs/08-roadmap.md` Phase 7,
+      // `model/celStorage.ts`) — `{ ...sprite, colorMode }` rather than
+      // `sprite` itself so `isIndexedLayer` sees the same defaulted mode the
+      // document is about to be replaced with, not a possibly-absent one.
+      if (layer && isIndexedLayer({ ...sprite, colorMode }, layer)) {
+        const idx = indices.get(cel.id);
+        if (idx && idx.length === cel.width * cel.height) {
+          setCelBuffer({ ...sprite, colorMode }, layer, cel.id, idx);
+        } else {
+          allocateCelBuffer({ ...sprite, colorMode }, layer, cel.id, cel.width, cel.height);
+        }
+        continue;
+      }
       const buf = pixels.get(cel.id);
       if (buf && buf.length === cel.width * cel.height * 4) setBuffer(cel.id, buf);
       else allocateBuffer(cel.id, cel.width, cel.height);
@@ -344,14 +388,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       // existed has no such field on the wire, and readers downstream (the
       // Timeline panel, the tileset panel) expect an array, not `undefined`
       // (mirrors the Rust side's `#[serde(default)]`).
-      sprite: { ...sprite, tags: sprite.tags ?? [], tilesets },
+      sprite: { ...sprite, colorMode, tags: sprite.tags ?? [], tilesets },
       activeLayerId: sprite.layers[sprite.layers.length - 1]?.id ?? s.activeLayerId,
       activeFrameId: sprite.frames[0]?.id ?? s.activeFrameId,
       revision: s.revision + 1,
     }));
   },
 
-  newDocument: (width, height) => {
+  newDocument: (width, height, colorMode = 'rgba', palette) => {
     const frame: Frame = { id: makeId('f'), durationMs: 100 };
     const layer: Layer = {
       id: makeId('l'),
@@ -381,8 +425,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       frames: [frame],
       cels: [cel],
       tags: [],
-      colorMode: 'rgba',
+      colorMode,
       tilesets: [],
+      palette,
     };
     get().replaceDocument(sprite, new Map());
   },
@@ -481,8 +526,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
             const { cols, rows } = tileGridDims(cel, layer.grid);
             allocateGrid(cel.id, cols, rows);
           }
-        } else if (!getBuffer(cel.id)) {
-          allocateBuffer(cel.id, cel.width, cel.height);
+        } else if (!getCelBuffer(s.sprite, layer, cel.id)) {
+          allocateCelBuffer(s.sprite, layer, cel.id, cel.width, cel.height);
         }
       }
       const layers = [...s.sprite.layers];
@@ -570,13 +615,19 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     const ids = [id, ...descendantIds(s.sprite.layers, id)];
     if (s.sprite.layers.length - ids.length < 1) return; // never leave zero layers
     for (const lid of ids) {
+      const layer = s.sprite.layers.find((l) => l.id === lid);
       get()
         .celsForLayer(lid)
         .forEach((c) => {
           // A linked cel owns no buffer of its own — every cel it could ever
           // link to also belongs to this same layer, so its target dies in
           // this same cascade and does not need a separate release here.
-          if (!c.linkedTo) releaseBuffer(c.id);
+          if (c.linkedTo) return;
+          // Indexed-mode raster storage (`docs/08-roadmap.md` Phase 7) lives
+          // in a different map; everything else (rgba, conversion, tilemap)
+          // keeps the exact pre-Phase-7 call here.
+          if (layer && isIndexedLayer(s.sprite, layer)) releaseCelBuffer(s.sprite, layer, c.id);
+          else releaseBuffer(c.id);
         });
       get().removeLayerMetadata(lid);
     }
@@ -629,8 +680,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
             const { cols, rows } = tileGridDims(cel, layer.grid);
             allocateGrid(cel.id, cols, rows);
           }
-        } else if (!getBuffer(cel.id)) {
-          allocateBuffer(cel.id, cel.width, cel.height);
+        } else if (layer ? !getCelBuffer(s.sprite, layer, cel.id) : !getBuffer(cel.id)) {
+          if (layer) allocateCelBuffer(s.sprite, layer, cel.id, cel.width, cel.height);
+          else allocateBuffer(cel.id, cel.width, cel.height);
         }
       }
       const clampedIndex = Math.max(0, Math.min(index, s.sprite.frames.length));

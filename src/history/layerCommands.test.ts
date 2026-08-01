@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getBuffer, getPixel, setPixel } from '../model/pixelBuffers';
+import { getIndexBuffer } from '../model/indexBuffers';
+import type { Palette } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import {
@@ -471,5 +473,52 @@ describe('layer effects (docs/03-data-model.md §5, roadmap Phase 7)', () => {
     expect(snapshot[0].enabled).toBe(false);
     expect(snapshot[0].thickness).toBe(3);
     expect(snapshot[1].kind).toBe('gradient-map');
+  });
+});
+
+describe('addLayer/deleteLayer on an indexed-mode sprite (docs/08-roadmap.md Phase 7)', () => {
+  const palette: Palette = { id: 'p1', name: 'P', colors: [[255, 0, 0, 255]] };
+
+  beforeEach(() => {
+    history().clear();
+    doc().newDocument(8, 8, 'indexed', palette);
+    history().clear();
+  });
+
+  it('a new layer gets an index buffer, not an RGBA one', () => {
+    addLayer('two');
+    const cel = doc().celsForLayer(doc().activeLayerId)[0];
+    expect(getIndexBuffer(cel.id)).toBeDefined();
+    expect(getIndexBuffer(cel.id)!.length).toBe(64);
+    expect(getBuffer(cel.id)).toBeUndefined();
+  });
+
+  it('undo/redo round-trips a painted index losslessly', () => {
+    addLayer('two');
+    const id = doc().activeLayerId;
+    const cel = doc().celsForLayer(id)[0];
+    setPixel(getIndexBuffer(cel.id)!, cel.width, cel.height, 2, 2, [1]);
+
+    history().undo();
+    expect(names()).toEqual(['Layer 1']);
+    expect(getIndexBuffer(cel.id)).toBeUndefined();
+
+    history().redo();
+    expect(names()).toEqual(['Layer 1', 'two']);
+    expect(getPixel(getIndexBuffer(cel.id)!, cel.width, cel.height, 2, 2, 1)).toEqual([1]);
+  });
+
+  it('deleteLayer releases and undo restores the index buffer', () => {
+    addLayer('two');
+    const id = doc().activeLayerId;
+    const cel = doc().celsForLayer(id)[0];
+    setPixel(getIndexBuffer(cel.id)!, cel.width, cel.height, 5, 5, [1]);
+    history().clear();
+
+    deleteLayer(id);
+    expect(getIndexBuffer(cel.id)).toBeUndefined();
+
+    history().undo();
+    expect(getPixel(getIndexBuffer(cel.id)!, cel.width, cel.height, 5, 5, 1)).toEqual([1]);
   });
 });

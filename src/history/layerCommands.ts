@@ -21,7 +21,7 @@
  * `setProps` calls, not new command types.
  */
 
-import { getBuffer, releaseBuffer, setBuffer } from '../model/pixelBuffers';
+import { getCelBuffer, releaseCelBuffer, setCelBuffer } from '../model/celStorage';
 import { getGrid, releaseGrid, setGrid } from '../model/tileGridBuffers';
 import { descendantIds, wouldCreateCycle } from '../model/layerTree';
 import type { BlendMode, Cel, CelId, Effect, EffectId, Layer, LayerId } from '../model/types';
@@ -39,8 +39,12 @@ import type { Command, DocumentApi } from './command';
  * method rather than duplicating this class per layer kind.
  */
 class LayerExistence {
-  /** Pixels (raster/conversion) or grids (tilemap) held while the layer is absent. */
-  private savedPixels: Map<CelId, Uint8ClampedArray> | null = null;
+  /**
+   * Pixels (raster/conversion — RGBA or, for an indexed-mode sprite,
+   * palette indices, `docs/08-roadmap.md` Phase 7) or grids (tilemap) held
+   * while the layer is absent.
+   */
+  private savedPixels: Map<CelId, Uint8ClampedArray | Uint8Array> | null = null;
   private savedGrids: Map<CelId, Uint32Array> | null = null;
 
   constructor(
@@ -62,18 +66,22 @@ class LayerExistence {
    * A linked cel (`docs/03-data-model.md` §2.2) has no buffer of its own —
    * `linkedTo` always names another cel *on this same layer*, so its target
    * is captured here too and there is nothing extra to snapshot for the link
-   * itself.
+   * itself. `sprite.colorMode` (and therefore which store `this.layer`'s
+   * cels live in) is fixed for the document's whole life, so reading the
+   * *current* store state here, in `add`, and in `remove` below is always
+   * the mode this layer was actually created under.
    */
   capture(): void {
-    const savedPixels = new Map<CelId, Uint8ClampedArray>();
+    const savedPixels = new Map<CelId, Uint8ClampedArray | Uint8Array>();
     const savedGrids = new Map<CelId, Uint32Array>();
+    const sprite = useDocumentStore.getState().sprite;
     for (const cel of this.cels) {
       if (cel.linkedTo) continue;
       if (this.layer.kind === 'tilemap') {
         const g = getGrid(cel.id);
         if (g) savedGrids.set(cel.id, g);
       } else {
-        const buf = getBuffer(cel.id);
+        const buf = getCelBuffer(sprite, this.layer, cel.id);
         if (buf) savedPixels.set(cel.id, buf);
       }
     }
@@ -84,7 +92,8 @@ class LayerExistence {
   add(doc: DocumentApi): void {
     doc.insertLayer(this.layer, this.cels, this.index);
     if (this.savedPixels) {
-      for (const [id, buf] of this.savedPixels) setBuffer(id, buf);
+      const sprite = useDocumentStore.getState().sprite;
+      for (const [id, buf] of this.savedPixels) setCelBuffer(sprite, this.layer, id, buf);
       this.savedPixels = null;
     }
     if (this.savedGrids) {
@@ -98,13 +107,14 @@ class LayerExistence {
   remove(doc: DocumentApi): void {
     this.capture();
     doc.removeLayerMetadata(this.layer.id);
+    const sprite = useDocumentStore.getState().sprite;
     // Every cel a link on this layer could point to also belongs to this
     // layer, so it dies in this same cascade — a linked cel never needs its
     // target released separately, and never owned a buffer to release itself.
     for (const cel of this.cels) {
       if (cel.linkedTo) continue;
       if (this.layer.kind === 'tilemap') releaseGrid(cel.id);
-      else releaseBuffer(cel.id);
+      else releaseCelBuffer(sprite, this.layer, cel.id);
     }
     doc.touch();
   }
