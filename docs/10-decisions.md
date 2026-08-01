@@ -166,6 +166,14 @@ a policy for "user picked a color not in the palette". RGBA keeps Phase 1 tracta
 **Deferred with it:** instant palette swapping (the retro team-color trick). Worth being
 clear that this is a real feature we are choosing to postpone, not one we forgot.
 
+**Update, Phase 7 (2026-08-01): implemented.** `docs/03-data-model.md` §3's own callout
+has the full account — storage (`model/indexBuffers.ts`, `model/celStorage.ts`), the
+out-of-palette policy (nearest colour in Oklab, `model/indexedColor.ts`), which tools were
+converted, the blend-mode/effects scope boundary (both resolve indices to RGBA first,
+unchanged otherwise), and the `.tess` wire format. Live palette swapping — the feature
+this decision named as postponed — is real: `history/paletteCommands.ts` +
+`panels/PalettePanel.tsx`.
+
 ---
 
 ## D10 · Hand-roll Oklab in both languages

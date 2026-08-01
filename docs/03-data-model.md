@@ -206,11 +206,29 @@ nearly-transparent colours and no error at all, so both orderings are pinned by 
 free — recolor a whole character by swapping the palette, which is exactly how retro
 games did team colors.
 
-> ⚠️ **Deferred to Phase 7** (`10-decisions.md` D9). **v1 is RGBA only.** Indexed mode
-> touches every tool, every blend mode and every effect, and needs a policy for "user
-> picked a color not in the palette". The `indexed` variants stay in the type definitions
-> so adding it later is an extension, not a migration — but nothing implements them in
-> v1. Instant palette swapping is postponed with it.
+> ✅ **Landed in Phase 7** (`10-decisions.md` D9). `Sprite.colorMode: 'rgba' | 'indexed'`
+> and, for an indexed sprite, its own embedded `Sprite.palette`. Storage is
+> `model/indexBuffers.ts` — one `Uint8Array` byte per pixel, raw index `0` reserved for
+> "transparent" (so an indexed sprite addresses 255 usable colours, palette entries at
+> raw indices `1..255`), resolved to displayable RGBA through the sprite's palette at
+> composite time (`model/celStorage.ts`, `model/indexedRender.ts`) — the same
+> "different buffer, resolved at composite time" pattern this doc's §2.2 note already
+> established for tilemap cels. The "user picked a color not in the palette" policy:
+> snap to the nearest palette entry in Oklab (`model/indexedColor.ts`, reusing
+> `pipeline/quantize.ts::nearestIndexOklab`), with alpha `0` always mapping to the
+> reserved transparent index regardless of RGB. **Scope actually delivered**: pencil,
+> eraser, fill (contiguous + global), line, rectangle, ellipse, the eyedropper, magic-wand
+> selection and Move all work correctly against an indexed cel. Blend modes and effects
+> were **not** made indexed-aware directly — every layer resolves to RGBA before either
+> runs (`canvas/blend.ts`, `canvas/effects.ts` are unchanged), which is a legitimate
+> boundary since neither needs to know how a pixel's color was produced. A `conversion`
+> layer's cel stays RGBA regardless of the sprite's `colorMode`, since its pixels come
+> from the RGBA conversion pipeline rather than hand-painting — re-quantizing conversion
+> output into a sprite's separate indexed palette is unimplemented. `.tess` round-trips
+> an indexed sprite's cels as raw bytes (`cels/<id>.bin`, mirroring the tilemap
+> convention) in both languages. Not implemented: converting an *already-open* RGBA
+> sprite to indexed (`app/NewSpriteDialog.tsx`'s color-mode choice is creation-time
+> only, matching D9's own "and/or" wording).
 
 ---
 

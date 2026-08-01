@@ -1488,8 +1488,92 @@ Ordered by value, not commitment:
       pre-existing/unrelated), `cargo clippy --all-targets -- -D warnings`
       (clean — no Rust files touched), and `npm run test:golden` (17 passed — no
       pipeline files touched, a sanity check) all pass.
-- [ ] **Indexed color mode + live palette swapping** (deferred from v1 by D9 — touches
-      every tool, blend mode and effect, so it is a real chunk of work, not a flag)
+- [x] **Indexed color mode + live palette swapping** (deferred from v1 by D9 — landed as
+      six checkpointed commits, `git log --grep "indexed color mode"`). `Sprite.colorMode:
+      'rgba' | 'indexed'` (default `'rgba'`, every pre-Phase-7 `.tess`/test unaffected) and,
+      for an indexed sprite, its own embedded `Sprite.palette` — `model/types.ts`, mirroring
+      Rust `Sprite`/`ColorMode`/`Palette`, which (checked directly rather than trusted) had
+      already reserved these fields even though `src/model/types.ts` genuinely had not.
+      **Storage**: `model/indexBuffers.ts` — one `Uint8Array` byte per pixel instead of four,
+      raw index `0` reserved for "transparent" (255 usable colours, palette entries at raw
+      indices `1..255`); `model/celStorage.ts` is the single place that decides RGBA vs.
+      indexed storage for a given layer (`raster` in an indexed sprite only — `conversion`
+      layers stay RGBA regardless of `colorMode`, since their pixels come from the RGBA
+      conversion pipeline, not hand-painting). **The "colour not in the palette" policy D9
+      itself named as unresolved**: snap to the nearest palette entry in Oklab
+      (`model/indexedColor.ts::nearestPaletteIndex`, reusing
+      `pipeline/quantize.ts::nearestIndexOklab` rather than a second metric); alpha `0`
+      always maps to the reserved transparent index regardless of RGB.
+      **Rendering**: `canvas/flatten.ts`, `canvas/renderer.ts`, `canvas/sample.ts` all
+      resolve an indexed cel's stored indices through `sprite.palette` at composite time
+      (`model/indexedRender.ts::renderIndexedCel`) — the same "different buffer, resolved at
+      composite time" pattern already established for tilemap cels. `renderer.ts`'s caches
+      fold in a palette fingerprint so a palette edit invalidates them, which is what makes
+      live swapping actually instant. **Tools**: pencil, eraser, fill (contiguous + global +
+      bucket), line, rectangle, ellipse and the eyedropper — the roadmap item's full list —
+      all write/read palette indices correctly via one shared conversion point
+      (`tools/pixelValue.ts::pixelValueFor`); magic-wand selection and Move were converted
+      too, beyond the explicit list, since both share the same low-level buffer helpers and
+      would otherwise have silently misread/corrupted an indexed cel's bytes the first time
+      anyone used them on one. The undo system (`history/pixelDelta.ts`, `commands.ts`,
+      `strokeRecorder.ts`) is bytes-per-pixel-generic, so undo/redo/coalescing work
+      identically for an indexed stroke. **Scope boundary on blend modes/effects** (stated
+      up front as legitimate, not a shortfall): `canvas/blend.ts` and `canvas/effects.ts` are
+      completely unchanged — every layer is resolved to RGBA (the step above) before either
+      ever sees a pixel, so indices never reach blend or effect code. The Transform tool
+      (rotxel/cleanEdge, a separate roadmap item) was **not** converted — on an indexed cel
+      it safely no-ops (`getBuffer` returns `undefined` for indexed storage, so
+      `applyTransform` returns early) rather than corrupting data, but a user cannot actually
+      transform an indexed layer yet. **`.tess` round-trip**, both languages:
+      `src-tauri/src/commands/project.rs` writes an indexed raster cel raw (`cels/<id>.bin`,
+      mirroring the existing tilemap convention) via `cel_is_raw`, replacing the old
+      "reject anything but `ColorMode::Rgba`" checks; `src/app/project.ts` stages/reads the
+      same raw bytes and threads them through `documentStore.replaceDocument`'s new
+      `indices` map. **Creation UI**: `app/NewSpriteDialog.tsx`'s Color Mode selector
+      (previously permanently disabled at "RGBA") is real — choosing Indexed embeds the
+      picked palette as the new sprite's own copy. **Live palette swapping** — the feature
+      D9 named as the actual point of deferring this — is real and demonstrable:
+      `panels/PalettePanel.tsx` grows a "This Sprite's Palette" section, shown only for an
+      indexed sprite, with an "Assign palette" dropdown (swap the whole palette) and one
+      native colour-input swatch per entry (recolor in place); both go through
+      `history/paletteCommands.ts` (undoable, coalescing). **Not implemented**: converting
+      an already-open RGBA sprite to indexed (creation-time only, matching D9's own
+      "and/or" wording for where this could live).
+
+      **Verified**: 71 new TS tests across the six commits (832 → 903 passed;
+      `indexBuffers.test.ts`,
+      `indexedColor.test.ts`, `indexedRender.test.ts`, `celStorage.test.ts`, indexed-mode
+      describe blocks added to `flatten.test.ts`/`sample.test.ts`/`renderer.test.ts`/
+      `documentStore.test.ts`/`layerCommands.test.ts`/`pencil.test.ts`/`fill.test.ts`/
+      `shapes.test.ts`/`select.test.ts`/`move.test.ts`/`newSprite.test.ts`/
+      `PalettePanel.test.tsx`/`project.test.ts`, `paletteCommands.test.ts`, plus 3 new Rust
+      tests in `commands::project`), including the specific proof the roadmap item asks
+      for — a test that edits a palette colour and confirms every pixel using that index
+      updates with zero writes to cel data (`flatten.test.ts`, `renderer.test.ts` at the
+      caching layer, `sample.test.ts`). `npm run test` (903 passed), `npx tsc --noEmit`
+      (clean), `npm run lint` (clean), `npm run build` (clean), `npm run test:golden`
+      (17 passed — no pipeline file was touched in any of the six commits, confirmed via
+      `git diff --stat -- src/pipeline/ src-tauri/src/pipeline/`), `cargo test` (243 passed,
+      5 ignored/unrelated), `cargo clippy --all-targets -- -D warnings` (clean) all pass.
+      Live-verified against the real Vite dev bundle over Chrome DevTools Protocol
+      (this container's Tauri WebView unreachable, as every earlier phase's own note here
+      records): drove the real `Ctrl+N` shortcut, opened the real New Sprite dialog, set
+      Color Mode to Indexed through a real `<select>` change event, created a 10×10 sprite,
+      and confirmed via screenshot and real DOM state that "THIS SPRITE'S PALETTE" appeared
+      with the real 4-colour Game Boy palette: then drove the real "Assign palette"
+      `<select>` to switch to NES and confirmed, by reading the live DOM back, all 4 Game
+      Boy swatches were replaced by the real 55 NES colours — genuine, live, end-to-end
+      proof the assign-palette path reaches from real UI through the real store into a real
+      re-render. Painting with the real Pencil tool via CDP-dispatched mouse events did not
+      reliably land in this container (a `getImageData` scan of the canvas after a
+      dispatched drag found no chromatic pixels) — a CDP mouse-event/pointer-capture
+      automation limitation consistent with every earlier phase's own documented WebView/
+      input flakiness in this specific container, not a code-path this session could
+      re-verify live; the pencil→index→undo path is instead covered by real, non-mocked
+      `ToolContext`-driven unit tests (`pencil.test.ts`) and the real-DOM `PalettePanel`
+      recolor test (`PalettePanel.test.tsx`, using the same native-input-setter technique
+      this project's `LayerEffectsSection`/`TimelinePanel`/`SliderField` tests already
+      established for a React-controlled input under jsdom).
 - [ ] Bead / cross-stitch chart export (W9)
 - [ ] Lospec URL import (opt-in network)
 - [ ] Isometric and hexagonal tile grids
