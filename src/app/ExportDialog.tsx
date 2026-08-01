@@ -28,6 +28,7 @@ import {
 import {
   EXPORT_SCALES,
   exportGif,
+  exportPatternChart,
   exportPng,
   exportSpritesheet,
   hasBackend,
@@ -35,16 +36,24 @@ import {
   stageBytes,
   type ExportScale,
 } from '../ipc/commands';
+import {
+  buildPatternChart,
+  DEFAULT_CHART_CELL_SIZE,
+  DEFAULT_MAX_DERIVED_COLORS,
+  MAX_CHART_CELL_SIZE,
+  MIN_CHART_CELL_SIZE,
+} from '../model/patternChart';
 import type { TagId } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useModalFocusTrap } from './useModalFocusTrap';
 
-type ExportFormat = 'png' | 'spritesheet' | 'gif';
+type ExportFormat = 'png' | 'spritesheet' | 'gif' | 'pattern-chart';
 
 const FORMAT_LABELS: Record<ExportFormat, string> = {
   png: 'PNG',
   spritesheet: 'Spritesheet',
   gif: 'GIF',
+  'pattern-chart': 'Pattern chart',
 };
 
 export function ExportDialog({ onClose }: { onClose: () => void }) {
@@ -57,12 +66,15 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [scale, setScale] = useState<ExportScale>(1);
   const [tagId, setTagId] = useState<TagId | null>(null);
   const [columns, setColumns] = useState(DEFAULT_SPRITESHEET_COLUMNS);
+  const [cellSize, setCellSize] = useState(DEFAULT_CHART_CELL_SIZE);
+  const [maxColors, setMaxColors] = useState(DEFAULT_MAX_DERIVED_COLORS);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const multiFrame = format !== 'png';
+  const multiFrame = format === 'spritesheet' || format === 'gif';
   const hasTags = sprite.tags.length > 0;
+  const clampedCellSize = Math.max(MIN_CHART_CELL_SIZE, Math.min(cellSize, MAX_CHART_CELL_SIZE));
 
   // Frame count for the current format + scope — used to clamp the columns
   // field and to preview the output dimensions before exporting.
@@ -139,6 +151,28 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const runPatternChart = async (path: string) => {
+    const chart = buildPatternChart(
+      sprite,
+      activeFrameId,
+      sprite.colorMode === 'rgba' ? { maxColors } : {},
+    );
+    if (chart.legend.length === 0) {
+      throw new Error('Nothing to chart — the frame has no opaque pixels.');
+    }
+    const result = await exportPatternChart({
+      width: chart.width,
+      height: chart.height,
+      grid: Array.from(chart.grid),
+      legend: chart.legend.map((e) => ({ color: e.color, count: e.count })),
+      cellSize: clampedCellSize,
+      path,
+    });
+    setStatus(
+      `Wrote a ${result.width}×${result.height} pattern chart (${result.colors} colors) to ${result.path}`,
+    );
+  };
+
   const run = async () => {
     setError(null);
     setStatus(null);
@@ -152,7 +186,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       setBusy(true);
       const path = await save({
         title: `Export ${FORMAT_LABELS[format]}`,
-        defaultPath: format === 'gif' ? 'sprite.gif' : 'sprite.png',
+        defaultPath:
+          format === 'gif'
+            ? 'sprite.gif'
+            : format === 'pattern-chart'
+              ? 'sprite-chart.png'
+              : 'sprite.png',
         filters: [
           format === 'gif'
             ? { name: 'GIF image', extensions: ['gif'] }
@@ -163,6 +202,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
       if (format === 'png') await runPng(path);
       else if (format === 'spritesheet') await runSpritesheet(path);
+      else if (format === 'pattern-chart') await runPatternChart(path);
       else await runGif(path);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -203,19 +243,55 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           ))}
         </fieldset>
 
-        <fieldset className="scale-row">
-          <legend className="sr-only">Scale</legend>
-          {EXPORT_SCALES.map((s) => (
-            <button
-              key={s}
-              className="scale-btn"
-              aria-pressed={scale === s}
-              onClick={() => setScale(s)}
-            >
-              {s}×
-            </button>
-          ))}
-        </fieldset>
+        {format !== 'pattern-chart' && (
+          <fieldset className="scale-row">
+            <legend className="sr-only">Scale</legend>
+            {EXPORT_SCALES.map((s) => (
+              <button
+                key={s}
+                className="scale-btn"
+                aria-pressed={scale === s}
+                onClick={() => setScale(s)}
+              >
+                {s}×
+              </button>
+            ))}
+          </fieldset>
+        )}
+
+        {format === 'pattern-chart' && (
+          <label className="field">
+            <span>Cell size (px)</span>
+            <input
+              type="number"
+              className="dim-input"
+              aria-label="Cell size"
+              min={MIN_CHART_CELL_SIZE}
+              max={MAX_CHART_CELL_SIZE}
+              value={clampedCellSize}
+              onChange={(e) =>
+                setCellSize(Math.round(e.target.valueAsNumber) || DEFAULT_CHART_CELL_SIZE)
+              }
+            />
+          </label>
+        )}
+
+        {format === 'pattern-chart' && sprite.colorMode === 'rgba' && (
+          <label className="field">
+            <span>Max colors</span>
+            <input
+              type="number"
+              className="dim-input"
+              aria-label="Max colors"
+              min={1}
+              max={256}
+              value={maxColors}
+              onChange={(e) =>
+                setMaxColors(Math.round(e.target.valueAsNumber) || DEFAULT_MAX_DERIVED_COLORS)
+              }
+            />
+          </label>
+        )}
 
         {multiFrame && hasTags && (
           <label className="field">
@@ -264,6 +340,10 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           {format === 'gif' &&
             `${previewFrameCount} frame${previewFrameCount === 1 ? '' : 's'} · ` +
               `${sprite.width * scale}×${sprite.height * scale} · loops`}
+          {format === 'pattern-chart' &&
+            (sprite.colorMode === 'indexed'
+              ? `${sprite.width}×${sprite.height} cells · using the sprite's own ${sprite.palette?.colors.length ?? 0}-color palette`
+              : `${sprite.width}×${sprite.height} cells · deriving up to ${maxColors} colors from the flattened image`)}
         </p>
 
         {status && <p className="hint">{status}</p>}

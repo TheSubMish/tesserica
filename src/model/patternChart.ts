@@ -44,6 +44,16 @@ export const DEFAULT_MAX_DERIVED_COLORS = 32;
  */
 export const PATTERN_CHART_ALPHA_THRESHOLD = 128;
 
+/**
+ * Printable cell-size bounds (pixels per cell). Mirrors
+ * `src-tauri/src/commands/pattern_chart.rs`'s `MIN_CELL_SIZE`/`MAX_CELL_SIZE`
+ * exactly, so the UI can clamp before ever calling Rust rather than round-
+ * tripping an IPC error for an out-of-range value.
+ */
+export const MIN_CHART_CELL_SIZE = 4;
+export const MAX_CHART_CELL_SIZE = 200;
+export const DEFAULT_CHART_CELL_SIZE = 24;
+
 export interface PatternChartLegendEntry {
   /** 0-based position in the legend — the same value `PatternChartData.grid` uses for cells of this color. */
   position: number;

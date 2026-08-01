@@ -177,6 +177,42 @@ export async function exportTilemap(request: {
 }
 
 // ---------------------------------------------------------------------------
+// Bead / cross-stitch pattern chart export (`docs/08-roadmap.md` Phase 7
+// "Bead / cross-stitch chart export (W9)",
+// `src-tauri/src/commands/pattern_chart.rs`).
+//
+// `src/model/patternChart.ts::buildPatternChart` does the color-key/grid
+// derivation client-side; only that small indexed grid plus its legend
+// travels here as plain JSON, the same "not a pixel buffer" reasoning
+// `exportTilemap`'s `tileIds` already rests on. Rust renders the
+// full-resolution printable PNG.
+// ---------------------------------------------------------------------------
+
+export interface PatternChartLegendInput {
+  color: readonly [number, number, number, number];
+  count: number;
+}
+
+export interface ExportPatternChartResult {
+  path: string;
+  width: number;
+  height: number;
+  colors: number;
+  bytes: number;
+}
+
+export async function exportPatternChart(request: {
+  width: number;
+  height: number;
+  grid: number[];
+  legend: PatternChartLegendInput[];
+  cellSize: number;
+  path: string;
+}): Promise<ExportPatternChartResult> {
+  return invoke<ExportPatternChartResult>('export_pattern_chart', { request });
+}
+
+// ---------------------------------------------------------------------------
 // `.tess` (docs/03-data-model.md §7)
 // ---------------------------------------------------------------------------
 
