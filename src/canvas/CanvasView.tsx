@@ -8,8 +8,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { getBuffer } from '../model/pixelBuffers';
+import { bytesPerPixelFor, getBufferForBpp, getCelBuffer } from '../model/celStorage';
 import { isEffectivelyLocked, isEffectivelyVisible } from '../model/layerTree';
-import { celBufferId } from '../model/types';
+import { celBufferId, type ColorMode } from '../model/types';
 import { onionSkinFrames } from '../model/onionSkin';
 import {
   beginStroke,
@@ -236,13 +237,21 @@ export function CanvasView() {
       // own — drawing on it must edit the buffer it shares, so every frame
       // linked to it sees the stroke too.
       const bufferId = celBufferId(cel);
-      const buffer = getBuffer(bufferId);
+      // `docs/08-roadmap.md` Phase 7 — an indexed-mode raster layer's cel
+      // lives in a different store (`model/celStorage.ts`) than an RGBA
+      // one. `layer` can be `undefined` only for a read-only tool (the guard
+      // above already returned for anything else), in which case there is no
+      // layer-specific storage decision to make and RGBA is the correct
+      // fallback, matching every pre-Phase-7 behaviour here.
+      const bpp = layer ? bytesPerPixelFor(doc.sprite, layer) : 4;
+      const buffer = layer ? getCelBuffer(doc.sprite, layer, bufferId) : getBuffer(bufferId);
       if (!buffer) return;
+      const toolColorMode: ColorMode = bpp === 1 ? 'indexed' : 'rgba';
 
       if (phase === 'down' && !tool.readOnly) {
         // One copy per gesture. The dirty rect is diffed out of it on release
         // (docs/03-data-model.md §6).
-        stroke.current = beginStroke(bufferId, buffer, cel.width, cel.height);
+        stroke.current = beginStroke(bufferId, buffer, cel.width, cel.height, bpp);
         strokeLabel.current = tool.label;
         strokeState.current = {};
       }
@@ -252,6 +261,8 @@ export function CanvasView() {
         buffer,
         width: cel.width,
         height: cel.height,
+        colorMode: toolColorMode,
+        palette: doc.sprite.palette,
         primary: toolState.primary,
         secondary: toolState.secondary,
         brushSize: toolState.brushSize,
@@ -270,8 +281,8 @@ export function CanvasView() {
         restorePixel: (px, py) => {
           if (!snapshot) return;
           if (px < 0 || py < 0 || px >= cel.width || py >= cel.height) return;
-          const i = (py * cel.width + px) * 4;
-          buffer.set(snapshot.pixels.subarray(i, i + 4), i);
+          const i = (py * cel.width + px) * bpp;
+          buffer.set(snapshot.pixels.subarray(i, i + bpp), i);
         },
         sample: (sx, sy) => samplePixel(doc.sprite, doc.activeFrameId, sx, sy),
         setColor: (c, slot) => {
@@ -307,7 +318,7 @@ export function CanvasView() {
     const snapshot = stroke.current;
     stroke.current = null;
     if (!snapshot) return;
-    const buffer = getBuffer(snapshot.celId);
+    const buffer = getBufferForBpp(snapshot.celId, snapshot.bytesPerPixel);
     if (!buffer) return;
     const cmd = finishStroke(snapshot, buffer, strokeLabel.current);
     if (cmd) useHistoryStore.getState().push(cmd);
@@ -444,7 +455,7 @@ export function CanvasView() {
       if (!drawing.current) return;
       const snapshot = stroke.current;
       if (snapshot) {
-        const buffer = getBuffer(snapshot.celId);
+        const buffer = getBufferForBpp(snapshot.celId, snapshot.bytesPerPixel);
         if (buffer) restoreStroke(snapshot, buffer);
         useDocumentStore.getState().touch(snapshot.celId);
       }

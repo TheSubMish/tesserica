@@ -1,6 +1,6 @@
 /** Concrete commands. Pixel edits live here. */
 
-import { getBuffer } from '../model/pixelBuffers';
+import { getBufferForBpp } from '../model/celStorage';
 import type { Command, DocumentApi } from './command';
 import { blitRegion, deltaMemoryCost, mergePixelDeltas, type PixelDelta } from './pixelDelta';
 
@@ -26,16 +26,16 @@ export class PixelDeltaCommand implements Command {
   }
 
   apply(doc: DocumentApi): void {
-    const buf = getBuffer(this.delta.celId);
+    const buf = getBufferForBpp(this.delta.celId, this.delta.bytesPerPixel);
     if (!buf) return;
-    blitRegion(buf, this.celWidth, this.delta.rect, this.delta.after);
+    blitRegion(buf, this.celWidth, this.delta.rect, this.delta.after, this.delta.bytesPerPixel);
     doc.touch(this.delta.celId);
   }
 
   invert(doc: DocumentApi): void {
-    const buf = getBuffer(this.delta.celId);
+    const buf = getBufferForBpp(this.delta.celId, this.delta.bytesPerPixel);
     if (!buf) return;
-    blitRegion(buf, this.celWidth, this.delta.rect, this.delta.before);
+    blitRegion(buf, this.celWidth, this.delta.rect, this.delta.before, this.delta.bytesPerPixel);
     doc.touch(this.delta.celId);
   }
 
@@ -44,7 +44,7 @@ export class PixelDeltaCommand implements Command {
     if (this.coalesceKey === null || this.coalesceKey !== next.coalesceKey) return null;
     if (this.delta.celId !== next.delta.celId) return null;
 
-    const buf = getBuffer(this.delta.celId);
+    const buf = getBufferForBpp(this.delta.celId, this.delta.bytesPerPixel);
     if (!buf) return null;
 
     return new PixelDeltaCommand(

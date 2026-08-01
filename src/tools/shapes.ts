@@ -9,7 +9,6 @@
 
 import { setPixel } from '../model/pixelBuffers';
 import { selectionContains, selectionFromMask, type Selection } from '../model/selection';
-import type { RGBA } from '../model/types';
 import type { Point } from './raster';
 
 /** Two dragged corners → an inclusive, normalized rect in cel coordinates. */
@@ -28,21 +27,21 @@ export function normalizeDrag(
 }
 
 export function drawRect(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   x0: number,
   y0: number,
   x1: number,
   y1: number,
-  color: RGBA,
+  value: readonly number[],
   filled: boolean,
   clip?: Selection | null,
 ): void {
   const { left, top, right, bottom } = normalizeDrag(x0, y0, x1, y1);
   const put = (x: number, y: number) => {
     if (!selectionContains(clip, x, y)) return;
-    setPixel(buf, width, height, x, y, color);
+    setPixel(buf, width, height, x, y, value);
   };
 
   if (filled) {
@@ -163,21 +162,21 @@ function ellipseRowSpans(points: Point[]): Map<number, { min: number; max: numbe
 }
 
 export function drawEllipse(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   x0: number,
   y0: number,
   x1: number,
   y1: number,
-  color: RGBA,
+  value: readonly number[],
   filled: boolean,
   clip?: Selection | null,
 ): void {
   const points = ellipsePoints(x0, y0, x1, y1);
   const put = (x: number, y: number) => {
     if (!selectionContains(clip, x, y)) return;
-    setPixel(buf, width, height, x, y, color);
+    setPixel(buf, width, height, x, y, value);
   };
 
   if (!filled) {

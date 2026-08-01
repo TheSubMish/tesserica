@@ -9,6 +9,7 @@
 
 import type { Tool } from './Tool';
 import { drawLine, stampBrush } from './raster';
+import { pixelValueFor } from './pixelValue';
 import type { RGBA } from '../model/types';
 
 const TRANSPARENT: RGBA = [0, 0, 0, 0];
@@ -17,7 +18,16 @@ export const eraser: Tool = {
   id: 'eraser',
   label: 'Eraser',
   onPointerDown(ctx, x, y) {
-    stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, TRANSPARENT, ctx.selection);
+    stampBrush(
+      ctx.buffer,
+      ctx.width,
+      ctx.height,
+      x,
+      y,
+      ctx.brushSize,
+      pixelValueFor(ctx, TRANSPARENT),
+      ctx.selection,
+    );
   },
   onPointerMove(ctx, x, y, prevX, prevY) {
     drawLine(
@@ -29,7 +39,7 @@ export const eraser: Tool = {
       x,
       y,
       ctx.brushSize,
-      TRANSPARENT,
+      pixelValueFor(ctx, TRANSPARENT),
       ctx.selection,
     );
   },

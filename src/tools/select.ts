@@ -51,7 +51,8 @@ export const select: Tool = {
       return;
     }
     if (ctx.selectMode === 'wand') {
-      ctx.setSelection(wandSelection(ctx.buffer, ctx.width, ctx.height, x, y));
+      const bpp = ctx.colorMode === 'indexed' ? 1 : 4;
+      ctx.setSelection(wandSelection(ctx.buffer, ctx.width, ctx.height, x, y, bpp));
       return;
     }
     dragSelection(ctx, x, y, x, y);

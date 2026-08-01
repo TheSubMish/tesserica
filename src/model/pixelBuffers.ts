@@ -66,31 +66,40 @@ export function clearAllBuffers(): void {
  * Write one pixel. Straight (non-premultiplied) alpha throughout —
  * `docs/02-architecture.md` §9. Out-of-bounds writes are silently ignored so
  * tools can draw freely without clamping at every call site.
+ *
+ * `value`'s own length is how many bytes a pixel occupies — four for an RGBA
+ * tuple, exactly as always, or one for an indexed-mode cel's raw palette
+ * index (`docs/08-roadmap.md` Phase 7, `model/celStorage.ts`). Every geometry
+ * helper built on this (`tools/raster.ts`, `tools/shapes.ts`, `tools/fill.ts`)
+ * inherits the same generality for free rather than needing a second,
+ * parallel set of functions per storage kind.
  */
 export function setPixel(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   x: number,
   y: number,
-  color: readonly [number, number, number, number],
+  value: readonly number[],
 ): void {
   if (x < 0 || y < 0 || x >= width || y >= height) return;
-  const i = (y * width + x) * 4;
-  buf[i] = color[0];
-  buf[i + 1] = color[1];
-  buf[i + 2] = color[2];
-  buf[i + 3] = color[3];
+  const bpp = value.length;
+  const i = (y * width + x) * bpp;
+  for (let k = 0; k < bpp; k++) buf[i + k] = value[k];
 }
 
+/** `bytesPerPixel` defaults to 4 (RGBA) — every pre-Phase-7 call site is unaffected. */
 export function getPixel(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   x: number,
   y: number,
-): [number, number, number, number] | null {
+  bytesPerPixel = 4,
+): number[] | null {
   if (x < 0 || y < 0 || x >= width || y >= height) return null;
-  const i = (y * width + x) * 4;
-  return [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
+  const i = (y * width + x) * bytesPerPixel;
+  const out: number[] = [];
+  for (let k = 0; k < bytesPerPixel; k++) out.push(buf[i + k]);
+  return out;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getPixel, setPixel } from '../model/pixelBuffers';
-import type { RGBA } from '../model/types';
+import type { Palette, RGBA } from '../model/types';
 import { fillContiguous, fillGlobal, wandSelection } from './fill';
 import { bucket } from './bucket';
 import { harness } from './testHarness';
@@ -147,5 +147,57 @@ describe('bucket tool', () => {
     const c = harness({ buffer: walled(), primary: GREEN });
     bucket.onPointerMove(c, 6, 6, 0, 0);
     expect(getPixel(c.buffer, W, H, 6, 6)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('fill — indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  const palette: Palette = {
+    id: 'p1',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255], // -> index 1
+      [0, 255, 0, 255], // -> index 2
+    ],
+  };
+
+  /** A vertical wall of index 1 at x=4, splitting the cel into two regions. */
+  function walledIndexed(): Uint8Array {
+    const buf = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) setPixel(buf, W, H, 4, y, [1]);
+    return buf;
+  }
+
+  it('fillContiguous writes the resolved index, not RGBA', () => {
+    const buf = walledIndexed();
+    fillContiguous(buf, W, H, 0, 0, [2]); // green
+    expect(getPixel(buf, W, H, 0, 0, 1)).toEqual([2]);
+    expect(getPixel(buf, W, H, 4, 0, 1)).toEqual([1]); // the wall, untouched
+    expect(getPixel(buf, W, H, 5, 0, 1)).toEqual([0]); // beyond it, untouched
+  });
+
+  it('fillGlobal writes the resolved index everywhere it matches', () => {
+    const buf = walledIndexed();
+    fillGlobal(buf, W, H, 0, 0, [2]);
+    expect(getPixel(buf, W, H, 7, 7, 1)).toEqual([2]);
+    expect(getPixel(buf, W, H, 4, 3, 1)).toEqual([1]);
+  });
+
+  it('wandSelection reads one byte per pixel when told bytesPerPixel=1', () => {
+    const buf = walledIndexed();
+    const sel = wandSelection(buf, W, H, 0, 0, 1)!;
+    expect(sel.bounds.width).toBe(4);
+  });
+
+  it('bucket tool resolves the primary colour through the palette before filling', () => {
+    const c = harness({
+      colorMode: 'indexed',
+      palette,
+      buffer: walledIndexed(),
+      fillContiguous: true,
+      primary: [0, 255, 0, 255], // -> index 2
+    });
+    bucket.onPointerDown(c, 0, 0);
+    expect(getPixel(c.buffer, W, H, 0, 0, 1)).toEqual([2]);
+    expect(getPixel(c.buffer, W, H, 7, 7, 1)).toEqual([0]); // beyond the wall, untouched
   });
 });

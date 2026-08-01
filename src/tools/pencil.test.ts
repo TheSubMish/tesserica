@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getPixel } from '../model/pixelBuffers';
+import { TRANSPARENT_INDEX } from '../model/indexBuffers';
+import type { Palette } from '../model/types';
 import { isRedundantCorner, pencil } from './pencil';
 import { eraser } from './eraser';
 import { harness, litPixels } from './testHarness';
@@ -142,5 +144,59 @@ describe('eraser', () => {
     for (let x = 0; x <= 4; x++) {
       expect(getPixel(c.buffer, c.width, c.height, x, 2)).toEqual([0, 0, 0, 0]);
     }
+  });
+});
+
+describe('pencil and eraser — indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  const palette: Palette = {
+    id: 'p1',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255], // -> index 1
+      [0, 255, 0, 255], // -> index 2
+    ],
+  };
+
+  function indexedHarness() {
+    return harness({
+      colorMode: 'indexed',
+      palette,
+      buffer: new Uint8Array(8 * 8),
+      primary: [255, 0, 0, 255],
+      secondary: [0, 255, 0, 255],
+    });
+  }
+
+  it('writes a palette index, not RGBA', () => {
+    const c = indexedHarness();
+    pencil.onPointerDown(c, 3, 4);
+    expect(getPixel(c.buffer, c.width, c.height, 3, 4, 1)).toEqual([1]);
+  });
+
+  it('snaps an off-palette colour to the nearest palette entry (Oklab) — the D9 policy', () => {
+    const c = indexedHarness();
+    c.primary = [250, 5, 5, 255]; // close to red, not an exact palette entry
+    pencil.onPointerDown(c, 0, 0);
+    expect(getPixel(c.buffer, c.width, c.height, 0, 0, 1)).toEqual([1]);
+  });
+
+  it('eraser writes the reserved transparent index', () => {
+    const c = indexedHarness();
+    pencil.onPointerDown(c, 2, 2);
+    eraser.onPointerDown(c, 2, 2);
+    expect(getPixel(c.buffer, c.width, c.height, 2, 2, 1)).toEqual([TRANSPARENT_INDEX]);
+  });
+
+  it('a colour with alpha 0 always resolves to the transparent index, never a palette snap', () => {
+    const c = indexedHarness();
+    c.primary = [255, 0, 0, 0];
+    pencil.onPointerDown(c, 1, 1);
+    expect(getPixel(c.buffer, c.width, c.height, 1, 1, 1)).toEqual([TRANSPARENT_INDEX]);
+  });
+
+  it('with no palette assigned, painting writes the transparent index rather than throwing', () => {
+    const c = harness({ colorMode: 'indexed', palette: undefined, buffer: new Uint8Array(64) });
+    pencil.onPointerDown(c, 0, 0);
+    expect(getPixel(c.buffer, c.width, c.height, 0, 0, 1)).toEqual([TRANSPARENT_INDEX]);
   });
 });

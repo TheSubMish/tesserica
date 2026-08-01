@@ -102,4 +102,18 @@ describe('select tool — wand mode', () => {
     select.onPointerMove(c, 4, 4, 0, 0);
     expect(c.selection).toEqual(after);
   });
+
+  it('reads the correct one-byte-per-pixel layout on an indexed cel (docs/08-roadmap.md Phase 7)', () => {
+    const buf = new Uint8Array(64); // every pixel index 0
+    buf[5] = 3; // one differently-indexed pixel, must not be selected with the rest
+    const c = harness({
+      anchor: { x: 0, y: 0 },
+      selectMode: 'wand',
+      colorMode: 'indexed',
+      buffer: buf,
+    });
+    select.onPointerDown(c, 0, 0);
+    expect(c.selection?.mask![5]).toBe(0);
+    expect(c.selection?.mask![6]).toBe(1);
+  });
 });

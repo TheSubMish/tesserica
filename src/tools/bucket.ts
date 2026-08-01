@@ -3,16 +3,17 @@
 import type { Tool } from './Tool';
 import { fillContiguous, fillGlobal } from './fill';
 import { colorFor } from './pencil';
+import { pixelValueFor } from './pixelValue';
 
 export const bucket: Tool = {
   id: 'fill',
   label: 'Fill',
   onPointerDown(ctx, x, y) {
-    const color = colorFor(ctx);
+    const value = pixelValueFor(ctx, colorFor(ctx));
     if (ctx.fillContiguous) {
-      fillContiguous(ctx.buffer, ctx.width, ctx.height, x, y, color, ctx.selection);
+      fillContiguous(ctx.buffer, ctx.width, ctx.height, x, y, value, ctx.selection);
     } else {
-      fillGlobal(ctx.buffer, ctx.width, ctx.height, x, y, color, ctx.selection);
+      fillGlobal(ctx.buffer, ctx.width, ctx.height, x, y, value, ctx.selection);
     }
   },
   // A fill is a click, not a drag. Dragging after the click would re-seed on

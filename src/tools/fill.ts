@@ -17,14 +17,22 @@
 
 import { setPixel } from '../model/pixelBuffers';
 import { selectionContains, selectionFromMask, type Selection } from '../model/selection';
-import type { RGBA } from '../model/types';
 
-function sameColor(buf: Uint8ClampedArray, i: number, c: readonly number[]): boolean {
-  return buf[i] === c[0] && buf[i + 1] === c[1] && buf[i + 2] === c[2] && buf[i + 3] === c[3];
+/** `bpp` bytes starting at `i` match `c` exactly. */
+function sameColor(
+  buf: Uint8ClampedArray | Uint8Array,
+  i: number,
+  c: readonly number[],
+  bpp: number,
+): boolean {
+  for (let k = 0; k < bpp; k++) if (buf[i + k] !== c[k]) return false;
+  return true;
 }
 
-function readColor(buf: Uint8ClampedArray, i: number): [number, number, number, number] {
-  return [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
+function readColor(buf: Uint8ClampedArray | Uint8Array, i: number, bpp: number): number[] {
+  const out: number[] = [];
+  for (let k = 0; k < bpp; k++) out.push(buf[i + k]);
+  return out;
 }
 
 /**
@@ -33,48 +41,47 @@ function readColor(buf: Uint8ClampedArray, i: number): [number, number, number, 
  * contiguous fill cannot flood out through its boundary.
  */
 export function fillGlobal(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   seedX: number,
   seedY: number,
-  color: RGBA,
+  value: readonly number[],
   clip?: Selection | null,
 ): void {
   if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return;
   if (!selectionContains(clip, seedX, seedY)) return;
-  const target = readColor(buf, (seedY * width + seedX) * 4);
-  if (target.every((v, k) => v === color[k])) return;
+  const bpp = value.length;
+  const target = readColor(buf, (seedY * width + seedX) * bpp, bpp);
+  if (target.every((v, k) => v === value[k])) return;
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (!selectionContains(clip, x, y)) continue;
-      const i = (y * width + x) * 4;
-      if (!sameColor(buf, i, target)) continue;
-      buf[i] = color[0];
-      buf[i + 1] = color[1];
-      buf[i + 2] = color[2];
-      buf[i + 3] = color[3];
+      const i = (y * width + x) * bpp;
+      if (!sameColor(buf, i, target, bpp)) continue;
+      for (let k = 0; k < bpp; k++) buf[i + k] = value[k];
     }
   }
 }
 
 /** Replace the 4-connected region of the seed's colour. */
 export function fillContiguous(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   seedX: number,
   seedY: number,
-  color: RGBA,
+  value: readonly number[],
   clip?: Selection | null,
 ): void {
   if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return;
   if (!selectionContains(clip, seedX, seedY)) return;
 
-  const target = readColor(buf, (seedY * width + seedX) * 4);
+  const bpp = value.length;
+  const target = readColor(buf, (seedY * width + seedX) * bpp, bpp);
   // Filling a region with the colour it already has would never terminate.
-  if (target.every((v, k) => v === color[k])) return;
+  if (target.every((v, k) => v === value[k])) return;
 
   const matches = (x: number, y: number): boolean =>
     x >= 0 &&
@@ -82,10 +89,10 @@ export function fillContiguous(
     y >= 0 &&
     y < height &&
     selectionContains(clip, x, y) &&
-    sameColor(buf, (y * width + x) * 4, target);
+    sameColor(buf, (y * width + x) * bpp, target, bpp);
 
   walkContiguousRuns(width, height, seedX, seedY, matches, (left, right, y) => {
-    for (let px = left; px <= right; px++) setPixel(buf, width, height, px, y, color);
+    for (let px = left; px <= right; px++) setPixel(buf, width, height, px, y, value);
   });
 }
 
@@ -155,19 +162,27 @@ function walkContiguousRuns(
  * Operates on the active layer's raw cel, like the bucket does, not the
  * composited image — consistent with every other paint tool's clip
  * semantics.
+ *
+ * `bytesPerPixel` defaults to 4 (RGBA) — every pre-Phase-7 call site is
+ * unaffected; an indexed-mode cel (`docs/08-roadmap.md` Phase 7) passes 1.
  */
 export function wandSelection(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   seedX: number,
   seedY: number,
+  bytesPerPixel = 4,
 ): Selection | null {
   if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return null;
 
-  const target = readColor(buf, (seedY * width + seedX) * 4);
+  const target = readColor(buf, (seedY * width + seedX) * bytesPerPixel, bytesPerPixel);
   const matches = (x: number, y: number): boolean =>
-    x >= 0 && x < width && y >= 0 && y < height && sameColor(buf, (y * width + x) * 4, target);
+    x >= 0 &&
+    x < width &&
+    y >= 0 &&
+    y < height &&
+    sameColor(buf, (y * width + x) * bytesPerPixel, target, bytesPerPixel);
 
   const mask = new Uint8Array(width * height);
   walkContiguousRuns(width, height, seedX, seedY, matches, (left, right, y) => {

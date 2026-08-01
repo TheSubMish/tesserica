@@ -12,6 +12,7 @@ import type { Tool } from './Tool';
 import { drawLine } from './raster';
 import { drawEllipse, drawRect } from './shapes';
 import { colorFor } from './pencil';
+import { pixelValueFor } from './pixelValue';
 
 export const line: Tool = {
   id: 'line',
@@ -26,7 +27,7 @@ export const line: Tool = {
       x,
       y,
       ctx.brushSize,
-      colorFor(ctx),
+      pixelValueFor(ctx, colorFor(ctx)),
       ctx.selection,
     );
   },
@@ -41,7 +42,7 @@ export const line: Tool = {
       x,
       y,
       ctx.brushSize,
-      colorFor(ctx),
+      pixelValueFor(ctx, colorFor(ctx)),
       ctx.selection,
     );
   },
@@ -59,7 +60,7 @@ export const rectangle: Tool = {
       y,
       x,
       y,
-      colorFor(ctx),
+      pixelValueFor(ctx, colorFor(ctx)),
       ctx.shapeFill,
       ctx.selection,
     );
@@ -74,7 +75,7 @@ export const rectangle: Tool = {
       ctx.anchor.y,
       x,
       y,
-      colorFor(ctx),
+      pixelValueFor(ctx, colorFor(ctx)),
       ctx.shapeFill,
       ctx.selection,
     );
@@ -93,7 +94,7 @@ export const ellipse: Tool = {
       y,
       x,
       y,
-      colorFor(ctx),
+      pixelValueFor(ctx, colorFor(ctx)),
       ctx.shapeFill,
       ctx.selection,
     );
@@ -108,7 +109,7 @@ export const ellipse: Tool = {
       ctx.anchor.y,
       x,
       y,
-      colorFor(ctx),
+      pixelValueFor(ctx, colorFor(ctx)),
       ctx.shapeFill,
       ctx.selection,
     );

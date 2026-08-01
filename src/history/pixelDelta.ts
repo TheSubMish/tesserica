@@ -12,27 +12,39 @@
  * recorder takes **one** copy of the cel at pointer-down, lets the tool draw
  * freely, and diffs at pointer-up. One copy per gesture, not per pointer
  * event — and the resulting rect is exact for any tool, including flood fill.
+ *
+ * `bytesPerPixel` defaults to 4 (RGBA) everywhere below, so every pre-Phase-7
+ * call site is unaffected; an indexed-mode cel (`docs/08-roadmap.md` Phase 7,
+ * `model/celStorage.ts`) passes 1. A given cel id always uses the same value
+ * for its whole life (a sprite's `colorMode` is fixed at creation), so a
+ * delta never needs to reconcile two different bpp values against each
+ * other.
  */
 
 import type { CelId } from '../model/types';
 import { EMPTY_RECT, isEmptyRect, unionRect, type Rect } from '../model/rect';
 
+type CelBuffer = Uint8ClampedArray | Uint8Array;
+
 export interface PixelDelta {
   celId: CelId;
   /** Cel-local coordinates. */
   rect: Rect;
-  /** RGBA bytes for `rect`, before the edit. */
-  before: Uint8ClampedArray;
-  /** RGBA bytes for `rect`, after the edit. */
-  after: Uint8ClampedArray;
+  /** Bytes for `rect`, before the edit — RGBA (4/px) or palette indices (1/px). */
+  before: CelBuffer;
+  /** Bytes for `rect`, after the edit. */
+  after: CelBuffer;
+  /** How `before`/`after` are laid out — see the module comment above. */
+  bytesPerPixel: number;
 }
 
 /** Bounding box of the pixels that differ between two same-sized buffers. */
 export function diffBounds(
-  before: Uint8ClampedArray,
-  after: Uint8ClampedArray,
+  before: CelBuffer,
+  after: CelBuffer,
   width: number,
   height: number,
+  bytesPerPixel = 4,
 ): Rect {
   let minX = width;
   let minY = height;
@@ -40,15 +52,17 @@ export function diffBounds(
   let maxY = -1;
 
   for (let y = 0; y < height; y++) {
-    const rowStart = y * width * 4;
+    const rowStart = y * width * bytesPerPixel;
     for (let x = 0; x < width; x++) {
-      const i = rowStart + x * 4;
-      if (
-        before[i] !== after[i] ||
-        before[i + 1] !== after[i + 1] ||
-        before[i + 2] !== after[i + 2] ||
-        before[i + 3] !== after[i + 3]
-      ) {
+      const i = rowStart + x * bytesPerPixel;
+      let differs = false;
+      for (let k = 0; k < bytesPerPixel; k++) {
+        if (before[i + k] !== after[i + k]) {
+          differs = true;
+          break;
+        }
+      }
+      if (differs) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -61,31 +75,45 @@ export function diffBounds(
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
-/** Copy `rect` out of a full-cel buffer into a tightly packed RGBA block. */
-export function extractRegion(
-  buf: Uint8ClampedArray,
+/**
+ * Copy `rect` out of a full-cel buffer into a tightly packed block.
+ *
+ * Generic over the concrete buffer type so a caller holding a
+ * `Uint8ClampedArray` (every pre-Phase-7 call site) gets a `Uint8ClampedArray`
+ * back, not the widened `CelBuffer` union — `canvas/applyTransform.ts` feeds
+ * the result straight into RGBA-only functions and would otherwise need a
+ * cast at every call site.
+ */
+export function extractRegion<T extends CelBuffer>(
+  buf: T,
   bufWidth: number,
   rect: Rect,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(rect.width * rect.height * 4);
+  bytesPerPixel = 4,
+): T {
+  const out = (
+    buf instanceof Uint8ClampedArray
+      ? new Uint8ClampedArray(rect.width * rect.height * bytesPerPixel)
+      : new Uint8Array(rect.width * rect.height * bytesPerPixel)
+  ) as T;
   for (let row = 0; row < rect.height; row++) {
-    const src = ((rect.y + row) * bufWidth + rect.x) * 4;
-    out.set(buf.subarray(src, src + rect.width * 4), row * rect.width * 4);
+    const src = ((rect.y + row) * bufWidth + rect.x) * bytesPerPixel;
+    out.set(buf.subarray(src, src + rect.width * bytesPerPixel), row * rect.width * bytesPerPixel);
   }
   return out;
 }
 
-/** Write a tightly packed RGBA block back into a full-cel buffer at `rect`. */
+/** Write a tightly packed block back into a full-cel buffer at `rect`. */
 export function blitRegion(
-  buf: Uint8ClampedArray,
+  buf: CelBuffer,
   bufWidth: number,
   rect: Rect,
-  data: Uint8ClampedArray,
+  data: CelBuffer,
+  bytesPerPixel = 4,
 ): void {
   for (let row = 0; row < rect.height; row++) {
-    const dst = ((rect.y + row) * bufWidth + rect.x) * 4;
-    const src = row * rect.width * 4;
-    buf.set(data.subarray(src, src + rect.width * 4), dst);
+    const dst = ((rect.y + row) * bufWidth + rect.x) * bytesPerPixel;
+    const src = row * rect.width * bytesPerPixel;
+    buf.set(data.subarray(src, src + rect.width * bytesPerPixel), dst);
   }
 }
 
@@ -96,18 +124,20 @@ export function blitRegion(
  */
 export function makePixelDelta(
   celId: CelId,
-  before: Uint8ClampedArray,
-  current: Uint8ClampedArray,
+  before: CelBuffer,
+  current: CelBuffer,
   width: number,
   height: number,
+  bytesPerPixel = 4,
 ): PixelDelta | null {
-  const rect = diffBounds(before, current, width, height);
+  const rect = diffBounds(before, current, width, height, bytesPerPixel);
   if (isEmptyRect(rect)) return null;
   return {
     celId,
     rect,
-    before: extractRegion(before, width, rect),
-    after: extractRegion(current, width, rect),
+    before: extractRegion(before, width, rect, bytesPerPixel),
+    after: extractRegion(current, width, rect, bytesPerPixel),
+    bytesPerPixel,
   };
 }
 
@@ -128,19 +158,20 @@ export function deltaMemoryCost(delta: PixelDelta): number {
 export function mergePixelDeltas(
   a: PixelDelta,
   b: PixelDelta,
-  current: Uint8ClampedArray,
+  current: CelBuffer,
   bufWidth: number,
 ): PixelDelta {
+  const bytesPerPixel = a.bytesPerPixel;
   const rect = unionRect(a.rect, b.rect);
 
   // `after` is simply the present state over the union.
-  const after = extractRegion(current, bufWidth, rect);
+  const after = extractRegion(current, bufWidth, rect, bytesPerPixel);
 
   // `before` is rebuilt by walking backwards: present → undo b → undo a.
-  const scratch = new Uint8ClampedArray(current);
-  blitRegion(scratch, bufWidth, b.rect, b.before);
-  blitRegion(scratch, bufWidth, a.rect, a.before);
-  const before = extractRegion(scratch, bufWidth, rect);
+  const scratch = current.slice();
+  blitRegion(scratch, bufWidth, b.rect, b.before, bytesPerPixel);
+  blitRegion(scratch, bufWidth, a.rect, a.before, bytesPerPixel);
+  const before = extractRegion(scratch, bufWidth, rect, bytesPerPixel);
 
-  return { celId: a.celId, rect, before, after };
+  return { celId: a.celId, rect, before, after, bytesPerPixel };
 }

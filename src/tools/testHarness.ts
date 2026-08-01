@@ -7,6 +7,7 @@
  * `restore` / `restorePixel` that the canvas normally supplies.
  */
 
+import { resolveIndexToRgba } from '../model/indexedColor';
 import type { Selection } from '../model/selection';
 import type { RGBA } from '../model/types';
 import type { ToolContext } from './Tool';
@@ -20,17 +21,25 @@ export interface Harness extends ToolContext {
   sampleSource: ((x: number, y: number) => RGBA | null) | null;
 }
 
+/**
+ * `colorMode`/`buffer` default to `'rgba'`/a `Uint8ClampedArray`, so every
+ * pre-Phase-7 test is unaffected. An indexed-mode test
+ * (`docs/08-roadmap.md` Phase 7) passes `{ colorMode: 'indexed', palette,
+ * buffer: new Uint8Array(...) }`.
+ */
 export function harness(init: Partial<ToolContext> & { size?: number } = {}): Harness {
   const { size = 8, ...options } = init;
   const width = options.width ?? size;
   const height = options.height ?? size;
   const buffer = options.buffer ?? new Uint8ClampedArray(width * height * 4);
-  let saved = new Uint8ClampedArray(buffer);
+  let saved = buffer.slice();
 
   const h: Harness = {
     buffer,
     width,
     height,
+    colorMode: 'rgba',
+    palette: undefined,
     primary: [255, 0, 0, 255],
     secondary: [0, 0, 255, 255],
     brushSize: 1,
@@ -49,7 +58,7 @@ export function harness(init: Partial<ToolContext> & { size?: number } = {}): Ha
       h.selection = s;
     },
     snapshot() {
-      saved = new Uint8ClampedArray(buffer);
+      saved = buffer.slice();
       h.strokeState = {};
     },
     restore() {
@@ -57,12 +66,17 @@ export function harness(init: Partial<ToolContext> & { size?: number } = {}): Ha
     },
     restorePixel(x, y) {
       if (x < 0 || y < 0 || x >= width || y >= height) return;
-      const i = (y * width + x) * 4;
-      buffer.set(saved.subarray(i, i + 4), i);
+      const bpp = h.colorMode === 'indexed' ? 1 : 4;
+      const i = (y * width + x) * bpp;
+      buffer.set(saved.subarray(i, i + bpp), i);
     },
     sample(x, y) {
       if (h.sampleSource) return h.sampleSource(x, y);
       if (x < 0 || y < 0 || x >= width || y >= height) return null;
+      if (h.colorMode === 'indexed') {
+        if (!h.palette) return [0, 0, 0, 0];
+        return resolveIndexToRgba((buffer as Uint8Array)[y * width + x], h.palette);
+      }
       const i = (y * width + x) * 4;
       return [buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3]];
     },
@@ -78,7 +92,7 @@ export function harness(init: Partial<ToolContext> & { size?: number } = {}): Ha
 }
 
 /** Set of `"x,y"` for every non-transparent pixel. */
-export function litPixels(buf: Uint8ClampedArray, w: number, h: number): Set<string> {
+export function litPixels(buf: Uint8ClampedArray | Uint8Array, w: number, h: number): Set<string> {
   const lit = new Set<string>();
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {

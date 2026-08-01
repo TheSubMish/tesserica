@@ -16,25 +16,30 @@ import type { CelId } from '../model/types';
 import { PixelDeltaCommand } from './commands';
 import { makePixelDelta } from './pixelDelta';
 
+type CelBuffer = Uint8ClampedArray | Uint8Array;
+
 export interface StrokeSnapshot {
   celId: CelId;
   width: number;
   height: number;
   /** The cel exactly as it was at pointer-down. */
-  pixels: Uint8ClampedArray;
+  pixels: CelBuffer;
+  /** `docs/08-roadmap.md` Phase 7 — 4 for RGBA, 1 for an indexed cel's palette index. */
+  bytesPerPixel: number;
 }
 
 export function beginStroke(
   celId: CelId,
-  buffer: Uint8ClampedArray,
+  buffer: CelBuffer,
   width: number,
   height: number,
+  bytesPerPixel = 4,
 ): StrokeSnapshot {
-  return { celId, width, height, pixels: new Uint8ClampedArray(buffer) };
+  return { celId, width, height, pixels: buffer.slice(), bytesPerPixel };
 }
 
 /** Put the cel back to its pointer-down state — used between shape previews. */
-export function restoreStroke(snapshot: StrokeSnapshot, buffer: Uint8ClampedArray): void {
+export function restoreStroke(snapshot: StrokeSnapshot, buffer: CelBuffer): void {
   buffer.set(snapshot.pixels);
 }
 
@@ -45,7 +50,7 @@ export function restoreStroke(snapshot: StrokeSnapshot, buffer: Uint8ClampedArra
  */
 export function finishStroke(
   snapshot: StrokeSnapshot,
-  buffer: Uint8ClampedArray,
+  buffer: CelBuffer,
   label: string,
 ): PixelDeltaCommand | null {
   const delta = makePixelDelta(
@@ -54,6 +59,7 @@ export function finishStroke(
     buffer,
     snapshot.width,
     snapshot.height,
+    snapshot.bytesPerPixel,
   );
   if (!delta) return null;
   return new PixelDeltaCommand(label, delta, snapshot.width);

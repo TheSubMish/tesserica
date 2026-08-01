@@ -8,26 +8,30 @@
 
 import { setPixel } from '../model/pixelBuffers';
 import { selectionContains, type Selection } from '../model/selection';
-import type { RGBA } from '../model/types';
 
 /**
  * `clip`, when given, confines painting to a selection (`docs/08-roadmap.md`
  * Phase 3). `undefined`/`null` means "no selection" — paint anywhere, which
  * keeps every pre-existing call site (and its tests) unaffected.
+ *
+ * `value` is whatever `setPixel` expects: a 4-number RGBA tuple, or a
+ * 1-number `[index]` for an indexed-mode cel (`docs/08-roadmap.md` Phase 7)
+ * — an `RGBA` is structurally a `readonly number[]`, so every existing
+ * rgba-mode call site keeps compiling unchanged.
  */
 export function stampBrush(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   cx: number,
   cy: number,
   size: number,
-  color: RGBA,
+  value: readonly number[],
   clip?: Selection | null,
 ): void {
   if (size <= 1) {
     if (!selectionContains(clip, cx, cy)) return;
-    setPixel(buf, width, height, cx, cy, color);
+    setPixel(buf, width, height, cx, cy, value);
     return;
   }
   // Square brush, centered as well as an even size allows.
@@ -37,7 +41,7 @@ export function stampBrush(
       const x = cx - offset + dx;
       const y = cy - offset + dy;
       if (!selectionContains(clip, x, y)) continue;
-      setPixel(buf, width, height, x, y, color);
+      setPixel(buf, width, height, x, y, value);
     }
   }
 }
@@ -79,7 +83,7 @@ export function linePoints(x0: number, y0: number, x1: number, y1: number): Poin
 
 /** Bresenham line, stamping the brush at every step. */
 export function drawLine(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   x0: number,
@@ -87,10 +91,10 @@ export function drawLine(
   x1: number,
   y1: number,
   size: number,
-  color: RGBA,
+  value: readonly number[],
   clip?: Selection | null,
 ): void {
   for (const p of linePoints(x0, y0, x1, y1)) {
-    stampBrush(buf, width, height, p.x, p.y, size, color, clip);
+    stampBrush(buf, width, height, p.x, p.y, size, value, clip);
   }
 }

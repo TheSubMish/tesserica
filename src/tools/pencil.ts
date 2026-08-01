@@ -15,6 +15,7 @@
 
 import type { Tool, ToolContext } from './Tool';
 import { linePoints, stampBrush, type Point } from './raster';
+import { pixelValueFor } from './pixelValue';
 import type { RGBA } from '../model/types';
 
 export function colorFor(ctx: ToolContext): RGBA {
@@ -39,7 +40,16 @@ export function isRedundantCorner(a: Point, b: Point, c: Point): boolean {
 }
 
 function plot(ctx: ToolContext, x: number, y: number, color: RGBA): void {
-  stampBrush(ctx.buffer, ctx.width, ctx.height, x, y, ctx.brushSize, color, ctx.selection);
+  stampBrush(
+    ctx.buffer,
+    ctx.width,
+    ctx.height,
+    x,
+    y,
+    ctx.brushSize,
+    pixelValueFor(ctx, color),
+    ctx.selection,
+  );
 
   if (!ctx.pixelPerfect || ctx.brushSize > 1) return;
 

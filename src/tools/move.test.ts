@@ -123,3 +123,24 @@ describe('move tool', () => {
     expect(c.selection).toEqual(original);
   });
 });
+
+describe('move tool — indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  it('translates palette indices, not RGBA bytes', () => {
+    const buf = new Uint8Array(W * H);
+    setPixel(buf, W, H, 0, 0, [3]);
+    const c = harness({
+      colorMode: 'indexed',
+      buffer: buf,
+      width: W,
+      height: H,
+      anchor: { x: 0, y: 0 },
+    });
+    c.snapshot();
+
+    move.onPointerDown(c, 0, 0);
+    move.onPointerMove(c, 2, 3, 0, 0);
+
+    expect(getPixel(c.buffer, W, H, 0, 0, 1)).toEqual([0]);
+    expect(getPixel(c.buffer, W, H, 2, 3, 1)).toEqual([3]);
+  });
+});

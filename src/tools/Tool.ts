@@ -19,14 +19,25 @@
  */
 
 import type { Selection } from '../model/selection';
-import type { RGBA } from '../model/types';
+import type { ColorMode, Palette, RGBA } from '../model/types';
 import type { SelectMode } from '../state/toolStore';
 
 export interface ToolContext {
-  /** Pixel buffer of the active cel. */
-  buffer: Uint8ClampedArray;
+  /**
+   * The active cel's own raw storage — a `Uint8ClampedArray` of RGBA bytes
+   * for an `'rgba'`-mode sprite, or a `Uint8Array` of one palette index per
+   * pixel for an `'indexed'`-mode one (`docs/08-roadmap.md` Phase 7,
+   * `model/celStorage.ts`). Tools that paint should go through
+   * `tools/pixelValue.ts::pixelValueFor` to get the right shape of value to
+   * write rather than assuming RGBA.
+   */
+  buffer: Uint8ClampedArray | Uint8Array;
   width: number;
   height: number;
+  /** `docs/08-roadmap.md` Phase 7 — which storage `buffer` actually is. */
+  colorMode: ColorMode;
+  /** Only meaningful when `colorMode === 'indexed'` — the sprite's own assigned palette. */
+  palette: Palette | undefined;
   primary: RGBA;
   secondary: RGBA;
   brushSize: number;

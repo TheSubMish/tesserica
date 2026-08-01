@@ -12,33 +12,38 @@
  * selection does not disturb the rest of its bounding box.
  */
 
+import { TRANSPARENT_INDEX } from '../model/indexBuffers';
 import { getPixel, setPixel } from '../model/pixelBuffers';
 import { intersectRect, type Rect } from '../model/rect';
 import { selectionContains, type Selection } from '../model/selection';
-import type { Tool } from './Tool';
+import type { Tool, ToolContext } from './Tool';
 
 /**
- * Copy of a region's pixels, row-major, `width × height × 4` bytes. Pixels
- * outside `sel` (when it carries a mask) are left as transparent zero, so
- * `pasteRegion`'s "skip zero-alpha" check naturally leaves them untouched at
- * the destination.
+ * Copy of a region's pixels, row-major, `width × height × bpp` bytes. Pixels
+ * outside `sel` (when it carries a mask) are left at the "nothing here" value
+ * — `0` in every byte, which for RGBA is transparent and for an indexed cel
+ * is `TRANSPARENT_INDEX` (`docs/08-roadmap.md` Phase 7) — so `pasteRegion`'s
+ * "skip empty source pixels" check naturally leaves them untouched at the
+ * destination either way.
  */
 function extractRegion(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   bounds: Rect,
   sel: Selection | null,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+  bpp: number,
+): number[] {
+  const out = new Array<number>(bounds.width * bounds.height * bpp).fill(0);
   for (let y = 0; y < bounds.height; y++) {
     for (let x = 0; x < bounds.width; x++) {
       const gx = bounds.x + x;
       const gy = bounds.y + y;
       if (!selectionContains(sel, gx, gy)) continue;
-      const p = getPixel(buf, width, height, gx, gy) ?? [0, 0, 0, 0];
-      const i = (y * bounds.width + x) * 4;
-      out.set(p, i);
+      const p = getPixel(buf, width, height, gx, gy, bpp);
+      if (!p) continue;
+      const i = (y * bounds.width + x) * bpp;
+      for (let k = 0; k < bpp; k++) out[i + k] = p[k];
     }
   }
   return out;
@@ -46,44 +51,48 @@ function extractRegion(
 
 /** Only clears pixels the mask actually selected — never the whole bounding box. */
 function clearRegion(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
   bounds: Rect,
   sel: Selection | null,
+  empty: readonly number[],
 ): void {
   for (let y = 0; y < bounds.height; y++) {
     for (let x = 0; x < bounds.width; x++) {
       const gx = bounds.x + x;
       const gy = bounds.y + y;
       if (!selectionContains(sel, gx, gy)) continue;
-      setPixel(buf, width, height, gx, gy, [0, 0, 0, 0]);
+      setPixel(buf, width, height, gx, gy, empty);
     }
   }
 }
 
 function pasteRegion(
-  buf: Uint8ClampedArray,
+  buf: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
-  region: Uint8ClampedArray,
+  region: readonly number[],
   regionWidth: number,
   regionHeight: number,
   atX: number,
   atY: number,
+  bpp: number,
 ): void {
   for (let y = 0; y < regionHeight; y++) {
     for (let x = 0; x < regionWidth; x++) {
-      const i = (y * regionWidth + x) * 4;
-      if (region[i + 3] === 0) continue; // nothing to overwrite the destination with
-      setPixel(buf, width, height, atX + x, atY + y, [
-        region[i],
-        region[i + 1],
-        region[i + 2],
-        region[i + 3],
-      ]);
+      const i = (y * regionWidth + x) * bpp;
+      // The last byte of a pixel is what "empty" means either way: RGBA's
+      // alpha, or an indexed cel's one-byte index, since TRANSPARENT_INDEX is
+      // `0` too (`model/indexBuffers.ts`).
+      if (region[i + bpp - 1] === 0) continue; // nothing to overwrite the destination with
+      setPixel(buf, width, height, atX + x, atY + y, region.slice(i, i + bpp));
     }
   }
+}
+
+function bppOf(ctx: ToolContext): number {
+  return ctx.colorMode === 'indexed' ? 1 : 4;
 }
 
 export const move: Tool = {
@@ -100,20 +109,23 @@ export const move: Tool = {
       ctx.height,
       bounds,
       ctx.selection,
+      bppOf(ctx),
     );
   },
 
   onPointerMove(ctx, x, y) {
     const bounds = ctx.strokeState.bounds as Rect | undefined;
-    const original = ctx.strokeState.original as Uint8ClampedArray | undefined;
+    const original = ctx.strokeState.original as number[] | undefined;
     if (!bounds || !original || bounds.width === 0 || bounds.height === 0) return;
 
+    const bpp = bppOf(ctx);
     const dx = x - ctx.anchor.x;
     const dy = y - ctx.anchor.y;
     ctx.restore();
     // The selection itself does not change mid-gesture (only on pointer-up
     // below), so clearing against the un-translated selection is correct here.
-    clearRegion(ctx.buffer, ctx.width, ctx.height, bounds, ctx.selection);
+    const empty = bpp === 1 ? [TRANSPARENT_INDEX] : [0, 0, 0, 0];
+    clearRegion(ctx.buffer, ctx.width, ctx.height, bounds, ctx.selection, empty);
     pasteRegion(
       ctx.buffer,
       ctx.width,
@@ -123,6 +135,7 @@ export const move: Tool = {
       bounds.height,
       bounds.x + dx,
       bounds.y + dy,
+      bpp,
     );
   },
 

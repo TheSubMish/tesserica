@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getPixel } from '../model/pixelBuffers';
-import type { RGBA } from '../model/types';
+import type { Palette, RGBA } from '../model/types';
 import { drawEllipse, drawRect, ellipsePoints, ellipseSelection, normalizeDrag } from './shapes';
 import { ellipse, line, rectangle } from './line';
 import { harness, litPixels } from './testHarness';
@@ -183,5 +183,52 @@ describe('shape tools preview from the pointer-down snapshot', () => {
     ellipse.onPointerMove(c, 6, 6, 0, 0);
     expect(litPixels(c.buffer, 8, 8).has('3,0')).toBe(true);
     expect(litPixels(c.buffer, 8, 8).has('0,0')).toBe(false);
+  });
+});
+
+describe('line/rect/ellipse — indexed color mode (docs/08-roadmap.md Phase 7)', () => {
+  const palette: Palette = {
+    id: 'p1',
+    name: 'P',
+    colors: [
+      [255, 0, 0, 255],
+      [0, 255, 0, 255],
+    ],
+  };
+
+  function indexedHarness() {
+    return harness({
+      size: 8,
+      colorMode: 'indexed',
+      palette,
+      buffer: new Uint8Array(64),
+      anchor: { x: 0, y: 0 },
+      primary: [0, 255, 0, 255], // -> index 2
+    });
+  }
+
+  it('line writes palette indices, not RGBA', () => {
+    const c = indexedHarness();
+    c.snapshot();
+    line.onPointerDown(c, 0, 0);
+    line.onPointerMove(c, 3, 0, 0, 0);
+    expect(getPixel(c.buffer, 8, 8, 2, 0, 1)).toEqual([2]);
+  });
+
+  it('rectangle writes palette indices, not RGBA', () => {
+    const c = indexedHarness();
+    c.anchor = { x: 1, y: 1 };
+    c.snapshot();
+    rectangle.onPointerDown(c, 1, 1);
+    rectangle.onPointerMove(c, 3, 3, 1, 1);
+    expect(getPixel(c.buffer, 8, 8, 1, 1, 1)).toEqual([2]);
+  });
+
+  it('ellipse writes palette indices, not RGBA', () => {
+    const c = indexedHarness();
+    c.snapshot();
+    ellipse.onPointerDown(c, 0, 0);
+    ellipse.onPointerMove(c, 6, 6, 0, 0);
+    expect(getPixel(c.buffer, 8, 8, 3, 0, 1)).toEqual([2]);
   });
 });
