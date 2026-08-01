@@ -24,41 +24,54 @@
  * **A measured trap**: an unknown or mistyped slug does not 404 promptly.
  * Real timings against the live site: existing slugs answer in ~1–2s;
  * nonexistent ones (including simple case mismatches — slugs are
- * case-sensitive) can hang for 30s+ with no response at all. A client-side
- * timeout is therefore not optional polish here, it is required for the
- * "handle failure gracefully" requirement — see `FETCH_TIMEOUT_MS`.
+ * case-sensitive) can hang for 30s+ with no response at all. A timeout is
+ * therefore not optional polish, it is required for "handle failure
+ * gracefully" — see `src-tauri/src/commands/lospec.rs::TIMEOUT_SECS` for the
+ * authoritative bound and `CLIENT_TIMEOUT_MS` below for a JS-side backstop.
  *
- * **This module never calls `fetch` on its own** — same invariant as
- * `segment/modelDownload.ts`. [`importLospecPalette`] only runs once a
- * component has shown the user an explicit confirm step naming lospec.com
- * and they have clicked through it; `fetchImpl` is injected so that
- * invariant and every failure path can be unit tested without a real
- * network call.
+ * **The actual network fetch happens in Rust, not here** — see
+ * `ipc/commands.ts::fetchLospecPalette` and
+ * `src-tauri/src/commands/lospec.rs` for why: `lospec.com` sends no
+ * `Access-Control-Allow-Origin` header, so a WebView-context `fetch()` is
+ * rejected by CORS before it ever reaches the network (confirmed live —
+ * that module's doc comment has the reproduction). This module still owns
+ * everything that does *not* need to be in Rust: URL validation/slug
+ * extraction (pure, synchronous, no network) and parsing the returned text
+ * with the existing file-import parser.
+ *
+ * **This module never calls `fetchImpl` on its own.**
+ * [`importLospecPalette`] only runs once a component has shown the user an
+ * explicit confirm step naming lospec.com and they have clicked through it;
+ * `fetchImpl` is injected so that invariant and every failure path can be
+ * unit tested without a real network call.
  */
 
 import type { Palette } from '../model/types.ts';
 import { PaletteParseError, parsePaletteFile } from './formats/palette.ts';
 
-/** Real slugs answer in ~1-2s; this bounds the "bad slug hangs" failure mode
- * measured against the live site (see module doc) while leaving generous
- * margin for a slow connection. */
-export const FETCH_TIMEOUT_MS = 20_000;
+/** A JS-side backstop above the Rust command's own 20s bound
+ * (`src-tauri/src/commands/lospec.rs::TIMEOUT_SECS`) — the authoritative
+ * timeout lives there now, this only guarantees the UI itself never hangs
+ * even if `invoke()` somehow never settles. */
+export const CLIENT_TIMEOUT_MS = 25_000;
 
+/** Matches `ipc/commands.ts::LospecFetchResult` without importing it
+ * directly, so this module (and its tests) stay free of any Tauri
+ * dependency — the same separation `segment/modelDownload.ts` keeps from
+ * `ipc/commands.ts`'s concrete types where it can. */
 export type LospecFetchImpl = (
-  url: string,
-  init: { signal: AbortSignal },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+  slug: string,
+) => Promise<{ ok: boolean; status: number; body: string }>;
 
-export type ParsedLospecUrl = { slug: string; downloadUrl: string };
+export type ParsedLospecUrl = { slug: string };
 
 export type LospecUrlResult =
   { kind: 'ok'; value: ParsedLospecUrl } | { kind: 'error'; message: string };
 
 /**
  * Validate a pasted string as a Lospec palette-page (or direct download)
- * URL and derive the `.hex` download URL from it. Pure and synchronous —
- * safe to call on every keystroke for inline validation, since it never
- * touches the network.
+ * URL and extract its slug. Pure and synchronous — safe to call on every
+ * keystroke for inline validation, since it never touches the network.
  */
 export function parseLospecUrl(input: string): LospecUrlResult {
   const trimmed = input.trim();
@@ -92,21 +105,38 @@ export function parseLospecUrl(input: string): LospecUrlResult {
   const slug = match[1].replace(/\.(hex|gpl|pal|txt|png|ase)$/i, '');
   if (!slug) return { kind: 'error', message: 'That URL has no palette name in it.' };
 
-  return {
-    kind: 'ok',
-    value: { slug, downloadUrl: `https://lospec.com/palette-list/${slug}.hex` },
-  };
+  return { kind: 'ok', value: { slug } };
 }
 
 export type LospecImportOutcome =
   { kind: 'success'; palette: Palette } | { kind: 'error'; message: string };
 
+function withClientTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out waiting for a response (after ${CLIENT_TIMEOUT_MS / 1000}s).`));
+    }, CLIENT_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (cause) => {
+        clearTimeout(timer);
+        reject(cause);
+      },
+    );
+  });
+}
+
 /**
- * Fetch a Lospec palette page's `.hex` data and parse it with the existing
- * file-import parser. Every failure mode — bad URL, network error, timeout,
- * non-2xx response, unparseable body — resolves to `{ kind: 'error' }`
- * rather than throwing, so the calling component can show it inline and the
- * app stays fully usable regardless of network state.
+ * Fetch a Lospec palette page's `.hex` data (via the injected `fetchImpl` —
+ * in production, `ipc/commands.ts::fetchLospecPalette`, which runs the
+ * actual GET in Rust) and parse it with the existing file-import parser.
+ * Every failure mode — bad URL, network error, timeout, non-2xx response,
+ * unparseable body — resolves to `{ kind: 'error' }` rather than throwing,
+ * so the calling component can show it inline and the app stays fully
+ * usable regardless of network state.
  */
 export async function importLospecPalette(
   input: string,
@@ -114,26 +144,16 @@ export async function importLospecPalette(
 ): Promise<LospecImportOutcome> {
   const parsed = parseLospecUrl(input);
   if (parsed.kind === 'error') return { kind: 'error', message: parsed.message };
-  const { slug, downloadUrl } = parsed.value;
+  const { slug } = parsed.value;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  let response: Awaited<ReturnType<LospecFetchImpl>>;
+  let response: { ok: boolean; status: number; body: string };
   try {
-    response = await deps.fetchImpl(downloadUrl, { signal: controller.signal });
+    response = await withClientTimeout(deps.fetchImpl(slug));
   } catch (cause) {
-    const timedOut = cause instanceof Error && cause.name === 'AbortError';
     return {
       kind: 'error',
-      message: timedOut
-        ? `Timed out waiting for lospec.com. Check the URL is an exact palette slug (they are case-sensitive).`
-        : `Could not reach lospec.com — check your network connection. (${
-            cause instanceof Error ? cause.message : String(cause)
-          })`,
+      message: cause instanceof Error ? cause.message : String(cause),
     };
-  } finally {
-    clearTimeout(timer);
   }
 
   if (!response.ok) {
@@ -146,20 +166,8 @@ export async function importLospecPalette(
     };
   }
 
-  let text: string;
   try {
-    text = await response.text();
-  } catch (cause) {
-    return {
-      kind: 'error',
-      message: `Download was interrupted before it finished. (${
-        cause instanceof Error ? cause.message : String(cause)
-      })`,
-    };
-  }
-
-  try {
-    const bytes = new TextEncoder().encode(text);
+    const bytes = new TextEncoder().encode(response.body);
     const palette = parsePaletteFile(`${slug}.hex`, bytes);
     return { kind: 'success', palette };
   } catch (cause) {

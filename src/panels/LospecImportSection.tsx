@@ -9,9 +9,17 @@
  * reveals a text field, and the URL is validated locally (no network) as the
  * user types so a bad URL is caught before the confirm button is even
  * enabled — but nothing is fetched until that button is pressed.
+ *
+ * The actual GET happens in Rust (`ipc/commands.ts::fetchLospecPalette` →
+ * `src-tauri/src/commands/lospec.rs`), not via a frontend `fetch()` like the
+ * segmentation-model download — `lospec.com` sends no CORS header, so a
+ * WebView-context `fetch()` to it fails outright (verified live; see that
+ * Rust module's doc comment). This component only decides *when* to ask for
+ * it, same as every other opt-in network affordance in this app.
  */
 
 import { useState } from 'react';
+import { fetchLospecPalette } from '../ipc/commands';
 import { importLospecPalette, parseLospecUrl } from '../lib/lospecImport';
 import { usePaletteStore } from '../state/paletteStore';
 
@@ -42,9 +50,7 @@ export function LospecImportSection() {
   const confirmFetch = async () => {
     setPhase('fetching');
     setMessage(undefined);
-    const outcome = await importLospecPalette(url, {
-      fetchImpl: (fetchUrl, init) => fetch(fetchUrl, init),
-    });
+    const outcome = await importLospecPalette(url, { fetchImpl: fetchLospecPalette });
     if (outcome.kind === 'success') {
       usePaletteStore.getState().addPalette(outcome.palette);
       setImportedName(outcome.palette.name);

@@ -55,6 +55,7 @@ macro_rules! all_commands {
             commands::onnx_runtime::onnx_runtime_info,
             commands::onnx_runtime::onnx_runtime_status,
             commands::onnx_runtime::save_downloaded_onnx_runtime,
+            commands::lospec::fetch_lospec_palette,
             bench::bench_mode,
             bench::bench_json,
             bench::bench_raw,
@@ -92,6 +93,7 @@ macro_rules! all_commands {
             commands::onnx_runtime::onnx_runtime_info,
             commands::onnx_runtime::onnx_runtime_status,
             commands::onnx_runtime::save_downloaded_onnx_runtime,
+            commands::lospec::fetch_lospec_palette,
         ]
     };
 }

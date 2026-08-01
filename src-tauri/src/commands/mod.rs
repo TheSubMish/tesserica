@@ -7,6 +7,7 @@ pub mod animation_export;
 pub mod ase_import;
 pub mod batch_convert;
 pub mod export;
+pub mod lospec;
 pub mod onnx_runtime;
 pub mod pattern_chart;
 pub mod project;

@@ -110,6 +110,26 @@ aseprite-io = { version = "0.2.0", default-features = false }
 # within one call.
 rayon = "1.12.0"
 
+# Lospec URL import (`docs/08-roadmap.md` Phase 7 "Lospec URL import (opt-in
+# network)", `docs/06-workflows.md` W8 step 4) — **the one exception to this
+# app's usual "fetch stays in the frontend" pattern** (contrast the
+# segmentation-model download above, which deliberately keeps `fetch()` in
+# TS). Measured directly against the real site (2026-08-01): lospec.com sends
+# no `Access-Control-Allow-Origin` header at all, so a WebView-context
+# `fetch('https://lospec.com/...')` is blocked by CORS before it ever reaches
+# the network — confirmed by driving the real Vite dev bundle over CDP in a
+# real (headless) browser context, where it failed with `TypeError: Failed to
+# fetch`, while the identical call from plain Node (which does not enforce
+# CORS) succeeded. Rust's HTTP stack has no such restriction, so the fetch
+# moves here (`commands::lospec::fetch_lospec_palette`) and only the already-
+# fetched text (a few hundred bytes to a handful of KB, nothing like a pixel
+# buffer) crosses back over IPC as an ordinary JSON return value. Chosen over
+# `reqwest` for the same "small, isolated, no surprise transitive tree" bar
+# the rest of this section holds new dependencies to: blocking (no tokio
+# runtime needed for one GET), MIT/Apache-2.0, default features already give
+# rustls + gzip.
+ureq = "3.3.0"
+
 [profile.release]
 codegen-units = 1
 lto = true

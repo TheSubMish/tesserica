@@ -560,3 +560,30 @@ export interface SavedOnnxRuntime {
 export async function saveDownloadedOnnxRuntime(bytes: ArrayBuffer): Promise<SavedOnnxRuntime> {
   return invoke<SavedOnnxRuntime>('save_downloaded_onnx_runtime', bytes);
 }
+
+// ---------------------------------------------------------------------------
+// Lospec URL import (`docs/08-roadmap.md` Phase 7 "Lospec URL import
+// (opt-in network)", `src/lib/lospecImport.ts`). **Unlike every other
+// network feature above, the fetch itself happens in Rust, not the
+// frontend** — measured directly: `lospec.com` sends no
+// `Access-Control-Allow-Origin` header, so a WebView `fetch()` to it is
+// rejected by CORS before any request leaves the browser engine (reproduced
+// live: a real headless-browser `fetch()` to a real Lospec URL failed with
+// `TypeError: Failed to fetch`, while the identical request from Node, which
+// does not enforce CORS, succeeded). `commands::lospec::fetch_lospec_palette`
+// has no such restriction. This call **is** the network activity — it is
+// still only ever reachable from `lib/lospecImport.ts::importLospecPalette`,
+// itself only ever reachable from an explicit user click
+// (`panels/LospecImportSection.tsx`), preserving the same "opt-in, explicit
+// consent" contract every other network feature here has.
+// ---------------------------------------------------------------------------
+
+export interface LospecFetchResult {
+  ok: boolean;
+  status: number;
+  body: string;
+}
+
+export async function fetchLospecPalette(slug: string): Promise<LospecFetchResult> {
+  return invoke<LospecFetchResult>('fetch_lospec_palette', { slug });
+}
