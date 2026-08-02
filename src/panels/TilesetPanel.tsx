@@ -230,6 +230,7 @@ export function TilesetPanel() {
           scale: 1,
           tilesetName: selectionForExport.tileset.name,
           layerName: activeLayer.name,
+          gridShape: selectionForExport.layer.grid.shape,
           gridCols: selectionForExport.cols,
           gridRows: selectionForExport.rows,
           tileIds: selectionForExport.tileIds,

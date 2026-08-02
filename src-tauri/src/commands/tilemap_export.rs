@@ -47,6 +47,18 @@
 //! `i` (`i >= 1`) becomes Tiled local id `i - 1` and therefore GID
 //! `firstgid + (i - 1) = i` — the two numbering schemes coincide exactly for
 //! every real tile.
+//!
+//! **Orientation is shape-aware (gap-closure follow-up to Phase 7 "Isometric
+//! and hexagonal tile grids").** Earlier, this module always wrote
+//! `"orientation": "orthogonal"` regardless of the exporting layer's actual
+//! `GridSpec.shape` — a real, documented gap (`docs/08-roadmap.md`'s Phase 7
+//! entry), since Tiled's own isometric/hexagonal orientations are read by a
+//! genuinely different renderer on Tiled's side. [`ExportTilemapRequest`] now
+//! carries `grid_shape`, and [`tiled_orientation_fields`] derives the correct
+//! `orientation` plus (for `hexagonal`) `hexsidelength`/`staggeraxis`/
+//! `staggerindex` — see that function's own doc comment for the real research
+//! (Tiled's documented JSON schema plus its `hexagonalrenderer.cpp` source)
+//! behind the `hexsidelength` derivation specifically.
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -54,6 +66,7 @@ use tauri::State;
 use crate::commands::animation_export::{assemble_sheet, SheetLayout};
 use crate::commands::export::{encode_png, scale_nearest, ALLOWED_SCALES};
 use crate::error::AppError;
+use crate::model::document::GridShape;
 use crate::staging::Staging;
 
 // ---------------------------------------------------------------------------
@@ -134,6 +147,13 @@ pub struct ExportTilemapRequest {
     pub scale: u32,
     pub tileset_name: String,
     pub layer_name: String,
+    /// The tilemap layer's own `GridSpec.shape` (`model/gridGeometry.ts`) —
+    /// drives which Tiled `orientation` (and, for `hexagonal`, which
+    /// `hexsidelength`/`staggeraxis`/`staggerindex`) the exported map JSON
+    /// declares (`tiled_orientation_fields`). Placement itself never crosses
+    /// IPC — Rust does not composite tiles (`docs/02-architecture.md` §6.2) —
+    /// only this one enum needs to travel.
+    pub grid_shape: GridShape,
     pub grid_cols: u32,
     pub grid_rows: u32,
     /// Packed Tesserica tile ids (`model/tileIds.ts`), row-major, one per
@@ -236,6 +256,17 @@ struct TiledMap {
     tile_width: u32,
     #[serde(rename = "tileheight")]
     tile_height: u32,
+    /// Hexagonal orientation only (`docs/tiled` schema, verified against both
+    /// the upstream JSON reference and `hexagonalrenderer.cpp` — see
+    /// `tiled_orientation_fields`'s own doc comment). Omitted entirely for
+    /// `orthogonal`/`isometric` maps rather than emitted as `null`, matching
+    /// what Tiled itself writes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hexsidelength: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    staggeraxis: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    staggerindex: Option<&'static str>,
     infinite: bool,
     #[serde(rename = "nextlayerid")]
     next_layer_id: u32,
@@ -246,6 +277,81 @@ struct TiledMap {
     properties: Vec<TiledProperty>,
 }
 
+/// Tiled `orientation` plus, for `hexagonal` only, `hexsidelength`/
+/// `staggeraxis`/`staggerindex` — researched against Tiled's own documented
+/// schema and renderer source, not guessed (the same bar
+/// `tesserica_id_to_tiled_gid` above holds itself to, which found a *real*
+/// bit-position mismatch despite the two schemes looking alike at a glance).
+///
+/// **Isometric** needs nothing beyond `"orientation": "isometric"`. Tiled's
+/// isometric renderer consumes the exact same row-major `data` array as
+/// orthogonal, only projecting `(col, row)` through its own 2:1 diamond shear
+/// at render time — there is no extra field in Tiled's schema for it, and
+/// this project's own isometric placement (`gridGeometry.ts::cellOrigin`,
+/// `docs/03-data-model.md` §4) is already that same standard 2:1 shear, so no
+/// convention translation is needed.
+///
+/// **Hexagonal** is the one that actually needed research. Tiled's JSON/TMX
+/// reference (`doc.mapeditor.org/en/stable/reference/json-map-format/`)
+/// documents `staggeraxis: "x" | "y"` and `staggerindex: "odd" | "even"` with
+/// no formula, so the real geometry was pulled from Tiled's own renderer
+/// source (`src/libtiled/hexagonalrenderer.cpp`,
+/// `HexagonalRenderer::RenderParams`), which — for a pointy-top map
+/// (`staggeraxis: "y"`, `staggerX = false`) — computes:
+///
+/// ```text
+/// sideOffsetY = (tileHeight - hexSideLength) / 2
+/// rowHeight   = sideOffsetY + hexSideLength = (tileHeight + hexSideLength) / 2
+/// columnWidth = tileWidth / 2   // horizontal shift Tiled applies to staggered rows
+/// ```
+///
+/// This project's own hex placement is pointy-top, odd-row horizontal offset
+/// ("odd-r", `gridGeometry.ts`'s module doc): rows step by a fixed
+/// `tileHeight * 0.75`, and odd-numbered rows (`isOddRow`) shift right by
+/// exactly `tileWidth / 2`. The horizontal shift already matches Tiled's
+/// `columnWidth` with no translation needed. Solving Tiled's `rowHeight`
+/// formula for the `hexSideLength` that reproduces this project's fixed
+/// `0.75` row step —
+///
+/// ```text
+/// (tileHeight + hexSideLength) / 2 = tileHeight * 0.75
+/// hexSideLength                    = tileHeight / 2
+/// ```
+///
+/// — is an *exact* match, not an approximation: plugging `hexSideLength =
+/// tileHeight / 2` back into Tiled's own `rowHeight` formula reproduces
+/// `tileHeight * 0.75` precisely. Unlike the GID flip bits (which looked
+/// alike but were not a bit-for-bit passthrough), no convention mismatch was
+/// found for the stagger axis/index themselves — `staggeraxis: "y"` is
+/// exactly "pointy-top, rows staggered" (this project's own choice) and
+/// `staggerindex: "odd"` is exactly "odd-numbered rows shift" (this
+/// project's own `isOddRow`). `hexSideLength` needed a real derivation only
+/// because this project's tiles are plain rectangular sprite buffers with a
+/// hex silhouette painted into their own alpha channel — nothing in
+/// `docs/03-data-model.md` or `gridGeometry.ts` names a "hex side length" at
+/// all, so there was no existing constant to read off directly. Odd
+/// `tileHeight` truncates by one pixel (`hexsidelength` is Tiled's own `int`
+/// field); harmless in practice since tile sizes are user-chosen even
+/// integers in every shipped default.
+fn tiled_orientation_fields(
+    shape: GridShape,
+    scaled_tile_height: u32,
+) -> (
+    &'static str,
+    Option<u32>,
+    Option<&'static str>,
+    Option<&'static str>,
+) {
+    match shape {
+        GridShape::Rect => ("orthogonal", None, None, None),
+        GridShape::Isometric => ("isometric", None, None, None),
+        GridShape::Hexagonal => {
+            let hex_side_length = scaled_tile_height / 2;
+            ("hexagonal", Some(hex_side_length), Some("y"), Some("odd"))
+        }
+    }
+}
+
 fn build_map_json(request: &ExportTilemapRequest, layout: &SheetLayout) -> TiledMap {
     let scale = request.scale;
     let data: Vec<u32> = request
@@ -253,16 +359,22 @@ fn build_map_json(request: &ExportTilemapRequest, layout: &SheetLayout) -> Tiled
         .iter()
         .map(|&id| tesserica_id_to_tiled_gid(id))
         .collect();
+    let scaled_tile_height = request.tile_height * scale;
+    let (orientation, hexsidelength, staggeraxis, staggerindex) =
+        tiled_orientation_fields(request.grid_shape, scaled_tile_height);
 
     TiledMap {
         r#type: "map".to_string(),
         version: "1.10".to_string(),
-        orientation: "orthogonal".to_string(),
+        orientation: orientation.to_string(),
         renderorder: "right-down".to_string(),
         width: request.grid_cols,
         height: request.grid_rows,
         tile_width: request.tile_width * scale,
-        tile_height: request.tile_height * scale,
+        tile_height: scaled_tile_height,
+        hexsidelength,
+        staggeraxis,
+        staggerindex,
         infinite: false,
         next_layer_id: 2,
         next_object_id: 1,
@@ -285,7 +397,7 @@ fn build_map_json(request: &ExportTilemapRequest, layout: &SheetLayout) -> Tiled
             image_width: layout.sheet_width() * scale,
             image_height: layout.sheet_height() * scale,
             tile_width: request.tile_width * scale,
-            tile_height: request.tile_height * scale,
+            tile_height: scaled_tile_height,
             tile_count: request.tile_count,
             columns: layout.columns,
             margin: 0,
@@ -458,6 +570,7 @@ mod tests {
             "scale": 1,
             "tilesetName": "Ground",
             "layerName": "Terrain",
+            "gridShape": "hexagonal",
             "gridCols": 2,
             "gridRows": 1,
             "tileIds": [1, 2],
@@ -468,6 +581,7 @@ mod tests {
         assert_eq!(request.tile_count, 2);
         assert_eq!(request.tile_ids, vec![1, 2]);
         assert_eq!(request.tileset_name, "Ground");
+        assert_eq!(request.grid_shape, GridShape::Hexagonal);
     }
 
     // -- JSON shape ---------------------------------------------------------
@@ -482,6 +596,7 @@ mod tests {
             scale: 1,
             tileset_name: "Ground".to_string(),
             layer_name: "Terrain".to_string(),
+            grid_shape: GridShape::Rect,
             grid_cols: 2,
             grid_rows: 1,
             tile_ids: vec![1, FLIP_H_BIT | 2],
@@ -529,6 +644,122 @@ mod tests {
         assert_eq!(value["tilesets"][0]["tilecount"], 2);
     }
 
+    // -- orientation / stagger fields (gap-closure: shape-aware Tiled export) --
+
+    #[test]
+    fn rect_grid_writes_orthogonal_orientation_and_no_hex_fields() {
+        let (orientation, hexsidelength, staggeraxis, staggerindex) =
+            tiled_orientation_fields(GridShape::Rect, 16);
+        assert_eq!(orientation, "orthogonal");
+        assert_eq!(hexsidelength, None);
+        assert_eq!(staggeraxis, None);
+        assert_eq!(staggerindex, None);
+    }
+
+    #[test]
+    fn isometric_grid_writes_isometric_orientation_and_no_hex_fields() {
+        let (orientation, hexsidelength, staggeraxis, staggerindex) =
+            tiled_orientation_fields(GridShape::Isometric, 16);
+        assert_eq!(orientation, "isometric");
+        assert_eq!(hexsidelength, None);
+        assert_eq!(staggeraxis, None);
+        assert_eq!(staggerindex, None);
+    }
+
+    #[test]
+    fn hexagonal_grid_writes_hexagonal_orientation_and_odd_r_stagger_fields() {
+        // tileHeight=16 -> hexSideLength=8, and plugging that back into
+        // Tiled's own rowHeight formula, (tileHeight + hexSideLength) / 2,
+        // reproduces this project's fixed 0.75 * tileHeight row step exactly:
+        // (16 + 8) / 2 = 12 = 16 * 0.75.
+        let (orientation, hexsidelength, staggeraxis, staggerindex) =
+            tiled_orientation_fields(GridShape::Hexagonal, 16);
+        assert_eq!(orientation, "hexagonal");
+        assert_eq!(hexsidelength, Some(8));
+        assert_eq!(staggeraxis, Some("y"));
+        assert_eq!(staggerindex, Some("odd"));
+
+        let tiled_row_height = (16 + hexsidelength.unwrap()) / 2;
+        let this_project_row_step = (16f64 * 0.75) as u32;
+        assert_eq!(tiled_row_height, this_project_row_step);
+    }
+
+    #[test]
+    fn hexsidelength_scales_with_the_export_scale_factor() {
+        // hexsidelength is a pixel length like tilewidth/tileheight — it must
+        // scale the same way they do (`request.tile_height * scale`), or an
+        // exported map at 2x/4x would have geometrically inconsistent hex
+        // tiles vs. row spacing.
+        let (_, hexsidelength, _, _) = tiled_orientation_fields(GridShape::Hexagonal, 16 * 4);
+        assert_eq!(hexsidelength, Some(32));
+    }
+
+    fn hex_request(path: &str) -> ExportTilemapRequest {
+        ExportTilemapRequest {
+            grid_shape: GridShape::Hexagonal,
+            ..sample_request(path)
+        }
+    }
+
+    fn iso_request(path: &str) -> ExportTilemapRequest {
+        ExportTilemapRequest {
+            grid_shape: GridShape::Isometric,
+            ..sample_request(path)
+        }
+    }
+
+    #[test]
+    fn build_map_json_for_a_hexagonal_layer_has_the_real_tiled_stagger_fields() {
+        let request = hex_request("/tmp/whatever/hex.png");
+        let layout = SheetLayout::new(
+            request.tile_count,
+            request.columns,
+            request.tile_width,
+            request.tile_height,
+        );
+        let map = build_map_json(&request, &layout);
+        assert_eq!(map.orientation, "hexagonal");
+        // tile_height is 8 (sample_request), scale 1 -> hexsidelength 4.
+        assert_eq!(map.hexsidelength, Some(4));
+        assert_eq!(map.staggeraxis, Some("y"));
+        assert_eq!(map.staggerindex, Some("odd"));
+
+        // Decode through serde_json::Value like the other JSON-shape tests
+        // do, proving the fields land on the exact documented Tiled key
+        // names (`hexsidelength`, `staggeraxis`, `staggerindex`) via the
+        // real serializer, not just the intermediate struct.
+        let value: serde_json::Value = serde_json::to_value(&map).unwrap();
+        assert_eq!(value["orientation"], "hexagonal");
+        assert_eq!(value["hexsidelength"], 4);
+        assert_eq!(value["staggeraxis"], "y");
+        assert_eq!(value["staggerindex"], "odd");
+    }
+
+    #[test]
+    fn build_map_json_for_an_isometric_layer_has_no_stray_hex_fields() {
+        let request = iso_request("/tmp/whatever/iso.png");
+        let layout = SheetLayout::new(
+            request.tile_count,
+            request.columns,
+            request.tile_width,
+            request.tile_height,
+        );
+        let map = build_map_json(&request, &layout);
+        assert_eq!(map.orientation, "isometric");
+        assert_eq!(map.hexsidelength, None);
+        assert_eq!(map.staggeraxis, None);
+        assert_eq!(map.staggerindex, None);
+
+        // Tiled omits these fields entirely for non-hex maps (rather than
+        // writing them as `null`) — confirm the real serializer output
+        // agrees, not just the struct-level `Option`.
+        let value: serde_json::Value = serde_json::to_value(&map).unwrap();
+        assert_eq!(value["orientation"], "isometric");
+        assert!(value.get("hexsidelength").is_none());
+        assert!(value.get("staggeraxis").is_none());
+        assert!(value.get("staggerindex").is_none());
+    }
+
     // -- write_tilemap end to end ---------------------------------------------
 
     fn solid(color: [u8; 4], w: u32, h: u32) -> Vec<u8> {
@@ -569,6 +800,7 @@ mod tests {
             scale: 1,
             tileset_name: "Ground".to_string(),
             layer_name: "Terrain".to_string(),
+            grid_shape: GridShape::Rect,
             grid_cols: 2,
             grid_rows: 1,
             tile_ids: vec![1, FLIP_H_BIT | 2],
@@ -598,6 +830,103 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// Real, end-to-end `write_tilemap` for a hexagonal layer: writes an
+    /// actual map JSON to disk and decodes it, the same bar
+    /// `exports_a_real_atlas_png_and_matching_map_json` holds itself to —
+    /// schema-conformance against Tiled's *documented* JSON reference
+    /// (`orientation`/`hexsidelength`/`staggeraxis`/`staggerindex`, all
+    /// verified in `tiled_orientation_fields`'s own doc comment), since
+    /// running real Tiled software is not available in this environment.
+    #[test]
+    fn exports_a_real_hexagonal_map_json_with_the_documented_stagger_fields() {
+        let staging = Staging::default();
+        let red = solid([255, 0, 0, 255], 2, 8); // matches tile_width=2, tile_height=8 below
+        let stage_id = staging.put(red);
+
+        let dir = std::env::temp_dir().join(format!(
+            "tess-tilemap-hex-test-{}-{stage_id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png_path = dir.join("hex.png");
+
+        let request = ExportTilemapRequest {
+            stage_id,
+            tile_width: 2,
+            tile_height: 8,
+            tile_count: 1,
+            columns: 1,
+            scale: 2,
+            tileset_name: "Hex".to_string(),
+            layer_name: "Terrain".to_string(),
+            grid_shape: GridShape::Hexagonal,
+            grid_cols: 1,
+            grid_rows: 1,
+            tile_ids: vec![1],
+            path: png_path.to_string_lossy().into_owned(),
+        };
+
+        let result = write_tilemap(&request, &staging).unwrap();
+
+        let json_bytes = std::fs::read(&result.json_path).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&json_bytes).unwrap();
+        assert_eq!(value["orientation"], "hexagonal");
+        assert_eq!(value["staggeraxis"], "y");
+        assert_eq!(value["staggerindex"], "odd");
+        // tileHeight 8 * scale 2 = 16 -> hexsidelength 8.
+        assert_eq!(value["tileheight"], 16);
+        assert_eq!(value["hexsidelength"], 8);
+        // orthogonal-only fields must not leak in from the earlier default.
+        assert_eq!(value["width"], 1);
+        assert_eq!(value["height"], 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Same bar as the hexagonal case above, for an isometric layer —
+    /// confirms the map JSON's `orientation` is correct and that no
+    /// hex-only field leaks in for a shape that does not use them.
+    #[test]
+    fn exports_a_real_isometric_map_json_with_no_stray_hex_fields() {
+        let staging = Staging::default();
+        let blue = solid([0, 0, 255, 255], 4, 2); // matches tile_width=4, tile_height=2 below
+        let stage_id = staging.put(blue);
+
+        let dir = std::env::temp_dir().join(format!(
+            "tess-tilemap-iso-test-{}-{stage_id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png_path = dir.join("iso.png");
+
+        let request = ExportTilemapRequest {
+            stage_id,
+            tile_width: 4,
+            tile_height: 2,
+            tile_count: 1,
+            columns: 1,
+            scale: 1,
+            tileset_name: "Iso".to_string(),
+            layer_name: "Terrain".to_string(),
+            grid_shape: GridShape::Isometric,
+            grid_cols: 1,
+            grid_rows: 1,
+            tile_ids: vec![1],
+            path: png_path.to_string_lossy().into_owned(),
+        };
+
+        let result = write_tilemap(&request, &staging).unwrap();
+
+        let json_bytes = std::fs::read(&result.json_path).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&json_bytes).unwrap();
+        assert_eq!(value["orientation"], "isometric");
+        assert!(value.get("hexsidelength").is_none());
+        assert!(value.get("staggeraxis").is_none());
+        assert!(value.get("staggerindex").is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn rejects_a_non_integer_scale() {
         let staging = Staging::default();
@@ -611,6 +940,7 @@ mod tests {
             scale: 3,
             tileset_name: "T".to_string(),
             layer_name: "L".to_string(),
+            grid_shape: GridShape::Rect,
             grid_cols: 1,
             grid_rows: 1,
             tile_ids: vec![1],
@@ -632,6 +962,7 @@ mod tests {
             scale: 1,
             tileset_name: "T".to_string(),
             layer_name: "L".to_string(),
+            grid_shape: GridShape::Rect,
             grid_cols: 1,
             grid_rows: 1,
             tile_ids: vec![0],
@@ -653,6 +984,7 @@ mod tests {
             scale: 1,
             tileset_name: "T".to_string(),
             layer_name: "L".to_string(),
+            grid_shape: GridShape::Rect,
             grid_cols: 2,
             grid_rows: 2,         // claims 4 cells
             tile_ids: vec![1, 1], // only 2 provided
@@ -675,6 +1007,7 @@ mod tests {
             scale: 1,
             tileset_name: "T".to_string(),
             layer_name: "L".to_string(),
+            grid_shape: GridShape::Rect,
             grid_cols: 1,
             grid_rows: 1,
             tile_ids: vec![1],

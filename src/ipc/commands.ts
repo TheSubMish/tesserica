@@ -17,6 +17,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 
 import type { ConvertSettings } from '../pipeline/settings.ts';
+import type { GridShape } from '../model/types.ts';
 
 export type StageId = number;
 
@@ -168,6 +169,13 @@ export async function exportTilemap(request: {
   scale: ExportScale;
   tilesetName: string;
   layerName: string;
+  /**
+   * The tilemap layer's `GridSpec.shape` — drives which Tiled `orientation`
+   * (and, for `hexagonal`, `hexsidelength`/`staggeraxis`/`staggerindex`) the
+   * exported map JSON declares (`src-tauri/src/commands/tilemap_export.rs`'s
+   * `tiled_orientation_fields`, gap-closure follow-up to Phase 7).
+   */
+  gridShape: GridShape;
   gridCols: number;
   gridRows: number;
   tileIds: number[];
