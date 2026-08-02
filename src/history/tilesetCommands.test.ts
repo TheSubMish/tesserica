@@ -130,20 +130,64 @@ describe('addTileToTileset', () => {
       expect(doc().sprite.tilesets.find((t) => t.id === tilesetId)!.tiles).toHaveLength(3);
     });
 
-    it('does not chase a diagonal transpose — the documented flip-only partial', () => {
+    it('reuses an existing tile that is a diagonal transpose of the captured pixels', () => {
       // A 2x2 tile whose transpose differs from every flipH/flipV/both
-      // combination of itself is not recognised as a duplicate.
+      // combination of itself — gap-closure: this used to add a duplicate
+      // entry (the documented flip-only partial); it now recognises the
+      // transpose and reuses the original tile's index instead.
       const tilesetId = addTileset('Ground', 2, 2);
       const original = new Uint8ClampedArray([
         255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
       ]);
-      addTileToTileset(tilesetId, original);
+      const first = addTileToTileset(tilesetId, original)!;
       // Transpose (swap x/y) of the 2x2 above.
       const transposed = new Uint8ClampedArray([
         255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255,
       ]);
       const outcome = addTileToTileset(tilesetId, transposed)!;
+      expect(outcome.reused).toBe(true);
+      expect(outcome.id).toBe(first.id);
+      expect(outcome.index).toBe(first.index);
+      expect(outcome.transpose).toBe(true);
+      expect(outcome.flipH).toBe(false);
+      expect(outcome.flipV).toBe(false);
+      expect(doc().sprite.tilesets.find((t) => t.id === tilesetId)!.tiles).toHaveLength(2);
+    });
+
+    it('reuses an existing tile under a transpose combined with a flip', () => {
+      // Combines transpose with flipH — the 5th/6th/7th/8th of the 8
+      // dihedral-symmetry comparisons, distinct from the plain transpose
+      // case above and from the flip-only cases already covered.
+      const tilesetId = addTileset('Ground', 2, 2);
+      const original = new Uint8ClampedArray([
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+      ]);
+      const first = addTileToTileset(tilesetId, original)!;
+      // transpose(original) = [R,B,G,Y] (see the plain-transpose test above);
+      // flipH swaps the two columns of each row: [B,R,Y,G].
+      const transposedThenFlippedH = new Uint8ClampedArray([
+        0, 0, 255, 255, 255, 0, 0, 255, 255, 255, 0, 255, 0, 255, 0, 255,
+      ]);
+      const outcome = addTileToTileset(tilesetId, transposedThenFlippedH)!;
+      expect(outcome.reused).toBe(true);
+      expect(outcome.id).toBe(first.id);
+      expect(outcome.transpose).toBe(true);
+      expect(outcome.flipH).toBe(true);
+      expect(outcome.flipV).toBe(false);
+    });
+
+    it('still adds a new entry when nothing matches under any of the 8 orientations', () => {
+      const tilesetId = addTileset('Ground', 2, 2);
+      const original = new Uint8ClampedArray([
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+      ]);
+      addTileToTileset(tilesetId, original);
+      const unrelated = new Uint8ClampedArray([
+        10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255,
+      ]);
+      const outcome = addTileToTileset(tilesetId, unrelated)!;
       expect(outcome.reused).toBe(false);
+      expect(doc().sprite.tilesets.find((t) => t.id === tilesetId)!.tiles).toHaveLength(3);
     });
   });
 });

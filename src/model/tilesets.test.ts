@@ -76,14 +76,19 @@ describe('findMatchingTile', () => {
     const a = new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255]);
     const ts = tileset([a]);
     const match = findMatchingTile(ts, new Uint8ClampedArray(a));
-    expect(match).toEqual({ index: 0, flipH: false, flipV: false });
+    expect(match).toEqual({ index: 0, flipH: false, flipV: false, transpose: false });
   });
 
   it('matches a horizontally-flipped copy and reports flipH', () => {
     const a = new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255]);
     const flippedA = new Uint8ClampedArray([0, 255, 0, 255, 255, 0, 0, 255]);
     const ts = tileset([a]);
-    expect(findMatchingTile(ts, flippedA)).toEqual({ index: 0, flipH: true, flipV: false });
+    expect(findMatchingTile(ts, flippedA)).toEqual({
+      index: 0,
+      flipH: true,
+      flipV: false,
+      transpose: false,
+    });
   });
 
   it('returns undefined when nothing matches, even under a flip', () => {
@@ -98,6 +103,51 @@ describe('findMatchingTile', () => {
     const ts = tileset([a]);
     const wrongSize = new Uint8ClampedArray(4);
     expect(findMatchingTile(ts, wrongSize)).toBeUndefined();
+  });
+
+  it('a non-square tile ignores a would-be transpose (no-op, per transposeTile)', () => {
+    // tileWidth=2, tileHeight=1 — transposeTile is only well-defined for a
+    // square tile, so the 4 transpose-inclusive comparisons degrade to the 4
+    // flip-only ones already covered; there is no 5th orientation to find
+    // here, and this must not throw or misbehave.
+    const a = new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255]);
+    const unrelated = new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]);
+    const ts = tileset([a]);
+    expect(findMatchingTile(ts, unrelated)).toBeUndefined();
+  });
+
+  it('matches a diagonally-transposed copy of a square tile and reports transpose', () => {
+    const square = new Uint8ClampedArray([
+      255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+    ]);
+    // Transpose (swap x/y) of the 2x2 pixel grid above.
+    const transposed = new Uint8ClampedArray([
+      255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255,
+    ]);
+    const ts = tileset([square], 2, 2);
+    expect(findMatchingTile(ts, transposed)).toEqual({
+      index: 0,
+      flipH: false,
+      flipV: false,
+      transpose: true,
+    });
+  });
+
+  it('matches a transpose combined with a flip (not confused with a plain transpose)', () => {
+    const square = new Uint8ClampedArray([
+      255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+    ]);
+    // transpose(square) = [R,B,G,Y] then flipH swaps the two columns: [B,R,Y,G].
+    const transposedThenFlippedH = new Uint8ClampedArray([
+      0, 0, 255, 255, 255, 0, 0, 255, 255, 255, 0, 255, 0, 255, 0, 255,
+    ]);
+    const ts = tileset([square], 2, 2);
+    expect(findMatchingTile(ts, transposedThenFlippedH)).toEqual({
+      index: 0,
+      flipH: true,
+      flipV: false,
+      transpose: true,
+    });
   });
 });
 

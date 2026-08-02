@@ -148,9 +148,10 @@ export function TilesetPanel() {
     useTilesetStore.getState().selectTile(tileset.id, outcome.index);
     useTilesetStore.getState().setFlipH(outcome.flipH);
     useTilesetStore.getState().setFlipV(outcome.flipV);
+    useTilesetStore.getState().setTranspose(outcome.transpose);
     setNotice({
       text: outcome.reused
-        ? `Reused tile #${outcome.index}${outcome.flipH || outcome.flipV ? ' (flipped)' : ''} — identical pixels already existed.`
+        ? `Reused tile #${outcome.index}${outcome.flipH || outcome.flipV || outcome.transpose ? ' (flipped)' : ''} — identical pixels already existed.`
         : `Added tile #${outcome.index}.`,
       error: false,
     });

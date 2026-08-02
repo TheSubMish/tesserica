@@ -162,13 +162,14 @@ export interface AddTileOutcome {
    */
   flipH: boolean;
   flipV: boolean;
+  transpose: boolean;
 }
 
 /**
  * Append one tile (raw RGBA pixels, already `tileWidth`×`tileHeight`×4) to an
  * existing tileset — or, when its pixel content exactly matches an existing
- * tile (directly or under a horizontal/vertical flip), reuse that tile's
- * index instead of storing a duplicate `TileEntry`
+ * tile under any of the 8 flip/transpose reorientations a square tile can
+ * take, reuse that tile's index instead of storing a duplicate `TileEntry`
  * (`docs/08-roadmap.md` Phase 6 "auto-deduplication", `model/tilesets.ts::
  * findMatchingTile`). Returns `undefined` if the tileset does not exist or
  * the pixel buffer is the wrong size.
@@ -190,6 +191,7 @@ export function addTileToTileset(
       reused: true,
       flipH: match.flipH,
       flipV: match.flipV,
+      transpose: match.transpose,
     };
   }
 
@@ -198,7 +200,7 @@ export function addTileToTileset(
   const entry: TileEntry = { id };
   const index = tileset.tiles.length;
   useHistoryStore.getState().run(new AddTileCommand(tilesetId, entry, index));
-  return { id, index, reused: false, flipH: false, flipV: false };
+  return { id, index, reused: false, flipH: false, flipV: false, transpose: false };
 }
 
 /** Create a tilemap layer bound to `tilesetId`, as a sibling of the active layer. */
