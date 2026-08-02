@@ -665,14 +665,30 @@ this crate has already done, for identically-shaped output, at real risk of intr
 than avoiding them. The `Cargo.toml` dependency comment documents the same re-verification
 so a future maintainer does not have to repeat it from scratch.
 
+**Update, gap-closure pass (2026-08-02): `.ase` tilemap import now lands.** The bit-layout
+mismatch below was real, not assumed — verified against the official
+`ase-file-specs.md` Tilemap Cel section (chunk 0x2005) and against `aseprite-io` 0.2.0's own
+`types.rs::set_tilemap_cel`/`reader.rs::read_cel_chunk`: Aseprite packs a 29-bit tile index
+(bits 0–28) with flip-horizontal/flip-vertical/"diagonal flip" (its own name for a
+transpose — spec wording is "swap X/Y axis") at bits 29/30/31, while this project's own
+packing (`docs/03-data-model.md` §4) uses a 28-bit index (bits 0–27) with the same three
+flags, same order, one bit lower across the board (28/29/30) — same semantics, different
+bit positions and a different index width, so the fix (`commands::ase_import::
+ase_tile_to_tesserica_id`, sharing `crate::model::tile_ids` — now factored out of
+`commands::tilemap_export` too, so both directions of this translation read the same
+constants) is a real per-tile repack, not a passthrough. An `.ase` tilemap layer's embedded
+`Tileset` chunk (0x2023) converts onto this project's own `Tileset`/`TileEntry`
+(`commands::ase_import::ase_tileset_to_sprite_tileset`) — the same model
+`commands::tilemap_export` already reads on the way out. Remaining, still-reported gaps: an
+*external*-file tileset reference is not followed (its tiles import blank, with a warning),
+and the legacy "empty tile equals `0xffffffff`" convention (tileset flag bit 4 unset — the
+spec's own words are "used in internal versions of Aseprite", not a shipping format) is not
+special-cased.
+
 **What did not make it into this pass, reported rather than silently dropped** (also
 disclosed in `commands::ase_import`'s own module doc comment and in every affected
 `LoadResult.warnings` entry):
 
-- **`.ase` tilemap layers are skipped.** Aseprite's own tile flip/rotate bit layout does not
-  match this project's `model/tileIds.ts` packing (the tileset-*export* item earlier in
-  Phase 6 already hit the analogous mismatch against Tiled's own bit layout) — repacking it
-  correctly is real work distinct from the rest of this item, not attempted here.
 - Aseprite's three non-W3C blend modes (`addition`/`subtract`/`divide`) import as `normal`
   — this project's `BlendMode` is the fixed W3C set (`03` §2.1).
 - `pingpongReverse` (Aseprite's fourth tag loop direction) imports as `pingpong` — this

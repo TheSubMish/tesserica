@@ -8,3 +8,4 @@
 //! file inside the archive instead (`docs/02-architecture.md` §6.2).
 
 pub mod document;
+pub mod tile_ids;

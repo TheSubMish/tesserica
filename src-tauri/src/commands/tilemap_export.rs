@@ -67,17 +67,16 @@ use crate::commands::animation_export::{assemble_sheet, SheetLayout};
 use crate::commands::export::{encode_png, scale_nearest, ALLOWED_SCALES};
 use crate::error::AppError;
 use crate::model::document::GridShape;
+use crate::model::tile_ids::unpack_tile_id;
+#[cfg(test)]
+use crate::model::tile_ids::{FLIP_H_BIT, FLIP_V_BIT, TRANSPOSE_BIT};
 use crate::staging::Staging;
 
 // ---------------------------------------------------------------------------
-// Tile-id bit packing (`docs/03-data-model.md` §4, mirroring `model/tileIds.ts`)
+// Tesserica → Tiled GID (`docs/03-data-model.md` §4's own packing, mirrored
+// in `crate::model::tile_ids` and `model/tileIds.ts`, vs. Tiled's own GID
+// flag bits)
 // ---------------------------------------------------------------------------
-
-const TILE_INDEX_BITS: u32 = 28;
-const TILE_INDEX_MASK: u32 = (1 << TILE_INDEX_BITS) - 1; // 0x0FFF_FFFF
-const FLIP_H_BIT: u32 = 1 << 28;
-const FLIP_V_BIT: u32 = 1 << 29;
-const TRANSPOSE_BIT: u32 = 1 << 30;
 
 /// Tiled's own GID flag bits (top of a 32-bit value) — see this module's own
 /// doc comment for why these are *not* the same bit positions as
@@ -86,23 +85,6 @@ const TRANSPOSE_BIT: u32 = 1 << 30;
 const TILED_FLIP_H: u32 = 0x8000_0000;
 const TILED_FLIP_V: u32 = 0x4000_0000;
 const TILED_FLIP_DIAGONAL: u32 = 0x2000_0000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct UnpackedTileId {
-    index: u32,
-    flip_h: bool,
-    flip_v: bool,
-    transpose: bool,
-}
-
-fn unpack_tile_id(id: u32) -> UnpackedTileId {
-    UnpackedTileId {
-        index: id & TILE_INDEX_MASK,
-        flip_h: id & FLIP_H_BIT != 0,
-        flip_v: id & FLIP_V_BIT != 0,
-        transpose: id & TRANSPOSE_BIT != 0,
-    }
-}
 
 /// A packed Tesserica tile id → a Tiled GID, folding in the flip-flag
 /// re-mapping and the index-0-means-empty convention both formats happen to
