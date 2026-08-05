@@ -951,6 +951,16 @@ select:focus-visible {
 .convert-mode {
   display: grid;
   grid-template-columns: 1fr var(--panel-width, 320px);
+  /*
+   * `.body` (the grid parent) is templated `44px 1fr 220px` for Edit mode's
+   * three direct children (ToolRail, CanvasView, aside.panels). Convert mode
+   * renders a single child here, so without an explicit span CSS Grid
+   * auto-places it into just the first (44px) column — the tool panel and
+   * status bar still read live values because nothing clips their overflow,
+   * but `.convert-canvas` has `overflow: hidden` and collapses to ~0 width,
+   * rendering nothing. Span every column of the parent grid instead.
+   */
+  grid-column: 1 / -1;
   flex: 1;
   min-height: 0;
 }

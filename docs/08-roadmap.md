@@ -1793,6 +1793,83 @@ other checkbox in every phase from 0 through 7 is now `[x]`.
 
 ---
 
+## Phase 8 · Live-usage follow-ups
+
+Filed from real desktop usage after Phase 7 closed, not from the original plan. Ordered
+by severity: a broken core workflow first, then two capability requests, then the doc
+gap that made the others harder to self-serve.
+
+- [x] Fix: Convert mode's preview canvas renders blank — the tool panel (pixel size,
+      palette, dither, strength) and the status bar (`gameboy · 4 colours · 34.0 ms ·
+      preview`) all reflect a live conversion, but `ConvertCanvas` draws nothing; the
+      stage is just its own `--surface-sunken` background with no "Drop an image…"
+      empty-state text either, so `frames.source` is not the empty case. Reported with a
+      screenshot of a loaded 120×149 source at Game Boy (4) / no dither. Root cause was
+      layout, not the preview pipeline: `.body` (`App.tsx`) is a 3-column CSS grid
+      (`44px 1fr 220px`) templated for Edit mode's three direct children (`ToolRail`,
+      `CanvasView`, `aside.panels`). Convert mode renders a single child, `<ConvertMode>`
+      → `.convert-mode`, so without an explicit span CSS Grid auto-placed it into just
+      the first (44px) column. Everything without `overflow: hidden` (the tool panel,
+      status bar) still rendered, visibly overflowing that sliver; `.convert-canvas`
+      does have `overflow: hidden` and collapsed to ~0×N, which is why only the canvas
+      area went blank. Fixed with `grid-column: 1 / -1` on `.convert-mode`
+      (`src/styles/global.css`) so it spans every column of its parent grid, with a
+      comment explaining why. Confirmed with the real running app, not source review
+      alone: ran the Vite dev bundle under a real headless Chrome over CDP
+      (`google-chrome --headless=new --remote-debugging-port=9222`, native Node
+      `WebSocket` driving the CDP wire protocol), clicked the real Convert tab, injected
+      a synthetic source into `previewRuntime`/`convertStore` (same technique earlier
+      Phase 5/7 items in this file used), and read back real canvas pixels and
+      `getBoundingClientRect`/computed-style geometry — before the fix, `.convert-canvas`
+      measured `0×N` px with only 1 non-background pixel decoded from `getImageData`;
+      after, it measured `1080×796` px with 633,616 of 859,680 pixels drawn, and a
+      screenshot showed a correct before/after split with the Game Boy palette applied.
+      Also drove a real control change (`setPixelSize`) after load and confirmed the
+      canvas re-rendered with new content, and re-checked Edit mode's layout
+      (`ToolRail`/`CanvasView`/`aside.panels`, unaffected — still 1136×838, three real
+      columns) to confirm the fix does not regress the grid it was originally built for.
+- [ ] Feature: raise the tilemap/document size ceiling for large maps. `MAX_SPRITE_SIZE`
+      (`src/app/newSprite.ts`) caps every document — and therefore every tilemap layer's
+      cel, since a cel cannot exceed its sprite (`03` §9) — at 2048×2048, which a tile
+      grid at typical tile sizes (16–32px) blows through well before typical tilemap
+      "large map" ambitions (see `06-workflows.md`'s tilemap workflow). Raise the cap
+      (`docs/00-vision-and-scope.md` §8's own success criteria and `10-decisions.md` for
+      whether a ceiling is load-bearing anywhere else — e.g. the proxy pipeline's
+      `PREVIEW_PROXY_MAX_EDGE`, which must stay independent of this) and re-check the
+      places that assume "sprite" means "small": canvas viewport pan/zoom at the new
+      size, `tileGridDims`'s shape-aware extent walk (`03` §4) for isometric/hexagonal at
+      a large grid, undo dirty-rect cost, and `.tess` round-trip size. If a flat cap is
+      the wrong shape for this — e.g. tilemap layers wanting to exceed their sprite's own
+      canvas, not just a bigger shared canvas — say so and scope down to what the data
+      model actually supports today rather than redesigning the cel/sprite relationship.
+- [ ] Content: bundle at least one more hardware palette alongside Game Boy/NES/CGA/
+      C64/ZX Spectrum (`src/lib/palettes/builtin.ts`). Read the `bundled-asset-license`
+      skill first — only factual hardware/fixed-spec colour lists may be bundled
+      (Lospec artist palettes stay import-only, never bundled). Candidates worth
+      checking against a primary source: Game Boy Color's default BIOS palette, Sega
+      Master System / Genesis, MSX2, Apple II lo-res, PICO-8 (a fixed published spec,
+      not an artist work, so the same reasoning as the existing hardware set applies —
+      confirm before treating it as equivalent). Add via the existing `palette()` helper
+      and extend `builtin.test.ts`'s coverage the same way the current five are covered.
+- [ ] Docs: write a user-facing Editor guide. Everything in `docs/` today is the design
+      spec (`docs/README.md`'s own framing: "the specification, not background
+      reading") — there is no document that walks a *user* through the Editor mode
+      itself: the seven tools, layers/groups, palettes, the timeline/frames panel,
+      tilemaps, undo, and export, task-oriented rather than architectural. Add it as a
+      new numbered doc (e.g. `docs/11-editor-guide.md`) or under a `docs/guide/`
+      subdirectory if a second user-facing doc (a Convert guide) is likely to follow —
+      pick based on what's already there, don't guess a structure the docs don't use
+      yet. Link it from `docs/README.md`'s reading-order table and from the root
+      `README.md`. Scope to what's actually shipped (cross-check against this roadmap's
+      own `[x]` items, not the feature list from memory) rather than aspirational.
+
+**Exit:** the Convert preview renders correctly for a fresh load and after every control
+change; a large tilemap (state the new ceiling explicitly) is creatable and paintable at
+usable performance; the new palette appears in the palette picker with correct swatches;
+and the Editor guide is linked from both READMEs and matches shipped behaviour.
+
+---
+
 ## Sequencing rationale
 
 **Why the editor before the converter (Phase 1 before 2):** the converter's output has to
