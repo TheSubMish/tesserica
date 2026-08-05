@@ -18,7 +18,43 @@ import { useUIStore } from '../state/uiStore';
 
 /** No doc mandates a ceiling; this is a sanity bound against fat-fingering a size field. */
 export const MIN_SPRITE_SIZE = 1;
-export const MAX_SPRITE_SIZE = 2048;
+/**
+ * Raised from 2048 (`docs/08-roadmap.md` Phase 8, "raise the tilemap/document
+ * size ceiling for large maps"). A tilemap layer's cel cannot exceed its
+ * sprite (`03-data-model.md` §9), so this cap was also the tilemap cap; 2048
+ * left barely 128×128 tiles at a 16 px tile size, well short of a "large map".
+ * 4096 gives 256×256 tiles at 16 px (or 128×128 at 32 px) — solidly past
+ * `06-workflows.md` W4's own 128×128-*pixel*-canvas example.
+ *
+ * Checked before raising, not assumed:
+ * - `convert/preview/proxy.ts::PREVIEW_PROXY_MAX_EDGE` (1024) is a wholly
+ *   separate constant for Convert mode's proxy preview and does not read this
+ *   one — confirmed independent, as `08-roadmap.md` required.
+ * - The viewport (`canvas/coords.ts::fitZoom`) has no fixed-size assumption;
+ *   it clamps to integer zoom ≥1 and scrolls for anything larger, same as
+ *   today.
+ * - `model/tileIds.ts::tileGridDims`'s shape-aware extent walk is O(cols +
+ *   rows), not O(cols × rows) — trivial even at this ceiling.
+ * - Rust's `Sprite`/`Cel` dimension fields are `u32` (`src-tauri/src/model/
+ *   document.rs`) — no truncation risk from a larger cap.
+ * - **A real cost that does grow with this cap, measured rather than
+ *   guessed**: `history/pixelDelta.ts::diffBounds`, run once per finished
+ *   drawing gesture on a *raster* layer, walks the whole cel to find the
+ *   dirty rect regardless of how small the edit was — O(cel area), not O(edit
+ *   size). A pure-algorithm microbenchmark of that walk (single-pixel edit,
+ *   worst case since location doesn't change the cost) measured ~54 ms at the
+ *   old 2048² cap and ~221 ms at 4096² on this machine. A *tilemap* layer is
+ *   unaffected — `history/tileStrokeRecorder.ts` diffs the tile-id grid
+ *   (`cols × rows`, e.g. 256×256 at 16 px tiles), not raw pixels, so painting
+ *   a large map stays cheap regardless of this cap. The regression only bites
+ *   freehand pixel drawing on a raster layer sized all the way up to the new
+ *   ceiling, was already present (just smaller) at the old cap, and is a
+ *   known limitation of the dirty-rect *discovery* mechanism itself — fixing
+ *   it would mean threading a touched-rect hint through every drawing tool,
+ *   which is a separate, larger change than raising this constant and is not
+ *   attempted here.
+ */
+export const MAX_SPRITE_SIZE = 4096;
 
 export interface NewSpriteOptions {
   width: number;

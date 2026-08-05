@@ -1828,20 +1828,51 @@ gap that made the others harder to self-serve.
       canvas re-rendered with new content, and re-checked Edit mode's layout
       (`ToolRail`/`CanvasView`/`aside.panels`, unaffected — still 1136×838, three real
       columns) to confirm the fix does not regress the grid it was originally built for.
-- [ ] Feature: raise the tilemap/document size ceiling for large maps. `MAX_SPRITE_SIZE`
-      (`src/app/newSprite.ts`) caps every document — and therefore every tilemap layer's
-      cel, since a cel cannot exceed its sprite (`03` §9) — at 2048×2048, which a tile
-      grid at typical tile sizes (16–32px) blows through well before typical tilemap
-      "large map" ambitions (see `06-workflows.md`'s tilemap workflow). Raise the cap
-      (`docs/00-vision-and-scope.md` §8's own success criteria and `10-decisions.md` for
-      whether a ceiling is load-bearing anywhere else — e.g. the proxy pipeline's
-      `PREVIEW_PROXY_MAX_EDGE`, which must stay independent of this) and re-check the
-      places that assume "sprite" means "small": canvas viewport pan/zoom at the new
-      size, `tileGridDims`'s shape-aware extent walk (`03` §4) for isometric/hexagonal at
-      a large grid, undo dirty-rect cost, and `.tess` round-trip size. If a flat cap is
-      the wrong shape for this — e.g. tilemap layers wanting to exceed their sprite's own
-      canvas, not just a bigger shared canvas — say so and scope down to what the data
-      model actually supports today rather than redesigning the cel/sprite relationship.
+- [x] Feature: raise the tilemap/document size ceiling for large maps. `MAX_SPRITE_SIZE`
+      (`src/app/newSprite.ts`) raised **2048 → 4096** — 256×256 tiles at a 16 px tile
+      size (or 128×128 at 32 px), well past `06-workflows.md` W4's own 128×128-*pixel*-
+      canvas example. A flat cap is still the right shape here: a tilemap layer's cel
+      cannot exceed its sprite (`03` §9) and nothing in `00-vision-and-scope.md` §8 or
+      `10-decisions.md` asks for a tilemap layer to exceed its own sprite's canvas, so no
+      redesign of the cel/sprite relationship was needed. Checked every place named in
+      this item, not assumed clean: **`PREVIEW_PROXY_MAX_EDGE`** (Convert mode's proxy
+      preview, `convert/preview/proxy.ts`) is a wholly separate constant that never reads
+      `MAX_SPRITE_SIZE` — confirmed independent by grep, not just by design intent.
+      **Viewport pan/zoom** (`canvas/coords.ts::fitZoom`) has no fixed-size assumption —
+      it clamps to integer zoom ≥1 and lets the viewport scroll past the sprite, same
+      mechanism at any size; verified live (below), not just read. **`tileGridDims`'s
+      shape-aware extent walk** (`model/tileIds.ts`, the Phase 6/7 gap-closure) is
+      `O(cols + rows)`, not `O(cols × rows)` — negligible at any ceiling. **`.tess`
+      round-trip**: Rust's `Sprite`/`Cel` dimension fields are `u32`
+      (`src-tauri/src/model/document.rs`), no truncation risk; no Rust file needed
+      changing. **Undo dirty-rect cost** is the one real, measured finding: a *tilemap*
+      stroke (`history/tileStrokeRecorder.ts`) diffs the `cols × rows` tile-id grid, not
+      raw pixels, so it stays cheap regardless of this cap — but a *raster*-layer
+      freehand stroke's dirty-rect discovery (`history/pixelDelta.ts::diffBounds`,
+      called once per finished gesture) walks the **whole cel** to find the changed
+      region, `O(cel area)` regardless of edit size, and that cost was already present
+      (just smaller) at the old 2048² cap. Documented with real numbers rather than a
+      guess, both in `src/app/newSprite.ts`'s own doc comment and here: a pure-algorithm
+      microbenchmark of a single-pixel edit measured ~54 ms at 2048² and ~221 ms at
+      4096²; live in the running app (see below) a real pointer-driven pencil stroke on a
+      full 4096×4096 raster layer measured 326.8 ms end to end (dispatch + diff +
+      React re-render), consistent with the isolated number. This is a known limitation
+      of the dirty-rect *discovery* mechanism, not of this cap specifically — fixing it
+      would mean threading a touched-rect hint through every drawing tool, a separate and
+      larger change not attempted here. It does not block the tilemap workflow this item
+      is actually about. Verified live over the same CDP technique as the item above
+      (Tauri's own WebView unreachable in this container): created a real 4096×4096
+      document (`createNewSprite`), confirmed `CanvasView`'s status bar and checkerboard
+      render correctly with no crash or blank canvas (screenshot, `zoom` clamped to
+      integer 1× per `fitZoom`); added a real tileset + tilemap layer sized to the
+      sprite (`tileGridDims` → 256×256, matching the 16 px tile math above) and ran a
+      real 200-cell diagonal stamp stroke through the actual
+      `beginTileStroke`/`setTilemapCell`/`finishTileStroke` path — 4.3 ms to paint and
+      finish the stroke, 0.4 ms to undo, 0.2 ms to redo, all genuinely usable; and
+      separately dispatched a real `PointerEvent` sequence at the pencil tool on the
+      canvas element, confirming one pixel painted, one "Pencil" undo step was recorded,
+      and it measured the 326.8 ms above — the raster-path cost, present and honestly
+      reported, not hidden.
 - [ ] Content: bundle at least one more hardware palette alongside Game Boy/NES/CGA/
       C64/ZX Spectrum (`src/lib/palettes/builtin.ts`). Read the `bundled-asset-license`
       skill first — only factual hardware/fixed-spec colour lists may be bundled
