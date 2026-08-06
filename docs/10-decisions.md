@@ -699,6 +699,44 @@ disclosed in `commands::ase_import`'s own module doc comment and in every affect
 
 ---
 
+## D18 · PICO-8's default palette is bundled, reversing an earlier removal
+
+**Locked 2026-08-06**, `08-roadmap.md` Phase 8 ("bundle at least one more hardware
+palette"). Reverses `03-data-model.md` §3's own prior call, recorded there rather than
+silently overwritten.
+
+**The earlier reasoning:** `07-tech-stack.md` §8 permits only "factual hardware colour
+lists, not copyrightable." A first pass (Phase 6-era) listed PICO-8, Sweetie-16 and
+Dawnbringer-16/-32 as candidates, then removed all three on the grounds that none of them
+is a physical chip's fixed output — they are each somebody's curatorial choice.
+
+**Why PICO-8 specifically gets reinstated and the other two do not:** PICO-8's 16-colour
+default palette is a single, fixed spec published by the platform itself (Lexaloffle's
+own PICO-8 manual) that every PICO-8 cart and tool agrees on — there is exactly one
+"PICO-8's palette," not a chooser's-worth of options. Sweetie-16 and Dawnbringer-16/-32
+are Lospec community palettes with a named individual author and an individual licence —
+there is no platform that defines them as *the* palette, only an artist's submission to a
+catalog. The line drawn here is "a platform's own single, fixed, published spec" vs. "an
+individually-licensed artist submission," not "hardware vs. software" — PICO-8 is
+software, but its palette is fixed by the platform the same way the NES PPU's output is
+fixed by silicon, whereas a Lospec entry is fixed only by one artist's choice.
+
+**Honesty about how this was verified:** the bundled hex values
+(`src/lib/palettes/builtin.ts::PICO_8`) were transcribed from model/training knowledge in
+the session that added them, not re-fetched from Lexaloffle's manual or cross-checked
+against a second independent source — this sandbox's outbound network access was
+unavailable for that verification attempt. This is flagged in the source comment and in
+`03-data-model.md` §3 as worth an independent spot-check (e.g. against
+`https://pico-8.fandom.com/wiki/Palette` or the PICO-8 manual itself) before treating it
+as unimpeachable, consistent with this project's own posture that a bundled asset's
+correctness is not assumed.
+
+If the "platform spec vs. artist submission" line ever needs to be drawn more carefully —
+e.g. a future candidate that is arguably both — revisit this decision rather than
+pattern-matching against it blindly.
+
+---
+
 ## Still open — deferred, not decided
 
 These genuinely need measurement rather than a preference, and each is scheduled:
@@ -731,3 +769,4 @@ These genuinely need measurement rather than a preference, and each is scheduled
 | D15 | Segmentation: direct **`ort`** (not `rembg-rs`), loaded via `load-dynamic` |
 | D16 | ONNX Runtime: **download on first use**, real installer measured at 2.1 MB |
 | D17 | `.ase` import: use **`aseprite-io`** crate, not a hand-rolled parser |
+| D18 | PICO-8's default palette is **bundled** — a platform's own fixed spec, not an artist submission |

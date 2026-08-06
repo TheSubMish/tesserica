@@ -178,15 +178,27 @@ interface Palette {
 }
 ```
 
-**Built-ins for v1 — hardware palettes only:** Game Boy (4), NES (55), CGA (16),
-Commodore 64 (16), ZX Spectrum (15), plus grayscale ramps (4/8/16).
+**Built-ins for v1 — hardware and fixed-spec palettes:** Game Boy (4), NES (55), CGA
+(16), Commodore 64 (16), ZX Spectrum (15), PICO-8 (16), plus grayscale ramps (4/8/16).
 
-> Earlier drafts of this section also listed PICO-8, Sweetie-16 and Dawnbringer-16/-32.
-> Those are **authored** palettes, and bundling them contradicts `07-tech-stack.md` §8,
-> which permits only factual hardware colour lists. They are removed from the built-in
-> set; users import them with the parsers below. Counts are after de-duplication — the
-> NES PPU has 64 register values but only 55 distinct colours (nine of them are black),
-> and the ZX Spectrum's two blacks are identical.
+> Earlier drafts of this section also listed PICO-8, Sweetie-16 and Dawnbringer-16/-32,
+> then removed all three (`07-tech-stack.md` §8: only factual hardware colour lists,
+> nothing authored). **PICO-8 was reinstated in `08-roadmap.md` Phase 8**, on the
+> reasoning that its 16-colour default palette is a single, fixed spec published by the
+> platform itself (Lexaloffle's own PICO-8 manual) rather than an individually-licensed
+> artist submission the way a Lospec palette is — closer to "the manufacturer wrote this
+> number down" than "an artist chose these sixteen colours and put them on Lospec."
+> Sweetie-16 and Dawnbringer-16/-32 remain excluded: those are Lospec community
+> palettes with their own named authors and licences, not a platform's own fixed spec.
+> This reverses this section's own prior call on PICO-8 specifically — recorded here
+> rather than silently overwritten, and worth a second look if the "platform spec vs.
+> artist submission" line ever needs to be drawn more carefully. `src/lib/palettes/
+> builtin.ts`'s own comment on `PICO_8` also flags that its hex values were transcribed
+> from model/training knowledge in that pass, not re-verified against Lexaloffle's
+> manual with a fresh fetch — worth an independent spot-check before treating it as
+> unimpeachable. Counts are after de-duplication — the NES PPU has 64 register values
+> but only 55 distinct colours (nine of them are black), and the ZX Spectrum's two
+> blacks are identical; PICO-8's 16 are already all distinct.
 
 **Import formats** (all four unlock the ~4,400-palette Lospec catalog):
 

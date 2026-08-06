@@ -1873,15 +1873,36 @@ gap that made the others harder to self-serve.
       canvas element, confirming one pixel painted, one "Pencil" undo step was recorded,
       and it measured the 326.8 ms above — the raster-path cost, present and honestly
       reported, not hidden.
-- [ ] Content: bundle at least one more hardware palette alongside Game Boy/NES/CGA/
-      C64/ZX Spectrum (`src/lib/palettes/builtin.ts`). Read the `bundled-asset-license`
-      skill first — only factual hardware/fixed-spec colour lists may be bundled
-      (Lospec artist palettes stay import-only, never bundled). Candidates worth
-      checking against a primary source: Game Boy Color's default BIOS palette, Sega
-      Master System / Genesis, MSX2, Apple II lo-res, PICO-8 (a fixed published spec,
-      not an artist work, so the same reasoning as the existing hardware set applies —
-      confirm before treating it as equivalent). Add via the existing `palette()` helper
-      and extend `builtin.test.ts`'s coverage the same way the current five are covered.
+- [x] Content: bundle at least one more hardware palette alongside Game Boy/NES/CGA/
+      C64/ZX Spectrum (`src/lib/palettes/builtin.ts`). Went with **PICO-8's default
+      palette** (16 colours) — of the item's own candidate list, the one with a single
+      unambiguous, platform-published spec rather than a per-game/per-console gamut with
+      no one canonical list (Sega Master System/Genesis are wide RGB DACs with no single
+      "the palette"; the Game Boy Color's default colorization is one of ~12
+      boot-ROM-selectable options depending on the cartridge, not one fixed list either —
+      both were considered and set aside for that reason). Locked as
+      `10-decisions.md` D18, which **reverses `03-data-model.md` §3's own prior removal**
+      of PICO-8 alongside Sweetie-16/Dawnbringer-16/-32 — recorded there rather than
+      silently overwritten, with the reasoning for why PICO-8 gets reinstated and the
+      Lospec pair does not (a platform's own single fixed spec vs. an individually-
+      licensed artist submission). **Sourcing caveat, stated plainly rather than
+      hidden**: this session's outbound network access was unavailable for fetching
+      Lexaloffle's manual as a primary source, so the bundled hex values were transcribed
+      from model/training knowledge instead — flagged in `builtin.ts`'s own comment, in
+      `03-data-model.md` §3, and in D18 itself as worth an independent spot-check before
+      treating them as unimpeachable. Added via the existing `palette()` helper
+      (`pico-8`, `'PICO-8'`); `builtin.test.ts` extended the same way the existing five
+      are covered (id/name present, 16 distinct colours with no unexpected dedup, fully
+      opaque, `source: { kind: 'builtin' }`, plus a values check on index 0 and PICO-8's
+      characteristic off-white index 7) and its forbidden-palette guard now excludes only
+      the still-rejected Lospec entries. `07-tech-stack.md` §8 and the
+      `bundled-asset-license` skill both updated to state where this line is drawn.
+      Verified live over the same CDP technique as the items above: opened Edit mode's
+      real Palette panel `<select>`, confirmed "PICO-8" is a real option among the
+      others, selected it through a genuine `change` event, and read back all 16
+      rendered `.palette-swatch` elements' computed `background-color` — every one
+      matched the bundled hex value exactly (e.g. index 0 `rgb(0, 0, 0)`, index 7
+      `rgb(255, 241, 232)`, index 12 `rgb(41, 173, 255)`).
 - [ ] Docs: write a user-facing Editor guide. Everything in `docs/` today is the design
       spec (`docs/README.md`'s own framing: "the specification, not background
       reading") — there is no document that walks a *user* through the Editor mode

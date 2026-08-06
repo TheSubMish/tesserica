@@ -11,10 +11,12 @@ describe('fromHex', () => {
 });
 
 describe('bundled palettes', () => {
-  it('ships only hardware palettes — no artist-made sets', () => {
-    // docs/07-tech-stack.md §8: hardware colour lists are factual and safe;
-    // artist palettes each carry their own licence and are imported, never
-    // bundled. This test is the guard on that.
+  it('ships only hardware/fixed-spec palettes — no individually-licensed artist sets', () => {
+    // docs/07-tech-stack.md §8, .claude/skills/bundled-asset-license: hardware
+    // colour lists (and PICO-8's own fixed, published console spec) are
+    // factual/fixed, not an authored work with its own licence, so shipping
+    // them is safe. Artist-made Lospec palettes each carry their own licence
+    // and are imported, never bundled. This test is the guard on that.
     const ids = BUILTIN_PALETTES.map((p) => p.id);
     expect(ids).toEqual([
       'gameboy',
@@ -22,11 +24,13 @@ describe('bundled palettes', () => {
       'cga',
       'c64',
       'zx-spectrum',
+      'pico-8',
       'grayscale-4',
       'grayscale-8',
       'grayscale-16',
     ]);
-    for (const forbidden of ['pico-8', 'pico8', 'sweetie-16', 'dawnbringer-16', 'db32']) {
+    // Lospec artist palettes — never bundled, however tempting.
+    for (const forbidden of ['sweetie-16', 'dawnbringer-16', 'db32', 'resurrect-64']) {
       expect(ids).not.toContain(forbidden);
     }
   });
@@ -39,6 +43,8 @@ describe('bundled palettes', () => {
     expect(byId('c64').colors).toHaveLength(16);
     // Eight hues × two brightnesses, but the two blacks are the same colour.
     expect(byId('zx-spectrum').colors).toHaveLength(15);
+    // All 16 of PICO-8's default-palette entries are distinct — no dedup.
+    expect(byId('pico-8').colors).toHaveLength(16);
   });
 
   it('contains no duplicates', () => {
@@ -65,6 +71,13 @@ describe('bundled palettes', () => {
       [139, 172, 15, 255],
       [155, 188, 15, 255],
     ]);
+  });
+
+  it('has PICO-8 index 0 as black and index 7 as its off-white', () => {
+    // PICO-8's own published palette-0 ordering (Lexaloffle): 0 is black, 7
+    // is the console's characteristic warm off-white, not pure #ffffff.
+    expect(byId('pico-8').colors[0]).toEqual([0, 0, 0, 255]);
+    expect(byId('pico-8').colors[7]).toEqual([255, 241, 232, 255]);
   });
 });
 
