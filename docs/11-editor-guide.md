@@ -113,10 +113,9 @@ composite time without touching the underlying pixels.
 The Palette panel lists the active palette's swatches; click one to make it the current
 foreground colour. The palette picker above it includes:
 
-- **Bundled hardware/fixed-spec palettes**: Game Boy, NES, CGA, Commodore 64, ZX
-  Spectrum, PICO-8, plus grayscale ramps at 4/8/16 steps. These are shipped because
-  they're facts about real hardware (or, for PICO-8, a single fixed platform spec) —
-  never an individual artist's Lospec palette, which carries its own licence.
+- **Bundled hardware palettes**: Game Boy, NES, CGA, Commodore 64, ZX Spectrum, plus
+  grayscale ramps at 4/8/16 steps. These are shipped because they're facts about real
+  hardware — never an individual artist's Lospec palette, which carries its own licence.
 - **Import your own**: `.hex`, `.gpl`, `.pal`, and Paint.NET `.txt` files, or paste a
   Lospec palette page URL directly (**Import from Lospec URL…**) — an explicit,
   user-initiated network fetch, the only kind this app makes outside model downloads.

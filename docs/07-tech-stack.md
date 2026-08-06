@@ -237,14 +237,10 @@ smells platform-dependent so the eventual port has a trail to follow.
 
 Bundled-asset constraints are independent of that choice and still bind:
 
-- ✅ **Hardware palettes** (Game Boy, NES, CGA, C64, ZX Spectrum) — factual color lists,
-  not copyrightable. Safe to ship.
-- ✅ **PICO-8's default palette** — not a physical chip's output, but a single, fixed
-  spec published by the platform itself, not an individually-licensed artist submission.
-  `10-decisions.md` D18 draws the line and the reasoning for treating it differently
-  from the next bullet.
-- ❌ **Artist-made Lospec palettes** (Sweetie-16, Dawnbringer-16/-32, etc.) — individual
-  licenses. Do not bundle; users import their own.
+- ✅ **Hardware palettes** (Game Boy, NES, CGA, C64) — factual color lists, not
+  copyrightable. Safe to ship.
+- ❌ **Artist-made Lospec palettes** — individual licenses. Do not bundle; users import
+  their own.
 - ✅ **U2-Net / `u2netp`** — Apache-2.0. Safe to bundle.
 - ❌ **BRIA RMBG** — non-commercial only. Never bundle.
 

@@ -76,27 +76,6 @@ const ZX_SPECTRUM = palette('zx-spectrum', 'ZX Spectrum', [
   '000000', '0000ff', 'ff0000', 'ff00ff', '00ff00', '00ffff', 'ffff00', 'ffffff',
 ]);
 
-/**
- * PICO-8's default palette (palette 0) — Lexaloffle's own fixed 16-colour
- * spec for the PICO-8 fantasy console, published in the PICO-8 manual.
- * `docs/08-roadmap.md` Phase 8 flagged this as needing the same scrutiny as
- * the hardware sets above rather than being assumed equivalent: it is not a
- * physical chip's output, but it *is* a single fixed, published spec fixed by
- * the platform itself, not an individually-licensed artist creation the way
- * a Lospec palette is — the same "factual/fixed-spec, not authored work" bar
- * `bundled-asset-license` sets, one level removed from silicon. These hex
- * values come from PICO-8's own well-known published default palette (model
- * knowledge, not a live fetch against Lexaloffle's manual in this pass — spot
- * check against `https://pico-8.fandom.com/wiki/Palette` or the PICO-8 manual
- * itself if extra certainty is wanted before relying on this for production
- * art).
- */
-// prettier-ignore
-const PICO_8 = palette('pico-8', 'PICO-8', [
-  '000000', '1d2b53', '7e2553', '008751', 'ab5236', '5f574f', 'c2c3c7', 'fff1e8',
-  'ff004d', 'ffa300', 'ffec27', '00e436', '29adff', '83769c', 'ff77a8', 'ffccaa',
-]);
-
 /** Evenly spaced grey ramp, endpoints included. */
 export function grayscaleRamp(steps: number): Palette {
   const colors: RGBA[] = [];
@@ -118,7 +97,6 @@ export const BUILTIN_PALETTES: Palette[] = [
   CGA,
   C64,
   ZX_SPECTRUM,
-  PICO_8,
   grayscaleRamp(4),
   grayscaleRamp(8),
   grayscaleRamp(16),

@@ -1873,36 +1873,28 @@ gap that made the others harder to self-serve.
       canvas element, confirming one pixel painted, one "Pencil" undo step was recorded,
       and it measured the 326.8 ms above — the raster-path cost, present and honestly
       reported, not hidden.
-- [x] Content: bundle at least one more hardware palette alongside Game Boy/NES/CGA/
-      C64/ZX Spectrum (`src/lib/palettes/builtin.ts`). Went with **PICO-8's default
-      palette** (16 colours) — of the item's own candidate list, the one with a single
-      unambiguous, platform-published spec rather than a per-game/per-console gamut with
-      no one canonical list (Sega Master System/Genesis are wide RGB DACs with no single
-      "the palette"; the Game Boy Color's default colorization is one of ~12
-      boot-ROM-selectable options depending on the cartridge, not one fixed list either —
-      both were considered and set aside for that reason). Locked as
-      `10-decisions.md` D18, which **reverses `03-data-model.md` §3's own prior removal**
-      of PICO-8 alongside Sweetie-16/Dawnbringer-16/-32 — recorded there rather than
-      silently overwritten, with the reasoning for why PICO-8 gets reinstated and the
-      Lospec pair does not (a platform's own single fixed spec vs. an individually-
-      licensed artist submission). **Sourcing caveat, stated plainly rather than
-      hidden**: this session's outbound network access was unavailable for fetching
-      Lexaloffle's manual as a primary source, so the bundled hex values were transcribed
-      from model/training knowledge instead — flagged in `builtin.ts`'s own comment, in
-      `03-data-model.md` §3, and in D18 itself as worth an independent spot-check before
-      treating them as unimpeachable. Added via the existing `palette()` helper
-      (`pico-8`, `'PICO-8'`); `builtin.test.ts` extended the same way the existing five
-      are covered (id/name present, 16 distinct colours with no unexpected dedup, fully
-      opaque, `source: { kind: 'builtin' }`, plus a values check on index 0 and PICO-8's
-      characteristic off-white index 7) and its forbidden-palette guard now excludes only
-      the still-rejected Lospec entries. `07-tech-stack.md` §8 and the
-      `bundled-asset-license` skill both updated to state where this line is drawn.
-      Verified live over the same CDP technique as the items above: opened Edit mode's
-      real Palette panel `<select>`, confirmed "PICO-8" is a real option among the
-      others, selected it through a genuine `change` event, and read back all 16
-      rendered `.palette-swatch` elements' computed `background-color` — every one
-      matched the bundled hex value exactly (e.g. index 0 `rgb(0, 0, 0)`, index 7
-      `rgb(255, 241, 232)`, index 12 `rgb(41, 173, 255)`).
+- [ ] Content: bundle at least one more hardware palette alongside Game Boy/NES/CGA/
+      C64/ZX Spectrum (`src/lib/palettes/builtin.ts`). Read the `bundled-asset-license`
+      skill first — only factual hardware/fixed-spec colour lists may be bundled
+      (Lospec artist palettes stay import-only, never bundled). Candidates worth
+      checking against a primary source: Game Boy Color's default BIOS palette, Sega
+      Master System / Genesis, MSX2, Apple II lo-res. **Not PICO-8**: a first pass at
+      this item bundled PICO-8's default 16-colour palette and locked its reasoning as
+      `10-decisions.md` D18, reversing `03-data-model.md` §3's own earlier, deliberate
+      removal of PICO-8 (grouped with Sweetie-16/Dawnbringer-16/-32 as "authored, not
+      factual"). That reversal was reverted — a locked decision (`10-decisions.md`'s own
+      "Locked means locked... reopening one requires updating that file and every
+      document it touches") is a human call, not one an unattended agent should make on
+      an orchestrator's mid-task suggestion, which is exactly how it happened here: a
+      network-fetch attempt for a primary source stalled, and the redirect that unblocked
+      it asserted PICO-8 cleared the factual/hardware bar without first checking that
+      `03-data-model.md` §3 had already considered and rejected exactly that question.
+      Reverted in full (code, tests, and all five docs the original commit touched) rather
+      than left half-applied. Next attempt: verify a candidate against a primary source
+      before bundling, and if none is reachable, say so and leave the item unchecked
+      rather than substitute model/training-knowledge values for a decision this
+      consequential. Add via the existing `palette()` helper and extend
+      `builtin.test.ts`'s coverage the same way the current five are covered.
 - [x] Docs: write a user-facing Editor guide. Added `docs/11-editor-guide.md` as a plain
       next-numbered doc (the existing `docs/` layout is flat, not subdirectoried, and
       there is no second user-facing doc yet to justify a `docs/guide/` subdirectory —
@@ -1925,8 +1917,8 @@ gap that made the others harder to self-serve.
       catching a first draft of this guide that had it backwards), export format list
       (`app/ExportDialog.tsx`), grid shapes and the tileset export button
       (`panels/TilesetPanel.tsx`), Aseprite import's dropped-feature list
-      (`10-decisions.md` D17), and the new PICO-8/4096-ceiling facts from earlier in this
-      same phase. Linked from `docs/README.md` (a new "User guides" section, kept
+      (`10-decisions.md` D17), and the 4096-ceiling fact from earlier in this same phase.
+      Linked from `docs/README.md` (a new "User guides" section, kept
       visually distinct from the numbered spec table since this document is explicitly
       not part of "the specification") and from the root `README.md`'s Documentation
       section — which also had a materially stale status line ("Phases 0–2 complete,
@@ -1940,10 +1932,14 @@ gap that made the others harder to self-serve.
       the real "Toggle Timeline panel (T)" title-bar button and confirmed it opens the
       Timeline panel from closed, matching §6.
 
-**Exit:** the Convert preview renders correctly for a fresh load and after every control
-change; a large tilemap (state the new ceiling explicitly) is creatable and paintable at
-usable performance; the new palette appears in the palette picker with correct swatches;
-and the Editor guide is linked from both READMEs and matches shipped behaviour.
+**Exit:** ⚠️ **Three of four.** The Convert preview renders correctly for a fresh load and
+after every control change (verified live, `b612c6f`); a 4096×4096 tilemap is creatable
+and paintable at usable performance (verified live, `30ebff3`); the Editor guide is
+linked from both READMEs and matches shipped behaviour (verified live, `1411ee7`). The
+new-palette item is **not done** — a first attempt bundled PICO-8 and reopened a locked
+decision without authorization to do so; reverted in full, see that item's own note.
+Needs a genuine hardware/fixed-spec palette candidate checked against a primary source
+before this phase can close.
 
 ---
 
