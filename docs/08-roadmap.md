@@ -1903,17 +1903,42 @@ gap that made the others harder to self-serve.
       rendered `.palette-swatch` elements' computed `background-color` — every one
       matched the bundled hex value exactly (e.g. index 0 `rgb(0, 0, 0)`, index 7
       `rgb(255, 241, 232)`, index 12 `rgb(41, 173, 255)`).
-- [ ] Docs: write a user-facing Editor guide. Everything in `docs/` today is the design
-      spec (`docs/README.md`'s own framing: "the specification, not background
-      reading") — there is no document that walks a *user* through the Editor mode
-      itself: the seven tools, layers/groups, palettes, the timeline/frames panel,
-      tilemaps, undo, and export, task-oriented rather than architectural. Add it as a
-      new numbered doc (e.g. `docs/11-editor-guide.md`) or under a `docs/guide/`
-      subdirectory if a second user-facing doc (a Convert guide) is likely to follow —
-      pick based on what's already there, don't guess a structure the docs don't use
-      yet. Link it from `docs/README.md`'s reading-order table and from the root
-      `README.md`. Scope to what's actually shipped (cross-check against this roadmap's
-      own `[x]` items, not the feature list from memory) rather than aspirational.
+- [x] Docs: write a user-facing Editor guide. Added `docs/11-editor-guide.md` as a plain
+      next-numbered doc (the existing `docs/` layout is flat, not subdirectoried, and
+      there is no second user-facing doc yet to justify a `docs/guide/` subdirectory —
+      the guide itself says so and names `docs/12-convert-guide.md` as the natural next
+      step if a Convert guide follows). Ten sections, task-oriented: modes, canvas
+      pan/zoom, all **twelve** tools (not seven — Select/Move/Zoom/Stamp/Transform
+      landed in Phases 3/6/7 after the original W2 exit line was written), undo
+      (including the diffBounds cost this same phase's tilemap-ceiling item measured,
+      surfaced here as a user-facing "worth knowing" note rather than only an internal
+      code comment), layers/groups/effects/palettes/indexed-colour, the Timeline panel,
+      tilemaps (including the new 4096×4096 ceiling stated explicitly, as the Exit line
+      below asks), Aseprite import, all four export formats, and `.tess` save/load with
+      a short, honest note on the conversion-layer handoff's two known limitations
+      (Phase 2's exit line: process-local `sourceId`, re-render not yet undoable).
+      Cross-checked against `08-roadmap.md`'s own `[x]` items rather than written from
+      memory, and against source directly for anything checkable in under a
+      grep/read — tool count and shortcuts (`panels/ToolRail.tsx`), blend-mode list and
+      undo budget constants (`model/types.ts`, `state/historyStore.ts`), the "Convert to
+      Indexed…" button's actual undoability (its own on-screen copy says "Undoable",
+      catching a first draft of this guide that had it backwards), export format list
+      (`app/ExportDialog.tsx`), grid shapes and the tileset export button
+      (`panels/TilesetPanel.tsx`), Aseprite import's dropped-feature list
+      (`10-decisions.md` D17), and the new PICO-8/4096-ceiling facts from earlier in this
+      same phase. Linked from `docs/README.md` (a new "User guides" section, kept
+      visually distinct from the numbered spec table since this document is explicitly
+      not part of "the specification") and from the root `README.md`'s Documentation
+      section — which also had a materially stale status line ("Phases 0–2 complete,
+      Phase 3 underway", "seven tools") predating this whole phase, corrected in the same
+      commit per `CLAUDE.md`'s "keep the docs honest" step rather than left to drift
+      further. Verified live over the same CDP technique as the items above, not just by
+      reading source: opened the real `≡` menu and confirmed every item's label and
+      shortcut match the guide's §8/§10 text exactly (`New…`/`Ctrl+N`,
+      `Open…`/`Ctrl+O`, `Import Aseprite file…`, `Save`/`Ctrl+S`,
+      `Save As…`/`Ctrl+Shift+S`, `Open image…`, `Export…`, `Batch Convert…`), and clicked
+      the real "Toggle Timeline panel (T)" title-bar button and confirmed it opens the
+      Timeline panel from closed, matching §6.
 
 **Exit:** the Convert preview renders correctly for a fresh load and after every control
 change; a large tilemap (state the new ceiling explicitly) is creatable and paintable at

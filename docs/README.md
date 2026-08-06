@@ -21,6 +21,16 @@ is settled and `09-open-questions.md` for the four questions still awaiting meas
 | 09 | [Open Questions](09-open-questions.md) | The four questions still deferred, and when each gets decided |
 | 10 | [Decision Log](10-decisions.md) | **Locked decisions and why** — read before changing anything structural |
 
+## User guides
+
+Everything above is the design specification — read it to understand *why* Tesserica is
+built the way it is. The document below is different: it's task-oriented, written for
+someone using the app, not building it.
+
+| # | Document | What it answers |
+|---|---|---|
+| 11 | [Editor Guide](11-editor-guide.md) | How to use Edit mode: tools, layers, palettes, the timeline, tilemaps, undo, export |
+
 ## The short version
 
 Tesserica is **both** a Pixelorama-style pixel art editor **and** a high-quality

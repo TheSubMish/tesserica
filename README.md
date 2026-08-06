@@ -6,11 +6,13 @@ cropping. Built with Tauri v2, React and Rust.
 
 The name is from _tessera_, the individual tile in a mosaic.
 
-> **Status: Phases 0–2 complete, Phase 3 (v1 release) underway.** Draw with seven tools
-> across layers with the full W3C blend-mode set, pick from bundled or imported
-> palettes, drop a photo in and convert it live, and keep editing the result as a
-> layer whose settings stay live. See `docs/08-roadmap.md` for what is and is not
-> built yet.
+> **Status: Phases 0–7 complete, Phase 8 (live-usage follow-ups) underway.** Draw with
+> twelve tools across layers/groups with the full W3C blend-mode set, animate with
+> frames/tags/onion-skinning, paint tilemaps (rect, isometric and hexagonal grids), pick
+> from bundled or imported palettes, drop a photo in and convert it live, and keep
+> editing the result as a layer whose settings stay live. See `docs/08-roadmap.md` for
+> what is and is not built yet, and [`docs/11-editor-guide.md`](docs/11-editor-guide.md)
+> for a task-oriented walkthrough of Edit mode.
 
 ## What makes it different
 
@@ -25,7 +27,10 @@ that.
 
 - [`docs/04-image-pipeline.md`](docs/04-image-pipeline.md) is **normative** — it
   specifies the pipeline for both the TypeScript and the Rust implementation.
-- [`docs/10-decisions.md`](docs/10-decisions.md) is the decision log. D1–D11 are locked.
+- [`docs/10-decisions.md`](docs/10-decisions.md) is the decision log. D1–D18 are locked.
+- [`docs/11-editor-guide.md`](docs/11-editor-guide.md) is different from the rest — a
+  **user-facing** guide to Edit mode (tools, layers, palettes, timeline, tilemaps,
+  export), not a design spec.
 
 ## Building
 
