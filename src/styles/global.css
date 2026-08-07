@@ -16,7 +16,11 @@ body {
   font-size: 13px;
   color: var(--text);
   background: var(--bg-app);
-  overflow: hidden;
+  /* Vertical scroll stays managed by the app's own internal regions
+     (canvas, panels), so only horizontal overflow is ever allowed through —
+     see `.app`'s min-width note below for why it happens at all. */
+  overflow-x: auto;
+  overflow-y: hidden;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -30,6 +34,20 @@ body {
      track goes unused rather than reserving space. */
   grid-template-rows: auto 1fr auto auto;
   height: 100%;
+  /*
+   * Matches `tauri.conf.json`'s own `minWidth: 900`. Below it, `.body`'s
+   * fixed-width tracks (44px tool rail + 220px/320px panel) plus the middle
+   * column's min-content don't fit, and CSS Grid — with no min-width:0 fix-up
+   * per column and nothing to shrink into — doesn't reflow, it silently
+   * clips: a dead canvas gap and truncated, wrapped panel text with no
+   * scrollbar to reveal the rest. The Tauri shell never lets a window get
+   * that narrow, but a plain-browser dev/preview window can, and did. Rather
+   * than attempt a real narrow-width redesign this isn't scoped for (a
+   * desktop pixel-art editor, not a responsive site), enforce the same floor
+   * here so the failure mode below it is an explicit horizontal scrollbar,
+   * not silent breakage.
+   */
+  min-width: 900px;
 }
 
 .titlebar {
