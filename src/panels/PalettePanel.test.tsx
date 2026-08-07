@@ -162,3 +162,59 @@ describe('PalettePanel — indexed color mode sprite palette (docs/08-roadmap.md
     expect(useDocumentStore.getState().sprite.palette?.colors).toEqual(target.colors);
   });
 });
+
+describe('PalettePanel — custom colour picker (docs/08-roadmap.md Phase 8)', () => {
+  // Bundling more preset palettes hit a locked decision (`10-decisions.md` —
+  // only factual hardware colour lists may ship); this "+" tile is the
+  // colour-picker alternative, always available regardless of which palette
+  // is currently showing.
+  afterEach(() => {
+    usePaletteStore.setState({
+      palettes: usePaletteStore.getState().palettes.filter((p) => p.id !== 'custom'),
+      activePaletteId: 'gameboy',
+    });
+  });
+
+  const addColorInput = () =>
+    container.querySelector(
+      'input[aria-label="Add custom color to your palette"]',
+    ) as HTMLInputElement;
+  const paletteSelect = () =>
+    container.querySelector('select[aria-label="Palette"]') as HTMLSelectElement;
+
+  // Same fix as the sprite-palette recolor tests above: go through the
+  // native setter so a React-controlled `<input type="color">` actually
+  // fires its `onChange`.
+  function setNativeInputValue(input: HTMLInputElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  it('is available no matter which palette is active', () => {
+    expect(addColorInput()).not.toBeNull();
+  });
+
+  it('picking a colour creates Custom on first use and switches to it', () => {
+    act(() => setNativeInputValue(addColorInput(), '#ff00aa'));
+
+    expect(usePaletteStore.getState().activePaletteId).toBe('custom');
+    expect(usePaletteStore.getState().activePalette().colors).toEqual([[255, 0, 170, 255]]);
+    expect(paletteSelect().value).toBe('custom');
+  });
+
+  it('only Custom swatches get a remove control — a bundled palette stays read-only', () => {
+    expect(container.querySelector('.palette-swatch-remove')).toBeNull();
+
+    act(() => setNativeInputValue(addColorInput(), '#ff00aa'));
+    const removeBtn = container.querySelector('.palette-swatch-remove') as HTMLButtonElement;
+    expect(removeBtn).not.toBeNull();
+
+    act(() => removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(usePaletteStore.getState().activePalette().colors).toEqual([]);
+    expect(container.querySelector('.palette-swatch-remove')).toBeNull();
+  });
+});

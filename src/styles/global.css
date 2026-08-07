@@ -600,6 +600,71 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
+/* ---- Custom palette: add-color tile + per-swatch remove (docs/08-roadmap.md
+   Phase 8 — a colour picker in place of bundling more preset palettes) ---- */
+
+.palette-swatch-add {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  background: transparent;
+  cursor: pointer;
+}
+
+.palette-swatch-add:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.palette-swatch-add:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A plain wrapper around each read-only-palette swatch, needed only because
+   `.map()` requires a keyed element — `display: contents` keeps it invisible
+   to the grid so sizing is identical to a bare `.palette-swatch` child. */
+.palette-swatch-cell {
+  display: contents;
+}
+
+.palette-swatch-custom-wrap {
+  position: relative;
+}
+
+.palette-swatch-custom-wrap .palette-swatch {
+  width: 100%;
+}
+
+.palette-swatch-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  line-height: 1;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.palette-swatch-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.palette-swatch-remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ---- Sprite palette recolor (docs/08-roadmap.md Phase 7, indexed mode) ---- */
 
 .palette-sprite-section {

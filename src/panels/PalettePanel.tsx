@@ -108,9 +108,9 @@ export function PalettePanel() {
           // The swatch always *picks* the true colour — simulation previews
           // what the palette looks like, it does not change what gets painted.
           const shown = simulateColorBlindness(c, colorBlind);
-          return (
+          const isCustom = palette.source?.kind === 'custom';
+          const swatch = (
             <button
-              key={`${toHex(c)}-${i}`}
               className="palette-swatch"
               style={{ background: toCss(shown) }}
               aria-label={
@@ -125,7 +125,45 @@ export function PalettePanel() {
               }}
             />
           );
+          // Only the hand-built Custom palette is editable in place — every
+          // other palette (bundled, imported, Lospec) is a fixed list, so a
+          // remove affordance only appears here.
+          if (!isCustom)
+            return (
+              <span key={`${toHex(c)}-${i}`} className="palette-swatch-cell">
+                {swatch}
+              </span>
+            );
+          return (
+            <div key={`${toHex(c)}-${i}`} className="palette-swatch-custom-wrap">
+              {swatch}
+              <button
+                className="palette-swatch-remove"
+                aria-label={`Remove ${toHex(c)} from Custom palette`}
+                title="Remove from Custom palette"
+                onClick={() => usePaletteStore.getState().removeCustomColor(i)}
+              >
+                ×
+              </button>
+            </div>
+          );
         })}
+        <label
+          className="palette-swatch palette-swatch-add"
+          title="Add a custom color (opens color picker)"
+        >
+          <span className="sr-only">Add custom color to your palette</span>
+          <input
+            type="color"
+            aria-label="Add custom color to your palette"
+            className="sr-only"
+            value="#ffffff"
+            onChange={(e) =>
+              usePaletteStore.getState().addCustomColor(fromHex(e.target.value, 255))
+            }
+          />
+          <span aria-hidden="true">+</span>
+        </label>
       </div>
 
       <label className="field">
