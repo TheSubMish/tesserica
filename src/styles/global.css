@@ -16,7 +16,11 @@ body {
   font-size: 13px;
   color: var(--text);
   background: var(--bg-app);
-  overflow: hidden;
+  /* Vertical scroll stays managed by the app's own internal regions
+     (canvas, panels), so only horizontal overflow is ever allowed through —
+     see `.app`'s min-width note below for why it happens at all. */
+  overflow-x: auto;
+  overflow-y: hidden;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -30,6 +34,20 @@ body {
      track goes unused rather than reserving space. */
   grid-template-rows: auto 1fr auto auto;
   height: 100%;
+  /*
+   * Matches `tauri.conf.json`'s own `minWidth: 900`. Below it, `.body`'s
+   * fixed-width tracks (44px tool rail + 220px/320px panel) plus the middle
+   * column's min-content don't fit, and CSS Grid — with no min-width:0 fix-up
+   * per column and nothing to shrink into — doesn't reflow, it silently
+   * clips: a dead canvas gap and truncated, wrapped panel text with no
+   * scrollbar to reveal the rest. The Tauri shell never lets a window get
+   * that narrow, but a plain-browser dev/preview window can, and did. Rather
+   * than attempt a real narrow-width redesign this isn't scoped for (a
+   * desktop pixel-art editor, not a responsive site), enforce the same floor
+   * here so the failure mode below it is an explicit horizontal scrollbar,
+   * not silent breakage.
+   */
+  min-width: 900px;
 }
 
 .titlebar {
@@ -180,6 +198,85 @@ body {
 .canvas {
   display: block;
   touch-action: none;
+}
+
+/* ---- Canvas scrollbars + center button ----
+   Custom, not native `overflow: scroll` — the canvas's content is never
+   actually laid out in the DOM at full size (`CanvasView` draws it into a
+   viewport-sized `<canvas>` using panX/panY as an offset), so there is no
+   real `scrollWidth` for the browser's own scrollbar to measure. Geometry
+   comes from `canvas/coords.ts::scrollBarGeometry` via `canvas/ScrollBar.tsx`. */
+
+.canvas-scrollbar {
+  position: absolute;
+  background: rgb(0 0 0 / 25%);
+  touch-action: none;
+}
+
+.canvas-scrollbar-x {
+  left: 0;
+  right: 22px;
+  bottom: 0;
+  height: 14px;
+}
+
+.canvas-scrollbar-y {
+  top: 0;
+  bottom: 22px;
+  right: 0;
+  width: 14px;
+}
+
+.canvas-scrollbar-thumb {
+  position: absolute;
+  background: var(--border-strong);
+  border-radius: 7px;
+  pointer-events: none;
+}
+
+.canvas-scrollbar-x .canvas-scrollbar-thumb {
+  top: 2px;
+  bottom: 2px;
+}
+
+.canvas-scrollbar-y .canvas-scrollbar-thumb {
+  left: 2px;
+  right: 2px;
+}
+
+.canvas-scrollbar:hover .canvas-scrollbar-thumb {
+  background: var(--text-muted);
+}
+
+.canvas-scrollbar:active .canvas-scrollbar-thumb {
+  background: var(--accent);
+}
+
+.canvas-center-btn {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  background: rgb(0 0 0 / 25%);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-center-btn:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.canvas-center-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* ---- Right panels ---- */
@@ -578,6 +675,71 @@ select:focus-visible {
 }
 
 .palette-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- Custom palette: add-color tile + per-swatch remove (docs/08-roadmap.md
+   Phase 8 — a colour picker in place of bundling more preset palettes) ---- */
+
+.palette-swatch-add {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  background: transparent;
+  cursor: pointer;
+}
+
+.palette-swatch-add:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.palette-swatch-add:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A plain wrapper around each read-only-palette swatch, needed only because
+   `.map()` requires a keyed element — `display: contents` keeps it invisible
+   to the grid so sizing is identical to a bare `.palette-swatch` child. */
+.palette-swatch-cell {
+  display: contents;
+}
+
+.palette-swatch-custom-wrap {
+  position: relative;
+}
+
+.palette-swatch-custom-wrap .palette-swatch {
+  width: 100%;
+}
+
+.palette-swatch-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  line-height: 1;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.palette-swatch-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.palette-swatch-remove:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

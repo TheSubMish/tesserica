@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { centerPan, docToScreen, fitZoom, screenToDoc } from './coords';
+import {
+  centerPan,
+  docToScreen,
+  fitZoom,
+  panFromScrollOffset,
+  screenToDoc,
+  scrollBarGeometry,
+} from './coords';
 
 const vp = (zoom: number, panX = 0, panY = 0) => ({ zoom, panX, panY });
 
@@ -69,5 +76,59 @@ describe('fitZoom', () => {
   it('never returns less than 1, however small the viewport', () => {
     expect(fitZoom(1024, 1024, 100, 100)).toBe(1);
     expect(fitZoom(64, 64, 10, 10)).toBe(1);
+  });
+});
+
+describe('scrollBarGeometry / panFromScrollOffset', () => {
+  // content 800 (a 100px sprite at 8x zoom), viewport 1000 — margin 1000,
+  // virtual track length 2800, thumbRatio 1000/2800, maxScroll 1800.
+  const content = 800;
+  const viewport = 1000;
+
+  it('centered pan (matching centerPan when content fits) puts the thumb mid-track', () => {
+    // pan = (viewport - content) / 2 = 100 here.
+    const { thumbRatio, thumbOffset } = scrollBarGeometry(content, viewport, 100);
+    expect(thumbRatio).toBeCloseTo(1000 / 2800);
+    // scroll = margin - pan = 900; usableTrack = 1 - thumbRatio.
+    const usableTrack = 1 - thumbRatio;
+    expect(thumbOffset).toBeCloseTo((900 / 1800) * usableTrack);
+  });
+
+  it('pan = margin (content pushed fully into its right-side overscroll) puts the thumb at track start', () => {
+    expect(scrollBarGeometry(content, viewport, viewport).thumbOffset).toBeCloseTo(0);
+  });
+
+  it('pan at the other extreme puts the thumb flush with track end', () => {
+    const margin = viewport;
+    const maxScroll = content + 2 * margin - viewport;
+    const { thumbRatio, thumbOffset } = scrollBarGeometry(content, viewport, margin - maxScroll);
+    expect(thumbOffset).toBeCloseTo(1 - thumbRatio);
+  });
+
+  it('clamps pan beyond either extreme to the track ends rather than escaping [0, 1]', () => {
+    expect(scrollBarGeometry(content, viewport, viewport * 10).thumbOffset).toBeCloseTo(0);
+    const { thumbRatio, thumbOffset } = scrollBarGeometry(content, viewport, -viewport * 10);
+    expect(thumbOffset).toBeCloseTo(1 - thumbRatio);
+  });
+
+  it('a sprite much smaller than the viewport still gets a meaningfully-sized, movable thumb', () => {
+    const { thumbRatio } = scrollBarGeometry(8, viewport, 0);
+    // Bare content-only track would give thumbRatio ~1 (fills the bar); the
+    // viewport-sized overscroll margin keeps it well short of that.
+    expect(thumbRatio).toBeLessThan(0.5);
+    expect(thumbRatio).toBeGreaterThan(0);
+  });
+
+  it('panFromScrollOffset round-trips scrollBarGeometry at both track ends and the middle', () => {
+    for (const offset of [0, 0.25, 0.5]) {
+      const pan = panFromScrollOffset(content, viewport, offset);
+      const back = scrollBarGeometry(content, viewport, pan).thumbOffset;
+      expect(back).toBeCloseTo(offset, 5);
+    }
+  });
+
+  it('degenerates to a full-track, immovable thumb for a zero-size viewport', () => {
+    expect(scrollBarGeometry(content, 0, 0)).toEqual({ thumbRatio: 1, thumbOffset: 0 });
+    expect(panFromScrollOffset(content, 0, 0.5)).toBe(0);
   });
 });

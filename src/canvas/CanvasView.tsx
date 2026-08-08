@@ -6,7 +6,7 @@
  * (docs/02-architecture.md §4).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getBuffer } from '../model/pixelBuffers';
 import { bytesPerPixelFor, getBufferForBpp, getCelBuffer } from '../model/celStorage';
 import { isEffectivelyLocked, isEffectivelyVisible } from '../model/layerTree';
@@ -28,6 +28,7 @@ import type { ToolContext } from '../tools/Tool';
 import { abortStamp, beginStamp, continueStamp, endStamp } from '../tools/stampSession';
 import { centerPan, fitZoom, screenToDoc } from './coords';
 import { samplePixel } from './sample';
+import { ScrollBar } from './ScrollBar';
 import {
   drawBorder,
   drawCheckerboard,
@@ -128,6 +129,12 @@ export function CanvasView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitRequest]);
 
+  // Tracked in React state, not just read off the ref, so the scrollbars'
+  // thumb geometry (`coords.ts::scrollBarGeometry`) re-renders when the
+  // window resizes — the canvas backing store itself is resized imperatively
+  // below regardless, same as before.
+  const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+
   /** Keep the backing store sized to the element, accounting for HiDPI. */
   const resize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -140,6 +147,7 @@ export function CanvasView() {
     canvas.style.height = `${wrap.clientHeight}px`;
     const ctx = canvas.getContext('2d');
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    setViewportSize({ w: wrap.clientWidth, h: wrap.clientHeight });
   }, []);
 
   useEffect(() => {
@@ -523,6 +531,28 @@ export function CanvasView() {
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
       />
+      <ScrollBar
+        axis="x"
+        content={sprite.width * zoom}
+        viewport={viewportSize.w}
+        pan={panX}
+        onPan={(x) => useUIStore.getState().setPan(x, panY)}
+      />
+      <ScrollBar
+        axis="y"
+        content={sprite.height * zoom}
+        viewport={viewportSize.h}
+        pan={panY}
+        onPan={(y) => useUIStore.getState().setPan(panX, y)}
+      />
+      <button
+        className="canvas-center-btn"
+        title="Center view on the picture (Home)"
+        aria-label="Center view on the picture"
+        onClick={() => useUIStore.getState().requestFit()}
+      >
+        ⌖
+      </button>
     </div>
   );
 }

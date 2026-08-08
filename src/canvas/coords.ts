@@ -59,3 +59,57 @@ export function fitZoom(
   // (docs/04-image-pipeline.md §7).
   return Math.max(1, Math.floor(z));
 }
+
+/**
+ * One axis' scrollbar geometry (`canvas/ScrollBar.tsx`).
+ *
+ * `CanvasView` already lets space/middle-drag push the sprite well past the
+ * viewport's edges — that pan is never clamped. The scrollbar has to agree
+ * with that freedom rather than fight it, so its track represents the
+ * content plus a viewport's worth of margin on *each* side (an "overscroll"
+ * exactly as generous as free-drag panning already is), not just the bare
+ * content. A track this size still shows a moving, meaningfully-sized thumb
+ * even when the sprite is much smaller than the viewport (fully zoomed out),
+ * where a bare content-sized track would otherwise degenerate to a thumb
+ * that fills the whole bar.
+ */
+const SCROLL_OVERSCROLL_RATIO = 1;
+
+export interface ScrollBarGeometry {
+  /** Fraction of the track the thumb covers, in `[0, 1]`. */
+  thumbRatio: number;
+  /** Fraction of the track before the thumb starts, in `[0, 1 - thumbRatio]`. */
+  thumbOffset: number;
+}
+
+/** Thumb size and position for one axis, from that axis' content size, viewport size, and current pan. */
+export function scrollBarGeometry(
+  content: number,
+  viewport: number,
+  pan: number,
+): ScrollBarGeometry {
+  if (viewport <= 0) return { thumbRatio: 1, thumbOffset: 0 };
+  const margin = viewport * SCROLL_OVERSCROLL_RATIO;
+  const virtualLength = content + 2 * margin;
+  const thumbRatio = Math.min(1, viewport / virtualLength);
+  const maxScroll = Math.max(0, virtualLength - viewport);
+  const scroll = Math.min(maxScroll, Math.max(0, margin - pan));
+  const usableTrack = 1 - thumbRatio;
+  const thumbOffset = maxScroll > 0 && usableTrack > 0 ? (scroll / maxScroll) * usableTrack : 0;
+  return { thumbRatio, thumbOffset };
+}
+
+/**
+ * The inverse of {@link scrollBarGeometry}'s scroll position: a track-relative
+ * thumb offset (`[0, 1 - thumbRatio]`, e.g. from a drag) back to `pan`.
+ */
+export function panFromScrollOffset(content: number, viewport: number, offset: number): number {
+  if (viewport <= 0) return 0;
+  const margin = viewport * SCROLL_OVERSCROLL_RATIO;
+  const virtualLength = content + 2 * margin;
+  const thumbRatio = Math.min(1, viewport / virtualLength);
+  const maxScroll = Math.max(0, virtualLength - viewport);
+  const usableTrack = 1 - thumbRatio;
+  const scroll = usableTrack > 0 ? (offset / usableTrack) * maxScroll : 0;
+  return margin - Math.min(maxScroll, Math.max(0, scroll));
+}
