@@ -9,6 +9,7 @@
 import { applyTransform, canApplyTransform } from '../canvas/applyTransform';
 import { SliderField } from '../app/SliderField';
 import { useToolStore, type SelectMode } from '../state/toolStore';
+import { toolLabel } from './toolMeta';
 
 const SELECT_MODES: { id: SelectMode; label: string }[] = [
   { id: 'rect', label: 'Rect' },
@@ -32,10 +33,8 @@ export function ToolOptions() {
   const isShape = tool === 'rect' || tool === 'ellipse';
 
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <span>Tool</span>
-      </div>
+    <section className="tool-bar" aria-label="Tool options">
+      <strong className="tool-bar-name">{toolLabel(tool)}</strong>
 
       {hasBrush && (
         <SliderField
@@ -145,7 +144,7 @@ export function ToolOptions() {
             onChange={(v) => useToolStore.getState().setTransformScale(v)}
           />
 
-          <p className="hint">
+          <p className="hint long">
             Rotates (and, with cleanEdge, scales) the selection — or the whole layer when nothing is
             selected — in place, using a pixel-art-aware algorithm that never invents a new colour.
           </p>

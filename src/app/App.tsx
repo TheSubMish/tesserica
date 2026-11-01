@@ -253,7 +253,7 @@ export function App() {
         )}
       </header>
 
-      <div className="body">
+      <div className={mode === 'edit' ? 'body edit' : 'body'}>
         {mode === 'convert' ? (
           <ConvertMode
             onExport={() => setExporting(true)}
@@ -272,11 +272,15 @@ export function App() {
         ) : (
           <>
             <ToolRail />
-            <CanvasView />
-            <aside className="panels">
+            <aside className="palette-dock" aria-label="Palette">
+              <PalettePanel docked />
+            </aside>
+            <div className="edit-center">
               <ToolOptions />
+              <CanvasView />
+            </div>
+            <aside className="panels">
               <ConversionPanel />
-              <PalettePanel />
               <LayerPanel />
               <TilesetPanel />
             </aside>

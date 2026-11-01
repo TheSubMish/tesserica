@@ -15,29 +15,36 @@ export function Foldable({
   title,
   actions,
   className = 'panel',
+  collapsible = true,
   children,
 }: {
   readonly id: string;
   readonly title: string;
   readonly actions?: ReactNode;
   readonly className?: string;
+  /** `false` renders a plain title (no fold button) — for a panel that lives in its own dock. */
+  readonly collapsible?: boolean;
   readonly children: ReactNode;
 }) {
-  const folded = useUIStore((s) => s.foldedPanels[id] === true);
+  const foldedState = useUIStore((s) => s.foldedPanels[id] === true);
+  const folded = collapsible && foldedState;
   return (
     <section className={className} data-folded={folded ? 'true' : 'false'}>
       <div className="panel-head">
-        <button
-          type="button"
-          className="fold-toggle"
-          aria-expanded={!folded}
-          onClick={() => useUIStore.getState().togglePanelFold(id)}
-        >
-          <span className="fold-chevron" aria-hidden="true">
-            {folded ? '▸' : '▾'}
-          </span>
-          {title}
-        </button>
+        {!collapsible && <span>{title}</span>}
+        {collapsible && (
+          <button
+            type="button"
+            className="fold-toggle"
+            aria-expanded={!folded}
+            onClick={() => useUIStore.getState().togglePanelFold(id)}
+          >
+            <span className="fold-chevron" aria-hidden="true">
+              {folded ? '▸' : '▾'}
+            </span>
+            {title}
+          </button>
+        )}
         {actions}
       </div>
       {!folded && children}

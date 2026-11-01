@@ -25,7 +25,7 @@ import { LospecImportSection } from './LospecImportSection';
 /** Extensions the parsers understand (`docs/03-data-model.md` §3). */
 const ACCEPT = '.hex,.gpl,.pal,.txt';
 
-export function PalettePanel() {
+export function PalettePanel({ docked = false }: { docked?: boolean } = {}) {
   const palettes = usePaletteStore((s) => s.palettes);
   const activePaletteId = usePaletteStore((s) => s.activePaletteId);
   const primary = useToolStore((s) => s.primary);
@@ -63,6 +63,7 @@ export function PalettePanel() {
     <Foldable
       id="palette"
       title="Palette"
+      collapsible={!docked}
       actions={
         <span>
           <button

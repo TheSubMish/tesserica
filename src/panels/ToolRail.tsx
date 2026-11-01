@@ -1,32 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { useToolStore, type ToolId } from '../state/toolStore';
+import { useToolStore } from '../state/toolStore';
 import type { RGBA } from '../model/types';
-import { Icon, type IconName } from '../ui/icons';
+import { Icon } from '../ui/icons';
+import { TOOLS } from './toolMeta';
 import { makeRamp, nearestInPalette } from '../lib/colorSpaces';
 import { toHex } from '../lib/color';
 import { usePaletteStore } from '../state/paletteStore';
 import { ColorPicker } from './ColorPicker';
 
 const rgba = (c: RGBA) => `rgba(${c[0]},${c[1]},${c[2]},${c[3] / 255})`;
-
-/** Order, glyphs and shortcuts follow docs/05-ui-design.md §4.1. */
-const TOOLS: { id: ToolId; glyph: IconName; label: string; key: string }[] = [
-  { id: 'pencil', glyph: 'pencil', label: 'Pencil', key: 'B' },
-  { id: 'eraser', glyph: 'eraser', label: 'Eraser', key: 'E' },
-  { id: 'fill', glyph: 'fill', label: 'Fill', key: 'G' },
-  { id: 'line', glyph: 'line', label: 'Line', key: 'L' },
-  { id: 'rect', glyph: 'rect', label: 'Rectangle', key: 'U' },
-  { id: 'ellipse', glyph: 'ellipse', label: 'Ellipse', key: 'O' },
-  { id: 'eyedropper', glyph: 'eyedropper', label: 'Eyedropper', key: 'I' },
-  { id: 'select', glyph: 'select', label: 'Select', key: 'M' },
-  { id: 'move', glyph: 'move', label: 'Move', key: 'V' },
-  { id: 'zoom', glyph: 'zoom', label: 'Zoom', key: 'Z' },
-  { id: 'stamp', glyph: 'stamp', label: 'Stamp', key: 'S' },
-  // Phase 7 — rotxel/cleanEdge rotate & scale (`docs/08-roadmap.md`), added
-  // beyond the `05-ui-design.md` §4.1 v1 table the same way Stamp was.
-  { id: 'transform', glyph: 'transform', label: 'Transform', key: 'R' },
-];
 
 export function ToolRail() {
   const activeTool = useToolStore((s) => s.activeTool);

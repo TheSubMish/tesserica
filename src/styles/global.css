@@ -2475,3 +2475,109 @@ button.primary:hover:not(:disabled) {
   margin-left: auto;
   color: var(--text-faint);
 }
+
+/* ---- Edit workspace: palette dock + tool bar --------------------------------- */
+
+.body.edit {
+  grid-template-columns: 44px 164px minmax(0, 1fr) 264px;
+}
+
+.palette-dock {
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.palette-dock .panel {
+  border-bottom: 0;
+}
+
+.palette-dock .hint {
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.palette-dock .swatch-grid {
+  grid-template-columns: repeat(5, 1fr);
+  max-height: none;
+}
+
+.palette-dock .field select,
+.palette-dock select {
+  width: 100%;
+}
+
+.edit-center {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.edit-center > .canvas-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.tool-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.tool-bar-name {
+  min-width: 70px;
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.tool-bar .field {
+  padding: 0;
+}
+
+.tool-bar .field input[type='range'] {
+  flex: none;
+  width: 120px;
+}
+
+.tool-bar .field select {
+  flex: none;
+  min-width: 150px;
+}
+
+.tool-bar .hint {
+  margin: 0;
+  padding: 0;
+  color: var(--text-faint);
+}
+
+.tool-bar .hint.long {
+  display: none;
+}
+
+.tool-bar .select-modes {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.tool-bar button {
+  min-height: var(--control-h-sm);
+}
+
+/* Buttons that sit directly in the dock get the same gutter as everything else. */
+.palette-dock .lospec-import-toggle,
+.palette-dock .palette-sprite-section > button {
+  width: calc(100% - 2 * var(--space-2));
+  margin: 0 var(--space-2) var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  line-height: 1.3;
+  white-space: normal;
+}
