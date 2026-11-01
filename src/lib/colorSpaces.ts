@@ -7,7 +7,7 @@
  */
 
 import type { RGBA } from '../model/types';
-import { oklabToLinearSrgb, srgb8ToOklab, linearToSrgb } from '../pipeline/oklab';
+import { distanceSq, linearToSrgb, oklabToLinearSrgb, srgb8ToOklab } from '../pipeline/oklab';
 
 /** Hue in degrees [0, 360), saturation and value in [0, 1]. */
 export interface Hsv {
@@ -119,4 +119,56 @@ export function harmonyColors(base: Hsv, id: HarmonyId): [number, number, number
     );
   }
   return HUE_OFFSETS[id].map((d) => hsvToRgb({ ...base, h: base.h + d }));
+}
+
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+
+/** Shortest signed angle from `from` to `to`, in degrees. */
+const hueDelta = (from: number, to: number): number => ((to - from + 540) % 360) - 180;
+
+/** Cool hue that shadows drift toward, and warm hue that highlights drift toward (Oklch degrees). */
+const SHADOW_HUE = 285;
+const LIGHT_HUE = 95;
+
+/**
+ * A shading ramp around `base`, darkest to lightest, with `base` itself in the
+ * middle. Pixel artists do not just darken a colour: shadows drift cool and
+ * highlights drift warm, and saturation falls away at both ends. This does
+ * that in Oklch, so equal steps look equally different. `steps` is rounded up
+ * to an odd number so the base colour sits exactly in the middle.
+ */
+export function makeRamp(base: RGBA, steps = 5): RGBA[] {
+  const n = Math.max(3, steps | 1);
+  const mid = (n - 1) / 2;
+  const { l: l0, c: c0, h: h0 } = rgbToOklch(base);
+  const out: RGBA[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i - mid) / mid; // -1 (dark) .. +1 (light)
+    if (t === 0) {
+      out.push([base[0], base[1], base[2], base[3]]);
+      continue;
+    }
+    const l = clamp(l0 + t * 0.3 * (t > 0 ? 1 - l0 * 0.5 : 0.5 + l0 * 0.5), 0.1, 0.97);
+    const target = t < 0 ? SHADOW_HUE : LIGHT_HUE;
+    const h = wrapHue(h0 + hueDelta(h0, target) * 0.22 * Math.abs(t));
+    const c = Math.min(c0 * (1 - 0.3 * Math.abs(t)), maxChromaFor(l, h));
+    out.push([...oklchToRgb({ l, c, h }).rgb, base[3]] as RGBA);
+  }
+  return out;
+}
+
+/** The palette entry closest to `color` in Oklab (the same metric the converter uses). */
+export function nearestInPalette(color: RGBA, palette: readonly RGBA[]): RGBA {
+  if (palette.length === 0) return color;
+  const target = srgb8ToOklab(color[0], color[1], color[2]);
+  let best = palette[0];
+  let bestD = Infinity;
+  for (const p of palette) {
+    const d = distanceSq(target, srgb8ToOklab(p[0], p[1], p[2]));
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return [best[0], best[1], best[2], color[3]];
 }

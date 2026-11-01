@@ -3,8 +3,28 @@ import { create } from 'zustand';
 /** Two modes, not three — animation is a panel inside Edit (docs/10-decisions.md D6, D7). */
 export type Mode = 'convert' | 'edit';
 
+const FOLD_KEY = 'tesserica.folded.v1';
+
+/** Sections that start folded for a first-time user: powerful, but rarely needed on day one. */
+export const DEFAULT_FOLDED: Readonly<Record<string, boolean>> = { effects: true, tileset: true };
+
+function loadFolded(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(FOLD_KEY);
+    if (raw === null) return { ...DEFAULT_FOLDED };
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null
+      ? { ...(parsed as Record<string, boolean>) }
+      : {};
+  } catch {
+    return { ...DEFAULT_FOLDED };
+  }
+}
+
 interface UIState {
   mode: Mode;
+  /** Which side-panel sections are folded, by id. Persisted per machine. */
+  foldedPanels: Record<string, boolean>;
   zoom: number;
   panX: number;
   panY: number;
@@ -40,6 +60,7 @@ interface UIState {
   fitRequest: number;
 
   setMode(m: Mode): void;
+  togglePanelFold(id: string): void;
   setZoom(z: number): void;
   zoomAt(factor: number, screenX: number, screenY: number): void;
   panBy(dx: number, dy: number): void;
@@ -72,6 +93,7 @@ const clampOnionSkinRange = (n: number): number =>
 
 export const useUIStore = create<UIState>((set) => ({
   mode: 'edit',
+  foldedPanels: loadFolded(),
   zoom: 8,
   panX: 0,
   panY: 0,
@@ -84,6 +106,16 @@ export const useUIStore = create<UIState>((set) => ({
   fitRequest: 0,
 
   setMode: (m) => set({ mode: m }),
+  togglePanelFold: (id) =>
+    set((s) => {
+      const foldedPanels = { ...s.foldedPanels, [id]: !s.foldedPanels[id] };
+      try {
+        localStorage.setItem(FOLD_KEY, JSON.stringify(foldedPanels));
+      } catch {
+        /* the choice just will not persist */
+      }
+      return { foldedPanels };
+    }),
   setZoom: (z) => set({ zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z)) }),
 
   /**

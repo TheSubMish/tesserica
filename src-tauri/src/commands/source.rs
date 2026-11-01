@@ -28,6 +28,7 @@ use crate::pipeline::convert::convert;
 use crate::pipeline::downscale::downscale;
 use crate::pipeline::settings::{BackgroundRemovalMethod, ConvertSettings, DownscaleMode};
 use crate::segment::Segmenter;
+use crate::staging::Staging;
 
 /// A source image, decoded once and kept here.
 pub struct SourceImage {
@@ -95,6 +96,43 @@ pub fn open_source(path: String, sources: State<'_, Sources>) -> Result<SourceIn
         width,
         height,
         path,
+    })
+}
+
+/// Decode an image the frontend has staged (`stage_bytes`) and keep it, exactly
+/// like [`open_source`] but without a file on disk. This is how the built-in
+/// sample image reaches Convert mode: the frontend draws it procedurally (no
+/// bundled artwork, so nothing to license) and hands over the encoded bytes.
+/// Consumes the staging handle.
+#[tauri::command]
+pub fn open_source_from_stage(
+    stage_id: u64,
+    name: String,
+    staging: State<'_, Staging>,
+    sources: State<'_, Sources>,
+) -> Result<SourceInfo, AppError> {
+    let bytes = staging.take(stage_id)?;
+    register_source_bytes(&bytes, name, &sources)
+}
+
+fn register_source_bytes(
+    bytes: &[u8],
+    name: String,
+    sources: &Sources,
+) -> Result<SourceInfo, AppError> {
+    let decoded = image::load_from_memory(bytes)?.to_rgba8();
+    let (width, height) = (decoded.width(), decoded.height());
+    let buffer =
+        PixelBuffer::from_data(width, height, decoded.into_raw()).map_err(AppError::invalid)?;
+    let source_id = sources.put(SourceImage {
+        path: name.clone(),
+        buffer,
+    });
+    Ok(SourceInfo {
+        source_id,
+        width,
+        height,
+        path: name,
     })
 }
 
@@ -260,6 +298,26 @@ pub fn export_conversion(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn staged_bytes_register_as_a_source() {
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(3, 2, image::Rgba([10, 20, 30, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let sources = super::Sources::default();
+        let info = super::register_source_bytes(&png, "sample.png".into(), &sources).unwrap();
+        assert_eq!((info.width, info.height), (3, 2));
+        assert_eq!(info.path, "sample.png");
+        assert_eq!(sources.len(), 1);
+    }
+
+    #[test]
+    fn garbage_bytes_are_an_error_not_a_panic() {
+        let sources = super::Sources::default();
+        assert!(super::register_source_bytes(b"not an image", "x".into(), &sources).is_err());
+        assert!(sources.is_empty());
+    }
+
     use super::*;
     use crate::pipeline::settings::PaletteSpec;
 

@@ -44,6 +44,10 @@ interface ToolState {
   transformAngle: number;
   /** Percent. Ignored by `rotxel`, which has no scale parameter. */
   transformScale: number;
+  /** Most recently chosen colours, newest first (opaque RGB + alpha), shown in the colour picker. */
+  recentColors: RGBA[];
+  /** When on, the colour picker snaps every pick to the active palette. */
+  lockToPalette: boolean;
 
   setTool(id: ToolId): void;
   setPrimary(c: RGBA): void;
@@ -59,7 +63,11 @@ interface ToolState {
   setTransformAlgorithm(a: TransformAlgorithm): void;
   setTransformAngle(deg: number): void;
   setTransformScale(pct: number): void;
+  pushRecentColor(c: RGBA): void;
+  setLockToPalette(v: boolean): void;
 }
+
+export const MAX_RECENT_COLORS = 12;
 
 export const DEFAULT_PRIMARY: RGBA = [0, 0, 0, 255];
 export const DEFAULT_SECONDARY: RGBA = [255, 255, 255, 255];
@@ -78,6 +86,8 @@ export const useToolStore = create<ToolState>((set) => ({
   transformAlgorithm: 'rotxel',
   transformAngle: 0,
   transformScale: 100,
+  recentColors: [],
+  lockToPalette: false,
 
   setTool: (id) => set({ activeTool: id }),
   setPrimary: (c) => set({ primary: c }),
@@ -92,4 +102,12 @@ export const useToolStore = create<ToolState>((set) => ({
   setTransformAlgorithm: (a) => set({ transformAlgorithm: a }),
   setTransformAngle: (deg) => set({ transformAngle: deg }),
   setTransformScale: (pct) => set({ transformScale: Math.max(1, Math.min(400, pct)) }),
+  pushRecentColor: (c) =>
+    set((s) => ({
+      recentColors: [
+        c,
+        ...s.recentColors.filter((r) => !(r[0] === c[0] && r[1] === c[1] && r[2] === c[2])),
+      ].slice(0, MAX_RECENT_COLORS),
+    })),
+  setLockToPalette: (v) => set({ lockToPalette: v }),
 }));

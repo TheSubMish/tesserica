@@ -242,8 +242,13 @@ export async function openProject(): Promise<{ path: string; warnings: string[] 
     filters: [TESS_FILTER],
   });
   if (!picked || typeof picked !== 'string') return null;
+  return openProjectAt(picked);
+}
 
-  const result = await loadProject(picked);
+/** Open the `.tess` at `path` (no dialog) — used by the welcome screen's recent list. */
+export async function openProjectAt(path: string): Promise<{ path: string; warnings: string[] }> {
+  if (!hasBackend()) throw new NoBackendError();
+  const result = await loadProject(path);
   await applyLoadResult(result);
   useDocumentStore.getState().setProjectPath(result.path);
 

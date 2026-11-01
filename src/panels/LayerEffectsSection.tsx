@@ -9,6 +9,7 @@
  * rest of the layer panel.
  */
 
+import { Foldable } from '../ui/Foldable';
 import { useRef } from 'react';
 import { SliderField } from '../app/SliderField';
 import { fromHex, toHex } from '../lib/color';
@@ -216,9 +217,11 @@ function EffectParams({ layerId, effect }: { layerId: string; effect: Effect }) 
 
 export function LayerEffectsSection({ layer }: { layer: Layer }) {
   return (
-    <section className="layer-effects">
-      <div className="panel-head">
-        <span>Effects</span>
+    <Foldable
+      id="effects"
+      title="Effects"
+      className="layer-effects"
+      actions={
         <select
           aria-label="Add effect"
           value=""
@@ -237,8 +240,8 @@ export function LayerEffectsSection({ layer }: { layer: Layer }) {
             </option>
           ))}
         </select>
-      </div>
-
+      }
+    >
       {layer.effects.length === 0 && <p className="hint">No effects on this layer.</p>}
 
       {layer.effects.map((fx, i) => (
@@ -283,6 +286,6 @@ export function LayerEffectsSection({ layer }: { layer: Layer }) {
           <EffectParams layerId={layer.id} effect={fx} />
         </div>
       ))}
-    </section>
+    </Foldable>
   );
 }

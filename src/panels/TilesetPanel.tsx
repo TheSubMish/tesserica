@@ -26,6 +26,7 @@
  */
 
 import { useRef, useState } from 'react';
+import { Foldable } from '../ui/Foldable';
 import { save } from '@tauri-apps/plugin-dialog';
 import { celBufferId, type GridShape, type GridSpec } from '../model/types';
 import { defaultGridOffset } from '../model/gridGeometry';
@@ -259,9 +260,10 @@ export function TilesetPanel() {
     selection.bounds.height === tileset.tileHeight;
 
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <span>Tileset</span>
+    <Foldable
+      id="tileset"
+      title="Tileset"
+      actions={
         <span>
           <button
             title="New tileset"
@@ -293,8 +295,8 @@ export function TilesetPanel() {
             ▦
           </button>
         </span>
-      </div>
-
+      }
+    >
       {creating && (
         <div className="tileset-create-form">
           <label className="field">
@@ -455,6 +457,6 @@ export function TilesetPanel() {
           {exportNotice.text}
         </p>
       )}
-    </section>
+    </Foldable>
   );
 }

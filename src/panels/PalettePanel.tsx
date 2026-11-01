@@ -10,6 +10,7 @@
  * reader announces something meaningful rather than "button".
  */
 
+import { Foldable } from '../ui/Foldable';
 import { useRef, useState } from 'react';
 import { fromHex, sameRgb, toCss, toHex } from '../lib/color';
 import { COLOR_BLIND_MODES, simulateColorBlindness, type ColorBlindMode } from '../lib/colorBlind';
@@ -59,9 +60,10 @@ export function PalettePanel() {
   };
 
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <span>Palette</span>
+    <Foldable
+      id="palette"
+      title="Palette"
+      actions={
         <span>
           <button
             title={`Import palette (${ACCEPT})`}
@@ -71,8 +73,8 @@ export function PalettePanel() {
             ⬇
           </button>
         </span>
-      </div>
-
+      }
+    >
       {/* Read in the WebView with the File API rather than through a Tauri
           command: palette files are kilobytes, and this keeps Phase 1 free of
           filesystem permissions it does not otherwise need. */}
@@ -276,6 +278,6 @@ export function PalettePanel() {
           </div>
         </div>
       )}
-    </section>
+    </Foldable>
   );
 }

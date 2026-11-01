@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useConvertStore } from '../state/convertStore';
+import { Icon } from '../ui/icons';
 import { fitRect, type Size } from './fit.ts';
 import { previewRuntime, type PreviewFrames } from './previewRuntime.ts';
 
@@ -15,7 +16,12 @@ import { previewRuntime, type PreviewFrames } from './previewRuntime.ts';
  * box with smoothing on would show the user a blurred image and then export
  * sharp blocks.
  */
-export function ConvertCanvas() {
+export interface ConvertCanvasProps {
+  readonly onOpenPhoto?: () => void;
+  readonly onOpenSample?: () => void;
+}
+
+export function ConvertCanvas({ onOpenPhoto, onOpenSample }: ConvertCanvasProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [frames, setFrames] = useState<PreviewFrames>(previewRuntime.current);
@@ -90,7 +96,28 @@ export function ConvertCanvas() {
           }}
         />
       )}
-      {empty && <p className="convert-empty">Drop an image anywhere, or use ≡ ▸ Open image…</p>}
+      {empty && (
+        <div className="convert-hero">
+          <Icon name="image" size={44} />
+          <h2>Turn a photo into pixel art</h2>
+          <p>Drop an image anywhere, or use ≡ ▸ Open image…</p>
+          {(onOpenPhoto || onOpenSample) && (
+            <div className="convert-hero-actions">
+              {onOpenPhoto && (
+                <button type="button" className="primary" onClick={onOpenPhoto}>
+                  Open photo…
+                </button>
+              )}
+              {onOpenSample && (
+                <button type="button" onClick={onOpenSample}>
+                  Try the sample
+                </button>
+              )}
+            </div>
+          )}
+          <small>PNG and JPEG · everything stays on your computer</small>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,7 @@ import {
   targetSize,
   useConvertStore,
 } from '../state/convertStore';
+import { LooksGallery } from './LooksGallery.tsx';
 import { detectGrid, type GridDetectionResult } from './gridDetect.ts';
 import { previewRuntime } from './previewRuntime.ts';
 
@@ -156,6 +157,8 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
           </p>
         )}
       </section>
+
+      <LooksGallery />
 
       <section className="panel">
         <label className="field">

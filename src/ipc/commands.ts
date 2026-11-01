@@ -347,6 +347,14 @@ export async function openSource(path: string): Promise<SourceInfo> {
   return invoke<SourceInfo>('open_source', { path });
 }
 
+/**
+ * Register an image the frontend has staged (`stageBytes`) as a source, with no
+ * file on disk. Used for the built-in sample image. Consumes the staging handle.
+ */
+export async function openSourceFromStage(stageId: StageId, name: string): Promise<SourceInfo> {
+  return invoke<SourceInfo>('open_source_from_stage', { stageId, name });
+}
+
 export async function releaseSource(sourceId: SourceId): Promise<void> {
   await invoke('release_source', { sourceId });
 }

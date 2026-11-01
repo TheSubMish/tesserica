@@ -15,6 +15,7 @@
  * `aria-pressed`, never colour alone; the whole panel is reachable by keyboard.
  */
 
+import { Icon } from '../ui/icons';
 import { useRef, useState } from 'react';
 import { SliderField } from '../app/SliderField';
 import {
@@ -87,17 +88,17 @@ export function LayerPanel() {
         <span>Layers</span>
         <span>
           <button title="Add layer" aria-label="Add layer" onClick={() => addLayer()}>
-            +
+            <Icon name="plus" />
           </button>
           <button title="New group" aria-label="New group" onClick={() => addGroup()}>
-            📁
+            <Icon name="folder" />
           </button>
           <button
             title="Group layer"
             aria-label="Group layer"
             onClick={() => groupLayer(activeLayerId)}
           >
-            ⊞
+            <Icon name="group" />
           </button>
           <button
             title="Ungroup"
@@ -105,28 +106,28 @@ export function LayerPanel() {
             disabled={active?.kind !== 'group'}
             onClick={() => ungroupLayer(activeLayerId)}
           >
-            ⊟
+            <Icon name="ungroup" />
           </button>
           <button
             title="Move layer up"
             aria-label="Move layer up"
             onClick={() => moveLayer(activeLayerId, 1)}
           >
-            ↑
+            <Icon name="up" />
           </button>
           <button
             title="Move layer down"
             aria-label="Move layer down"
             onClick={() => moveLayer(activeLayerId, -1)}
           >
-            ↓
+            <Icon name="down" />
           </button>
           <button
             title="Delete layer"
             aria-label="Delete layer"
             onClick={() => deleteLayer(activeLayerId)}
           >
-            🗑
+            <Icon name="trash" />
           </button>
         </span>
       </div>
