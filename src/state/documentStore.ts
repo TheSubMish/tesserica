@@ -285,6 +285,8 @@ interface DocumentState {
    * value), which `setSpritePalette`'s required parameter cannot express.
    */
   setColorMode(mode: Sprite['colorMode'], palette?: Palette): void;
+  /** See `history/command.ts::DocumentApi.resizeSprite`. */
+  resizeSprite(width: number, height: number): void;
 }
 
 function createInitialSprite(
@@ -784,6 +786,17 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   setColorMode: (mode, palette) =>
     set((s) => ({ sprite: { ...s.sprite, colorMode: mode, palette }, revision: s.revision + 1 })),
+
+  resizeSprite: (width, height) =>
+    set((s) => ({
+      sprite: {
+        ...s.sprite,
+        width,
+        height,
+        cels: s.sprite.cels.map((c) => ({ ...c, width, height })),
+      },
+      revision: s.revision + 1,
+    })),
 
   insertTag: (tag, index) =>
     set((s) => {

@@ -15,6 +15,8 @@ const actions: AppActions = {
   convertFormat: noop,
   showWelcome: noop,
   showShortcuts: noop,
+  canvasSize: noop,
+  spriteOp: noop,
 };
 
 describe('fuzzyScore', () => {
@@ -43,6 +45,14 @@ describe('command registry', () => {
     expect(filterCommands(commands, 'grid')[0].id).toBe('view.grid');
     expect(filterCommands(commands, 'ellip')[0].id).toBe('tool.ellipse');
     expect(filterCommands(commands, 'zzzzqq')).toEqual([]);
+  });
+
+  it('offers every sprite operation, wired to its own run', () => {
+    const spriteOp = vi.fn();
+    const cmds = buildCommands({ ...actions, spriteOp });
+    expect(cmds.filter((c) => c.group === 'Sprite').length).toBeGreaterThanOrEqual(10);
+    cmds.find((c) => c.id === 'sprite.flatten')?.run();
+    expect(spriteOp).toHaveBeenCalledWith(expect.objectContaining({ id: 'flatten' }));
   });
 
   it('runs injected app actions', () => {

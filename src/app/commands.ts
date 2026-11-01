@@ -7,6 +7,7 @@
  * {@link AppActions}; everything else talks to the stores directly.
  */
 
+import { SPRITE_OPS, type SpriteOp } from './spriteOps';
 import { useHistoryStore } from '../state/historyStore';
 import { useToolStore, type ToolId } from '../state/toolStore';
 import { useUIStore } from '../state/uiStore';
@@ -14,7 +15,7 @@ import { useUIStore } from '../state/uiStore';
 export interface AppCommand {
   readonly id: string;
   readonly label: string;
-  readonly group: 'File' | 'Mode' | 'Tool' | 'Edit' | 'View' | 'Help';
+  readonly group: 'File' | 'Sprite' | 'Mode' | 'Tool' | 'Edit' | 'View' | 'Help';
   /** Display-only key hint, e.g. `Ctrl+Z`. */
   readonly keys?: string;
   readonly run: () => void;
@@ -32,6 +33,9 @@ export interface AppActions {
   convertFormat(): void;
   showWelcome(): void;
   showShortcuts(): void;
+  canvasSize(): void;
+  /** Run a whole-document operation and report a refusal to the user. */
+  spriteOp(op: SpriteOp): void;
 }
 
 const TOOL_COMMANDS: readonly { id: ToolId; label: string; key: string }[] = [
@@ -69,6 +73,14 @@ export function buildCommands(a: AppActions): AppCommand[] {
     { id: 'file.export', group: 'File', label: 'Export…', run: a.exportImage },
     { id: 'file.batch', group: 'File', label: 'Batch convert…', run: a.batchConvert },
     { id: 'file.format', group: 'File', label: 'Convert image format…', run: a.convertFormat },
+
+    { id: 'sprite.canvas', group: 'Sprite', label: 'Canvas size…', run: a.canvasSize },
+    ...SPRITE_OPS.map((op): AppCommand => ({
+      id: `sprite.${op.id}`,
+      group: 'Sprite',
+      label: op.label,
+      run: () => a.spriteOp(op),
+    })),
 
     {
       id: 'mode.convert',

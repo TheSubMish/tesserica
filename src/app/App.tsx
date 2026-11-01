@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CanvasView } from '../canvas/CanvasView';
 import { ConversionPanel } from '../panels/ConversionPanel';
+import { HistoryPanel } from '../panels/HistoryPanel';
 import { LayerPanel } from '../panels/LayerPanel';
 import { PalettePanel } from '../panels/PalettePanel';
 import { StatusBar } from '../panels/StatusBar';
@@ -17,6 +18,7 @@ import { Icon, LogoMark } from '../ui/icons';
 import { BatchConvertDialog } from './BatchConvertDialog';
 import { buildCommands, type AppActions } from './commands';
 import { CommandPalette } from './CommandPalette';
+import { CanvasSizeDialog } from './CanvasSizeDialog';
 import { ConvertFormatDialog } from './ConvertFormatDialog';
 import { ExportDialog } from './ExportDialog';
 import { FileMenu } from './FileMenu';
@@ -31,6 +33,7 @@ import {
 } from './project';
 import { addRecent, clearRecent, loadRecent, type RecentFile } from './recentFiles';
 import { ShortcutSheet } from './ShortcutSheet';
+import { SPRITE_OPS, type SpriteOp } from './spriteOps';
 import { useShortcuts } from './shortcuts';
 import { shouldShowWelcome } from './startupPrefs';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -45,6 +48,7 @@ export function App() {
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [dropping, setDropping] = useState(false);
   const [welcome, setWelcome] = useState(shouldShowWelcome);
+  const [canvasSizing, setCanvasSizing] = useState(false);
   const [palette, setPalette] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
   const [recent, setRecent] = useState<RecentFile[]>(loadRecent);
@@ -120,6 +124,11 @@ export function App() {
     });
   };
 
+  const runSpriteOp = (op: SpriteOp): void => {
+    const result = op.run();
+    setNotice(result.ok ? null : { text: result.message, error: true });
+  };
+
   const actions: AppActions = {
     newSprite: () => setCreatingNew(true),
     openProject: openProjectDialog,
@@ -132,6 +141,8 @@ export function App() {
     convertFormat: () => setConvertingFormat(true),
     showWelcome: () => setWelcome(true),
     showShortcuts: () => setShortcuts(true),
+    canvasSize: () => setCanvasSizing(true),
+    spriteOp: runSpriteOp,
   };
   const commands = buildCommands(actions);
 
@@ -214,6 +225,16 @@ export function App() {
             { label: 'Welcome Screen', onSelect: () => setWelcome(true) },
           ]}
         />
+        {mode === 'edit' && (
+          <FileMenu
+            label="Sprite"
+            glyph="▦"
+            items={[
+              { label: 'Canvas Size…', onSelect: () => setCanvasSizing(true) },
+              ...SPRITE_OPS.map((op) => ({ label: op.label, onSelect: () => runSpriteOp(op) })),
+            ]}
+          />
+        )}
         <span className="wordmark">
           <LogoMark size={18} />
           Tesserica
@@ -283,6 +304,7 @@ export function App() {
               <ConversionPanel />
               <LayerPanel />
               <TilesetPanel />
+              <HistoryPanel />
             </aside>
           </>
         )}
@@ -340,6 +362,7 @@ export function App() {
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
       {shortcuts && <ShortcutSheet commands={commands} onClose={() => setShortcuts(false)} />}
 
+      {canvasSizing && <CanvasSizeDialog onClose={() => setCanvasSizing(false)} />}
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {creatingNew && <NewSpriteDialog onClose={() => setCreatingNew(false)} />}
       {batchConverting && <BatchConvertDialog onClose={() => setBatchConverting(false)} />}

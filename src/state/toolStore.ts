@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { RGBA } from '../model/types';
+import type { BrushShape, Ink } from '../tools/brush';
 import type { TransformAlgorithm } from '../canvas/transform';
 
 export type ToolId =
@@ -48,6 +49,11 @@ interface ToolState {
   recentColors: RGBA[];
   /** When on, the colour picker snaps every pick to the active palette. */
   lockToPalette: boolean;
+  brushShape: BrushShape;
+  ink: Ink;
+  /** Mirror axes through the sprite's centre (`tools/symmetry.ts`). */
+  symmetryX: boolean;
+  symmetryY: boolean;
 
   setTool(id: ToolId): void;
   setPrimary(c: RGBA): void;
@@ -65,6 +71,10 @@ interface ToolState {
   setTransformScale(pct: number): void;
   pushRecentColor(c: RGBA): void;
   setLockToPalette(v: boolean): void;
+  setBrushShape(s: BrushShape): void;
+  setInk(i: Ink): void;
+  setSymmetryX(v: boolean): void;
+  setSymmetryY(v: boolean): void;
 }
 
 export const MAX_RECENT_COLORS = 12;
@@ -88,6 +98,10 @@ export const useToolStore = create<ToolState>((set) => ({
   transformScale: 100,
   recentColors: [],
   lockToPalette: false,
+  brushShape: 'square',
+  ink: 'normal',
+  symmetryX: false,
+  symmetryY: false,
 
   setTool: (id) => set({ activeTool: id }),
   setPrimary: (c) => set({ primary: c }),
@@ -110,4 +124,8 @@ export const useToolStore = create<ToolState>((set) => ({
       ].slice(0, MAX_RECENT_COLORS),
     })),
   setLockToPalette: (v) => set({ lockToPalette: v }),
+  setBrushShape: (s) => set({ brushShape: s }),
+  setInk: (i) => set({ ink: i }),
+  setSymmetryX: (v) => set({ symmetryX: v }),
+  setSymmetryY: (v) => set({ symmetryY: v }),
 }));

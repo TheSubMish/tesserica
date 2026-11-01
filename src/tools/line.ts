@@ -29,6 +29,7 @@ export const line: Tool = {
       ctx.brushSize,
       pixelValueFor(ctx, colorFor(ctx)),
       ctx.selection,
+      { shape: ctx.brushShape, ink: ctx.ink },
     );
   },
   onPointerMove(ctx, x, y) {
@@ -44,6 +45,7 @@ export const line: Tool = {
       ctx.brushSize,
       pixelValueFor(ctx, colorFor(ctx)),
       ctx.selection,
+      { shape: ctx.brushShape, ink: ctx.ink },
     );
   },
 };

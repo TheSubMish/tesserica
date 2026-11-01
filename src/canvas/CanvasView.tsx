@@ -24,6 +24,8 @@ import { useSelectionStore } from '../state/selectionStore';
 import { useToolStore } from '../state/toolStore';
 import { GRID_AUTO_ZOOM, useUIStore } from '../state/uiStore';
 import { getTool } from '../tools/registry';
+import { withSolo } from '../model/solo';
+import { replayMirrored, runPhase } from '../tools/symmetry';
 import type { ToolContext } from '../tools/Tool';
 import { abortStamp, beginStamp, continueStamp, endStamp } from '../tools/stampSession';
 import { centerPan, fitZoom, screenToDoc } from './coords';
@@ -37,6 +39,7 @@ import {
   drawOnionSkin,
   drawSelection,
   drawSprite,
+  drawSymmetryAxes,
 } from './renderer';
 
 /** One wheel notch of vertical/horizontal scroll, in screen pixels. */
@@ -67,6 +70,8 @@ export function CanvasView() {
   const anchor = useRef({ x: 0, y: 0 });
   /** Per-gesture tool scratch (the pencil's pixel-perfect trail). */
   const strokeState = useRef<Record<string, unknown>>({});
+  /** Stroke state for each mirrored copy of the gesture (index 0 is unused). */
+  const mirrorStates = useRef<Record<string, unknown>[]>([]);
 
   const sprite = useDocumentStore((s) => s.sprite);
   const activeFrameId = useDocumentStore((s) => s.activeFrameId);
@@ -102,7 +107,12 @@ export function CanvasView() {
     [onionSkinEnabled, sprite.frames, activeFrameId, onionSkinBefore, onionSkinAfter],
   );
 
+  const soloLayerId = useUIStore((s) => s.soloLayerId);
+  // What is *drawn*; edits and the eyedropper keep using the real sprite.
+  const shownSprite = useMemo(() => withSolo(sprite, soloLayerId), [sprite, soloLayerId]);
   const brushSize = useToolStore((s) => s.brushSize);
+  const symmetryX = useToolStore((s) => s.symmetryX);
+  const symmetryY = useToolStore((s) => s.symmetryY);
 
   /**
    * Center the sprite on first mount, and again whenever something asks for a
@@ -178,8 +188,9 @@ export function CanvasView() {
     // content — tinted and translucent, view-only, never paintable or
     // exported (`canvas/renderer.ts::drawOnionSkin`).
     if (onionSkinGhosts.length > 0) drawOnionSkin(ctx, sprite, vp, onionSkinGhosts);
-    drawSprite(ctx, sprite, activeFrameId, vp);
+    drawSprite(ctx, shownSprite, activeFrameId, vp);
     if (showGrid && zoom >= GRID_AUTO_ZOOM) drawGrid(ctx, sprite, vp);
+    drawSymmetryAxes(ctx, sprite, vp, symmetryX, symmetryY);
     drawBorder(ctx, sprite, vp);
     if (selection) drawSelection(ctx, vp, selection);
     if (cursor && !panning.current) {
@@ -189,12 +200,15 @@ export function CanvasView() {
     sprite,
     activeFrameId,
     revision,
+    shownSprite,
     zoom,
     panX,
     panY,
     showGrid,
     cursor,
     brushSize,
+    symmetryX,
+    symmetryY,
     selection,
     onionSkinGhosts,
     // Resizing the backing store clears it, so a size change must repaint —
@@ -278,6 +292,8 @@ export function CanvasView() {
         primary: toolState.primary,
         secondary: toolState.secondary,
         brushSize: toolState.brushSize,
+        brushShape: toolState.brushShape,
+        ink: toolState.ink,
         button,
         pixelPerfect: toolState.pixelPerfect,
         shapeFill: toolState.shapeFill,
@@ -303,9 +319,19 @@ export function CanvasView() {
         },
       };
 
-      if (phase === 'down') tool.onPointerDown(ctx, x, y);
-      else if (phase === 'move') tool.onPointerMove(ctx, x, y, prevX, prevY);
-      else tool.onPointerUp?.(ctx, x, y);
+      runPhase(tool, phase, ctx, x, y, prevX, prevY);
+      replayMirrored({
+        tool,
+        phase,
+        ctx,
+        x,
+        y,
+        prevX,
+        prevY,
+        symmetryX: toolState.symmetryX,
+        symmetryY: toolState.symmetryY,
+        states: mirrorStates.current,
+      });
 
       if (!tool.readOnly) doc.touch(bufferId);
     },

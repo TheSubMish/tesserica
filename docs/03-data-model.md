@@ -327,6 +327,74 @@ likewise collapse into a single "Change palette" step.
 
 ---
 
+### 6.1 Whole-document operations
+
+Most edits are dirty-rect deltas (above). A handful of operations instead rewrite every
+pixel of a cel, or change the sprite's own dimensions; they are rare and deliberate, so
+they trade the delta's compactness for simplicity.
+
+| Operation | Effect |
+|---|---|
+| **Canvas size** | New width/height plus a 3×3 anchor. Existing pixels keep their pixel positions relative to the anchor; new area is transparent. Shrinking crops. |
+| **Crop to selection** | Canvas size where the new rect is the selection's bounding box. |
+| **Flip sprite** (H/V), **Rotate sprite** (90° CW / 90° CCW / 180°) | Every raster cel is re-sampled. 90° swaps width and height. |
+| **Flip layer** (H/V) | The active raster layer's cels only; the sprite size is unchanged. |
+| **Merge down** | The active layer is composited into the layer directly below it, per frame, then deleted. |
+| **Flatten** | Every layer is composited into one new raster layer, per frame. |
+
+**Storage invariant.** Cels are always at `(0, 0)` and exactly the sprite's size; every
+cel buffer therefore changes when the sprite's size does. The operations above are
+applied to *buffers*, never by re-deriving from source images. Linked cels (§2.2) share
+one buffer, which is transformed **once**.
+
+**Undo.** These operations are a single command holding the full before/after buffers of
+the cels they touch plus the before/after sprite size. The command reports its real
+retained bytes (`memoryCost`), so the history budget (§9) evicts older steps first. They
+are not delta-encoded on purpose: a canvas resize touches every pixel, so a delta would
+be the same size as a snapshot.
+
+**Indexed mode** (`Sprite.colorMode === 'indexed'`): the same operations act on the index
+buffers directly; the palette is untouched and new area is `TRANSPARENT_INDEX`. Merge
+down and Flatten are **refused** in indexed mode — compositing blends colours, and
+choosing which palette entry a blend lands on is a quantization decision this operation
+should not make silently.
+
+**Refusals.** An operation that cannot be applied faithfully reports why and changes
+nothing; it never half-applies:
+
+- Canvas size, crop, flip sprite and rotate sprite are refused when the sprite contains a
+  **tilemap layer** (a tile grid does not resample) or a **conversion layer** (its pixels
+  are derived from a source image at `targetWidth × targetHeight`; moving them would make
+  "re-render" silently undo the edit). Convert such layers to raster first.
+- Flip layer is refused unless the active layer is a **raster** layer.
+- Merge down needs a raster layer directly below with the same parent, neither being a
+  clipping mask, and no *linked* cel on the lower layer (a shared buffer would change in
+  frames where the upper layer differs — unlink first).
+
+After a size change the selection is cleared and the viewport re-fits.
+
+**Merge/flatten fidelity.** The merged-in layer contributes exactly what the exporter
+would draw for it: its enabled effects are baked in, then its opacity and blend mode are
+applied (`canvas/flatten.ts`). Hidden layers are dropped by Flatten and merged by Merge
+down only if the merged-in layer is itself visible (a hidden layer merges as nothing and
+is simply deleted).
+
+### 6.2 View-only and tool state introduced alongside
+
+- **Solo layer** — a view toggle (`uiStore.soloLayerId`). The canvas shows only that layer
+  (and its ancestor groups). It is not part of the document, is never saved, and never
+  reaches export (`canvas/flatten.ts` does not read it). Cleared when a document is
+  replaced.
+- **Symmetry** (`toolStore.symmetryX`/`symmetryY`) — mirror axes through the sprite's
+  centre. Each mirrored copy of a stroke runs through the same tool with its own stroke
+  state, so pixel-perfect and shape previews behave identically in every copy. Applies to
+  pencil, eraser, line, rectangle and ellipse only.
+- **Brush shape** (`square` | `circle` | `slash` | `backslash`) and **ink** (`normal` |
+  `lock-alpha`). Lock alpha paints only where a pixel already has coverage and preserves
+  its alpha (RGBA) or leaves transparent pixels alone (indexed).
+- **History panel** — a list over the existing past/future stacks; clicking an entry
+  performs the matching run of undos or redos. It adds no new command type.
+
 ## 7. Project file format
 
 **`.tess` — a ZIP archive.** (Locked — `10-decisions.md` D3.)

@@ -23,6 +23,12 @@ function loadFolded(): Record<string, boolean> {
 
 interface UIState {
   mode: Mode;
+  /**
+   * The layer shown alone while soloing (`model/solo.ts`), or `null`. View-only:
+   * never saved, never exported. A layer that no longer exists is ignored.
+   */
+  soloLayerId: string | null;
+  toggleSolo(id: string): void;
   /** Which side-panel sections are folded, by id. Persisted per machine. */
   foldedPanels: Record<string, boolean>;
   zoom: number;
@@ -93,6 +99,8 @@ const clampOnionSkinRange = (n: number): number =>
 
 export const useUIStore = create<UIState>((set) => ({
   mode: 'edit',
+  soloLayerId: null,
+  toggleSolo: (id) => set((s) => ({ soloLayerId: s.soloLayerId === id ? null : id })),
   foldedPanels: loadFolded(),
   zoom: 8,
   panX: 0,

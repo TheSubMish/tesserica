@@ -96,7 +96,8 @@ function ownContribution(own: Uint8ClampedArray, opacity: number): Uint8ClampedA
   return out;
 }
 
-function mergeNormal(
+/** Composite `own` onto `out` in place with a layer's opacity and blend mode. */
+export function mergeNormal(
   out: Uint8ClampedArray,
   own: Uint8ClampedArray,
   opacity: number,

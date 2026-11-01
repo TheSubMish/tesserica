@@ -43,6 +43,8 @@ export function harness(init: Partial<ToolContext> & { size?: number } = {}): Ha
     primary: [255, 0, 0, 255],
     secondary: [0, 0, 255, 255],
     brushSize: 1,
+    brushShape: 'square',
+    ink: 'normal',
     button: 0,
     pixelPerfect: false,
     shapeFill: false,

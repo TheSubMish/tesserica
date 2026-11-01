@@ -21,6 +21,7 @@
 import type { Selection } from '../model/selection';
 import type { ColorMode, Palette, RGBA } from '../model/types';
 import type { SelectMode } from '../state/toolStore';
+import type { BrushShape, Ink } from './brush';
 
 export interface ToolContext {
   /**
@@ -41,6 +42,10 @@ export interface ToolContext {
   primary: RGBA;
   secondary: RGBA;
   brushSize: number;
+  /** Which pixels a stamp covers (`tools/brush.ts`). */
+  brushShape: BrushShape;
+  /** How covered pixels are written. */
+  ink: Ink;
   /** Which mouse button — right-drag paints with the secondary color. */
   button: number;
 
