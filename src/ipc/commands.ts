@@ -470,6 +470,30 @@ export async function cancelBatchConvert(jobId: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Standalone image-format conversion (`src-tauri/src/commands/format_convert.rs`,
+// `src/app/ConvertFormatDialog.tsx`).
+//
+// Unrelated to the pixel-art pipeline above: a plain decode/re-encode of one
+// file on disk. Both paths cross as plain strings — Rust reads and writes
+// the files itself, so no pixel buffer ever needs to reach the frontend.
+// ---------------------------------------------------------------------------
+
+export interface ConvertImageFormatResult {
+  path: string;
+  width: number;
+  height: number;
+  bytes: number;
+}
+
+export async function convertImageFormat(request: {
+  inputPath: string;
+  outputPath: string;
+  format: string;
+}): Promise<ConvertImageFormatResult> {
+  return invoke<ConvertImageFormatResult>('convert_image_format', { request });
+}
+
+// ---------------------------------------------------------------------------
 // On-demand segmentation model download (`docs/08-roadmap.md` Phase 5
 // "on-demand download for larger models with explicit consent",
 // `src/segment/modelDownload.ts`).

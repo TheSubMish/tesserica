@@ -14,6 +14,7 @@ import { handoffToEdit } from '../convert/editHandoff';
 import { loadSourceImage } from '../convert/loadSource';
 import { useUIStore } from '../state/uiStore';
 import { BatchConvertDialog } from './BatchConvertDialog';
+import { ConvertFormatDialog } from './ConvertFormatDialog';
 import { ExportDialog } from './ExportDialog';
 import { FileMenu } from './FileMenu';
 import { NewSpriteDialog } from './NewSpriteDialog';
@@ -26,6 +27,7 @@ export function App() {
   const [exporting, setExporting] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
   const [batchConverting, setBatchConverting] = useState(false);
+  const [convertingFormat, setConvertingFormat] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [dropping, setDropping] = useState(false);
   useShortcuts({ onNewSprite: () => setCreatingNew(true) });
@@ -137,6 +139,7 @@ export function App() {
             },
             { label: 'Export…', onSelect: () => setExporting(true) },
             { label: 'Batch Convert…', onSelect: () => setBatchConverting(true) },
+            { label: 'Convert Image Format…', onSelect: () => setConvertingFormat(true) },
           ]}
         />
         <span className="wordmark">Tesserica</span>
@@ -227,6 +230,7 @@ export function App() {
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {creatingNew && <NewSpriteDialog onClose={() => setCreatingNew(false)} />}
       {batchConverting && <BatchConvertDialog onClose={() => setBatchConverting(false)} />}
+      {convertingFormat && <ConvertFormatDialog onClose={() => setConvertingFormat(false)} />}
     </div>
   );
 }

@@ -66,7 +66,7 @@ No blockers for Tauri v2 on this machine.
 |---|---|---|
 | `tauri` | 2.11.5 | app framework |
 | `serde` / `serde_json` | 1.0.229 | IPC + project format |
-| `image` | 0.25.10 | decode/encode PNG, JPEG, GIF, WebP |
+| `image` | 0.25.10 | decode/encode PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, TGA, PNM, QOI, farbfeld, HDR, OpenEXR (`commands::format_convert` — standalone format conversion, not the pixel-art pipeline; AVIF deliberately excluded, its encoder needs `ravif`/`rav1e`) |
 | `imageproc` | 0.27.0 | morphology, connected components (`04` §6.1) |
 | `rayon` | 1.12.0 | parallel pixel loops |
 | ~~`palette`~~ | ~~0.7.6~~ | ❌ **not used** — Oklab hand-rolled instead (D10, §3.2) |
