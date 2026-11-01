@@ -110,7 +110,7 @@ body {
 
 .body {
   display: grid;
-  grid-template-columns: 44px 1fr 220px;
+  grid-template-columns: 44px 1fr 264px;
   min-height: 0;
 }
 
@@ -300,8 +300,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 26px;
-  padding: 0 var(--space-2);
+  flex-wrap: wrap;
+  min-height: 26px;
+  padding: 2px var(--space-2);
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1680,4 +1681,214 @@ select:focus-visible {
   background: var(--accent-muted);
   border-color: var(--accent);
   color: var(--text);
+}
+
+/* ---- Base button ----------------------------------------------------------
+   Zero specificity (`:where`), so every class-styled button above still wins.
+   Without it, any button without its own class — Export, Detect grid, the
+   split/side toggle, Convert to Indexed, Import from Lospec — rendered as the
+   browser's white default on a dark UI. */
+:where(button) {
+  min-height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+:where(button):hover:not(:disabled) {
+  background: #363640;
+  border-color: var(--accent-muted);
+}
+
+:where(button):active:not(:disabled) {
+  background: var(--bg-panel);
+}
+
+:where(button):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+:where(button)[aria-pressed='true'] {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+}
+
+:where(button):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.panel-head > span:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+/* ---- Colour picker -------------------------------------------------------- */
+
+.swatch-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.swatch-swap {
+  width: 26px;
+  min-height: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.color-popover {
+  position: absolute;
+  left: 44px;
+  bottom: 0;
+  z-index: 50;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+}
+
+.color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 196px;
+}
+
+.color-picker-modes {
+  display: flex;
+  gap: 2px;
+}
+
+.color-picker-modes button {
+  flex: 1;
+  min-height: 22px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+.color-picker-modes button[aria-selected='true'] {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+}
+
+.color-wheel {
+  position: relative;
+  align-self: center;
+  border-radius: 50%;
+  background: repeating-conic-gradient(#2a2a30 0 25%, #1e1e23 0 50%) 0 0 / 12px 12px;
+  touch-action: none;
+}
+
+.color-wheel canvas {
+  display: block;
+  border-radius: 50%;
+  cursor: crosshair;
+}
+
+.color-wheel-marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px #000,
+    inset 0 0 0 1px #000;
+  pointer-events: none;
+}
+
+.color-picker-slider {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.color-picker-slider input[type='range'] {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+}
+
+.color-picker-slider input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 16px;
+  border-radius: 2px;
+  background: #fff;
+  border: 1px solid #000;
+}
+
+.color-picker-slider output {
+  min-width: 2ch;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.color-picker-hex {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.color-picker-hex input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.color-harmony {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.color-harmony select {
+  height: var(--control-h-sm);
+  font-size: 11px;
+}
+
+.color-harmony-swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.color-harmony-swatch {
+  flex: 1;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
 }

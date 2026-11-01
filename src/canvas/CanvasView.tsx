@@ -197,6 +197,10 @@ export function CanvasView() {
     brushSize,
     selection,
     onionSkinGhosts,
+    // Resizing the backing store clears it, so a size change must repaint —
+    // otherwise the canvas stays blank after the ResizeObserver's first
+    // callback until the pointer moves.
+    viewportSize,
   ]);
 
   /**

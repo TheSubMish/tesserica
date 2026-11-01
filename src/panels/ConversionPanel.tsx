@@ -60,12 +60,17 @@ export function ConversionPanel() {
         <select
           value={paletteIdFor(settings.palette)}
           onChange={(e) => {
+            if (e.target.value === AUTO_ID) {
+              apply({ palette: { kind: 'auto', maxColors: 16 } });
+              return;
+            }
             const palette = BUILTIN_PALETTES.find((p) => p.id === e.target.value);
             if (palette) {
               apply({ palette: { kind: 'fixed', colors: palette.colors as readonly Rgba[] } });
             }
           }}
         >
+          <option value={AUTO_ID}>Auto — fit to image</option>
           {BUILTIN_PALETTES.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name} ({p.colors.length})
@@ -109,8 +114,11 @@ export function ConversionPanel() {
   );
 }
 
+const AUTO_ID = 'auto';
+
 /** Which bundled palette a fixed colour list corresponds to, if any. */
 function paletteIdFor(spec: { kind: 'fixed' | 'auto'; colors?: readonly Rgba[] }): string {
+  if (spec.kind === 'auto') return AUTO_ID;
   if (spec.kind !== 'fixed' || !spec.colors) return BUILTIN_PALETTES[0].id;
   const match = BUILTIN_PALETTES.find(
     (p) =>
