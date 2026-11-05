@@ -1,0 +1,8 @@
+# Pinned so local builds and CI use the same compiler and the same Clippy lint
+# set. An unpinned `stable` in CI picks up new lints as Rust releases (1.99
+# added `chunks_exact_to_as_chunks`) and turns `-D warnings` red with no code
+# change. Bump deliberately, fixing any new lints in the same PR, and keep
+# .github/actions/setup-build-env/action.yml on the same version.
+[toolchain]
+channel = "1.89.0"
+components = ["clippy", "rustfmt"]

@@ -26,8 +26,9 @@ runs:
           libayatana-appindicator3-dev \
           librsvg2-dev
 
-    - name: Install Rust stable (clippy + rustfmt)
-      uses: dtolnay/rust-toolchain@stable
+    # Keep this version in sync with /rust-toolchain.toml.
+    - name: Install Rust 1.89 (clippy + rustfmt)
+      uses: dtolnay/rust-toolchain@1.89.0
       with:
         components: clippy, rustfmt
 
