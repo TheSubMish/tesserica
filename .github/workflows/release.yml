@@ -1,0 +1,58 @@
+name: Release
+
+# Push a tag like `v0.1.0` to build the Linux installers and publish them as
+# a *draft* GitHub Release. Bump the version in both `package.json` and
+# `src-tauri/tauri.conf.json` before tagging — they aren't read from the tag.
+#
+# The release is created as a draft on purpose: publishing a release is
+# outward-facing and hard to walk back once someone downloads it, so this
+# workflow stops one step short and leaves the "Publish release" click to a
+# human in the GitHub UI.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify before release
+    # Same gate as ci.yml, run again here because a tag push doesn't imply
+    # ci.yml already ran green against this exact commit.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build-env
+      - run: npm run verify
+      - run: npm run test:golden
+
+  release:
+    name: Build installers and publish draft release
+    needs: verify
+    # Linux only: docs/10-decisions.md D5. Bundle targets (deb, appimage)
+    # come from src-tauri/tauri.conf.json, not from this workflow.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build-env
+
+      - name: Build and publish Linux installers (.deb, .AppImage)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Tesserica ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+          generateReleaseNotes: true
+          # No auto-updater plugin is configured (see tauri.conf.json), so
+          # don't emit updater artifacts/signatures for it.
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
