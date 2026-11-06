@@ -27,6 +27,7 @@ export const eraser: Tool = {
       ctx.brushSize,
       pixelValueFor(ctx, TRANSPARENT),
       ctx.selection,
+      { shape: ctx.brushShape, ink: 'normal' },
     );
   },
   onPointerMove(ctx, x, y, prevX, prevY) {
@@ -41,6 +42,7 @@ export const eraser: Tool = {
       ctx.brushSize,
       pixelValueFor(ctx, TRANSPARENT),
       ctx.selection,
+      { shape: ctx.brushShape, ink: 'normal' },
     );
   },
 };

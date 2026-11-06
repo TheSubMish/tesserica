@@ -347,6 +347,14 @@ export async function openSource(path: string): Promise<SourceInfo> {
   return invoke<SourceInfo>('open_source', { path });
 }
 
+/**
+ * Register an image the frontend has staged (`stageBytes`) as a source, with no
+ * file on disk. Used for the built-in sample image. Consumes the staging handle.
+ */
+export async function openSourceFromStage(stageId: StageId, name: string): Promise<SourceInfo> {
+  return invoke<SourceInfo>('open_source_from_stage', { stageId, name });
+}
+
 export async function releaseSource(sourceId: SourceId): Promise<void> {
   await invoke('release_source', { sourceId });
 }
@@ -467,6 +475,30 @@ export async function batchConvert(
 /** Cooperative cancellation: already-converting files still finish. */
 export async function cancelBatchConvert(jobId: number): Promise<void> {
   await invoke('cancel_batch_convert', { jobId });
+}
+
+// ---------------------------------------------------------------------------
+// Standalone image-format conversion (`src-tauri/src/commands/format_convert.rs`,
+// `src/app/ConvertFormatDialog.tsx`).
+//
+// Unrelated to the pixel-art pipeline above: a plain decode/re-encode of one
+// file on disk. Both paths cross as plain strings — Rust reads and writes
+// the files itself, so no pixel buffer ever needs to reach the frontend.
+// ---------------------------------------------------------------------------
+
+export interface ConvertImageFormatResult {
+  path: string;
+  width: number;
+  height: number;
+  bytes: number;
+}
+
+export async function convertImageFormat(request: {
+  inputPath: string;
+  outputPath: string;
+  format: string;
+}): Promise<ConvertImageFormatResult> {
+  return invoke<ConvertImageFormatResult>('convert_image_format', { request });
 }
 
 // ---------------------------------------------------------------------------

@@ -28,6 +28,13 @@ interface HistoryState {
   undo(): void;
   redo(): void;
   clear(): void;
+  /**
+   * Move to the state after exactly `pastLength` commands have been applied —
+   * the history panel's "click an earlier step". `0` is the original document.
+   * It is repeated undo or redo, so it records nothing new and keeps the redo
+   * branch until a fresh edit is made.
+   */
+  jumpTo(pastLength: number): void;
   undoLabel(): string | null;
   redoLabel(): string | null;
 }
@@ -91,6 +98,13 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     }),
 
   clear: () => set({ past: [], future: [], memoryUsed: 0 }),
+
+  jumpTo: (pastLength) => {
+    const total = get().past.length + get().future.length;
+    const target = Math.max(0, Math.min(total, Math.round(pastLength)));
+    while (get().past.length > target) get().undo();
+    while (get().past.length < target && get().future.length > 0) get().redo();
+  },
 
   undoLabel: () => get().past[get().past.length - 1]?.label ?? null,
   redoLabel: () => get().future[0]?.label ?? null,

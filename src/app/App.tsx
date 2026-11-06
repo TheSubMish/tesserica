@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CanvasView } from '../canvas/CanvasView';
 import { ConversionPanel } from '../panels/ConversionPanel';
+import { HistoryPanel } from '../panels/HistoryPanel';
 import { LayerPanel } from '../panels/LayerPanel';
 import { PalettePanel } from '../panels/PalettePanel';
 import { StatusBar } from '../panels/StatusBar';
@@ -11,14 +12,31 @@ import { ToolRail } from '../panels/ToolRail';
 import { ConvertMode } from '../convert/ConvertMode';
 import { listenForImageDrop, SUPPORTED_IMAGE_EXTENSIONS } from '../convert/dropTarget';
 import { handoffToEdit } from '../convert/editHandoff';
-import { loadSourceImage } from '../convert/loadSource';
+import { loadSampleImage, loadSourceImage } from '../convert/loadSource';
 import { useUIStore } from '../state/uiStore';
+import { Icon, LogoMark } from '../ui/icons';
 import { BatchConvertDialog } from './BatchConvertDialog';
+import { buildCommands, type AppActions } from './commands';
+import { CommandPalette } from './CommandPalette';
+import { CanvasSizeDialog } from './CanvasSizeDialog';
+import { ConvertFormatDialog } from './ConvertFormatDialog';
 import { ExportDialog } from './ExportDialog';
 import { FileMenu } from './FileMenu';
+import { FirstRunTips } from './FirstRunTips';
 import { NewSpriteDialog } from './NewSpriteDialog';
-import { importAseFile, openProject, pickImage, saveCurrentProject } from './project';
+import {
+  importAseFile,
+  openProject,
+  openProjectAt,
+  pickImage,
+  saveCurrentProject,
+} from './project';
+import { addRecent, clearRecent, loadRecent, type RecentFile } from './recentFiles';
+import { ShortcutSheet } from './ShortcutSheet';
+import { SPRITE_OPS, type SpriteOp } from './spriteOps';
 import { useShortcuts } from './shortcuts';
+import { shouldShowWelcome } from './startupPrefs';
+import { WelcomeScreen } from './WelcomeScreen';
 
 export function App() {
   const mode = useUIStore((s) => s.mode);
@@ -26,9 +44,19 @@ export function App() {
   const [exporting, setExporting] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
   const [batchConverting, setBatchConverting] = useState(false);
+  const [convertingFormat, setConvertingFormat] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [dropping, setDropping] = useState(false);
-  useShortcuts({ onNewSprite: () => setCreatingNew(true) });
+  const [welcome, setWelcome] = useState(shouldShowWelcome);
+  const [canvasSizing, setCanvasSizing] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
+  const [recent, setRecent] = useState<RecentFile[]>(loadRecent);
+  useShortcuts({
+    onNewSprite: () => setCreatingNew(true),
+    onCommandPalette: () => setPalette((open) => !open),
+    onShortcutSheet: () => setShortcuts(true),
+  });
 
   const guard = async (label: string, run: () => Promise<string | null>) => {
     try {
@@ -38,6 +66,85 @@ export function App() {
       setNotice({ text: e instanceof Error ? e.message : String(e), error: true });
     }
   };
+
+  const remember = (path: string, kind: RecentFile['kind']): void =>
+    setRecent(addRecent(path, kind));
+
+  const openPhoto = (): void =>
+    void guard('Opened', async () => {
+      const path = await pickImage();
+      if (!path) return null;
+      useUIStore.getState().setMode('convert');
+      await loadSourceImage(path);
+      remember(path, 'image');
+      return path;
+    });
+
+  const openSample = (): void =>
+    void guard('Loaded', async () => {
+      useUIStore.getState().setMode('convert');
+      await loadSampleImage();
+      return 'the sample photo';
+    });
+
+  const openProjectDialog = (): void =>
+    void guard('Opened', async () => {
+      const result = await openProject();
+      if (result?.warnings.length) {
+        setNotice({ text: result.warnings.join('; '), error: true });
+        return null;
+      }
+      if (result) remember(result.path, 'project');
+      return result?.path ?? null;
+    });
+
+  const save = (saveAs: boolean): void =>
+    void guard('Saved', async () => {
+      const path = await saveCurrentProject({ saveAs });
+      if (path) remember(path, 'project');
+      return path;
+    });
+
+  const openRecent = (file: RecentFile): void => {
+    setWelcome(false);
+    void guard('Opened', async () => {
+      if (file.kind === 'image') {
+        useUIStore.getState().setMode('convert');
+        await loadSourceImage(file.path);
+        remember(file.path, 'image');
+        return file.path;
+      }
+      const result = await openProjectAt(file.path);
+      if (result.warnings.length) {
+        setNotice({ text: result.warnings.join('; '), error: true });
+        return null;
+      }
+      remember(result.path, 'project');
+      return result.path;
+    });
+  };
+
+  const runSpriteOp = (op: SpriteOp): void => {
+    const result = op.run();
+    setNotice(result.ok ? null : { text: result.message, error: true });
+  };
+
+  const actions: AppActions = {
+    newSprite: () => setCreatingNew(true),
+    openProject: openProjectDialog,
+    saveProject: () => save(false),
+    saveProjectAs: () => save(true),
+    openImage: openPhoto,
+    openSample,
+    exportImage: () => setExporting(true),
+    batchConvert: () => setBatchConverting(true),
+    convertFormat: () => setConvertingFormat(true),
+    showWelcome: () => setWelcome(true),
+    showShortcuts: () => setShortcuts(true),
+    canvasSize: () => setCanvasSizing(true),
+    spriteOp: runSpriteOp,
+  };
+  const commands = buildCommands(actions);
 
   /**
    * Whole-window drop target (`docs/05-ui-design.md` §3).
@@ -57,6 +164,7 @@ export function App() {
         void guard('Opened', async () => {
           useUIStore.getState().setMode('convert');
           await loadSourceImage(path);
+          remember(path, 'image');
           return path;
         });
       },
@@ -92,15 +200,7 @@ export function App() {
             {
               label: 'Open…',
               shortcut: 'Ctrl+O',
-              onSelect: () =>
-                void guard('Opened', async () => {
-                  const result = await openProject();
-                  if (result?.warnings.length) {
-                    setNotice({ text: result.warnings.join('; '), error: true });
-                    return null;
-                  }
-                  return result?.path ?? null;
-                }),
+              onSelect: openProjectDialog,
             },
             {
               label: 'Import Aseprite file…',
@@ -114,32 +214,31 @@ export function App() {
                   return result?.path ?? null;
                 }),
             },
-            {
-              label: 'Save',
-              shortcut: 'Ctrl+S',
-              onSelect: () => void guard('Saved', () => saveCurrentProject({ saveAs: false })),
-            },
-            {
-              label: 'Save As…',
-              shortcut: 'Ctrl+Shift+S',
-              onSelect: () => void guard('Saved', () => saveCurrentProject({ saveAs: true })),
-            },
-            {
-              label: 'Open image…',
-              onSelect: () =>
-                void guard('Opened', async () => {
-                  const path = await pickImage();
-                  if (!path) return null;
-                  useUIStore.getState().setMode('convert');
-                  await loadSourceImage(path);
-                  return path;
-                }),
-            },
+            { label: 'Save', shortcut: 'Ctrl+S', onSelect: () => save(false) },
+            { label: 'Save As…', shortcut: 'Ctrl+Shift+S', onSelect: () => save(true) },
+            { label: 'Open image…', onSelect: openPhoto },
             { label: 'Export…', onSelect: () => setExporting(true) },
             { label: 'Batch Convert…', onSelect: () => setBatchConverting(true) },
+            { label: 'Convert Image Format…', onSelect: () => setConvertingFormat(true) },
+            { label: 'Command Palette…', shortcut: 'Ctrl+K', onSelect: () => setPalette(true) },
+            { label: 'Keyboard Shortcuts', shortcut: '?', onSelect: () => setShortcuts(true) },
+            { label: 'Welcome Screen', onSelect: () => setWelcome(true) },
           ]}
         />
-        <span className="wordmark">Tesserica</span>
+        {mode === 'edit' && (
+          <FileMenu
+            label="Sprite"
+            glyph="▦"
+            items={[
+              { label: 'Canvas Size…', onSelect: () => setCanvasSizing(true) },
+              ...SPRITE_OPS.map((op) => ({ label: op.label, onSelect: () => runSpriteOp(op) })),
+            ]}
+          />
+        )}
+        <span className="wordmark">
+          <LogoMark size={18} />
+          Tesserica
+        </span>
         {/* Two modes, not three — D6/D7. */}
         <div className="modes" role="tablist" aria-label="Mode">
           <button
@@ -170,12 +269,12 @@ export function App() {
             aria-pressed={showTimeline}
             onClick={() => useUIStore.getState().toggleTimeline()}
           >
-            ▤
+            <Icon name="timeline" />
           </button>
         )}
       </header>
 
-      <div className="body">
+      <div className={mode === 'edit' ? 'body edit' : 'body'}>
         {mode === 'convert' ? (
           <ConvertMode
             onExport={() => setExporting(true)}
@@ -188,17 +287,24 @@ export function App() {
               }
             }}
             onNotice={(text, error) => setNotice({ text, error })}
+            onOpenPhoto={openPhoto}
+            onOpenSample={openSample}
           />
         ) : (
           <>
             <ToolRail />
-            <CanvasView />
-            <aside className="panels">
+            <aside className="palette-dock" aria-label="Palette">
+              <PalettePanel docked />
+            </aside>
+            <div className="edit-center">
               <ToolOptions />
+              <CanvasView />
+            </div>
+            <aside className="panels">
               <ConversionPanel />
               <LayerPanel />
               <TilesetPanel />
-              <PalettePanel />
+              <HistoryPanel />
             </aside>
           </>
         )}
@@ -224,9 +330,43 @@ export function App() {
         </div>
       )}
 
+      {welcome && (
+        <WelcomeScreen
+          recent={recent}
+          onClose={() => setWelcome(false)}
+          onConvertPhoto={() => {
+            setWelcome(false);
+            useUIStore.getState().setMode('convert');
+            openPhoto();
+          }}
+          onTrySample={() => {
+            setWelcome(false);
+            openSample();
+          }}
+          onNewSprite={() => {
+            setWelcome(false);
+            setCreatingNew(true);
+          }}
+          onOpenProject={() => {
+            setWelcome(false);
+            openProjectDialog();
+          }}
+          onOpenRecent={openRecent}
+          onClearRecent={() => {
+            clearRecent();
+            setRecent([]);
+          }}
+        />
+      )}
+      {!welcome && <FirstRunTips />}
+      {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
+      {shortcuts && <ShortcutSheet commands={commands} onClose={() => setShortcuts(false)} />}
+
+      {canvasSizing && <CanvasSizeDialog onClose={() => setCanvasSizing(false)} />}
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {creatingNew && <NewSpriteDialog onClose={() => setCreatingNew(false)} />}
       {batchConverting && <BatchConvertDialog onClose={() => setBatchConverting(false)} />}
+      {convertingFormat && <ConvertFormatDialog onClose={() => setConvertingFormat(false)} />}
     </div>
   );
 }

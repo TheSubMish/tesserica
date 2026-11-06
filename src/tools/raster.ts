@@ -6,8 +6,10 @@
  * interpolating between them a stroke comes out as disconnected dots.
  */
 
+import { TRANSPARENT_INDEX } from '../model/indexBuffers';
 import { setPixel } from '../model/pixelBuffers';
 import { selectionContains, type Selection } from '../model/selection';
+import { footprint, type BrushOptions } from './brush';
 
 /**
  * `clip`, when given, confines painting to a selection (`docs/08-roadmap.md`
@@ -19,6 +21,38 @@ import { selectionContains, type Selection } from '../model/selection';
  * — an `RGBA` is structurally a `readonly number[]`, so every existing
  * rgba-mode call site keeps compiling unchanged.
  */
+/**
+ * Write one pixel, honouring the ink. `lock-alpha` only recolours pixels that
+ * already have coverage and keeps their alpha — so it can never paint onto
+ * transparency, and never change how see-through a pixel already is.
+ */
+function writePixel(
+  buf: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  value: readonly number[],
+  lockAlpha: boolean,
+): void {
+  if (!lockAlpha) {
+    setPixel(buf, width, height, x, y, value);
+    return;
+  }
+  if (x < 0 || y < 0 || x >= width || y >= height) return;
+  if (value.length === 1) {
+    // Indexed: a transparent pixel is index `TRANSPARENT_INDEX`; leave it alone.
+    if (buf[y * width + x] === TRANSPARENT_INDEX) return;
+    buf[y * width + x] = value[0];
+    return;
+  }
+  const i = (y * width + x) * 4;
+  if (buf[i + 3] === 0) return;
+  buf[i] = value[0];
+  buf[i + 1] = value[1];
+  buf[i + 2] = value[2];
+}
+
 export function stampBrush(
   buf: Uint8ClampedArray | Uint8Array,
   width: number,
@@ -28,21 +62,21 @@ export function stampBrush(
   size: number,
   value: readonly number[],
   clip?: Selection | null,
+  brush?: BrushOptions,
 ): void {
+  const lockAlpha = brush?.ink === 'lock-alpha';
   if (size <= 1) {
     if (!selectionContains(clip, cx, cy)) return;
-    setPixel(buf, width, height, cx, cy, value);
+    writePixel(buf, width, height, cx, cy, value, lockAlpha);
     return;
   }
-  // Square brush, centered as well as an even size allows.
+  // Centred as well as an even size allows.
   const offset = Math.floor((size - 1) / 2);
-  for (let dy = 0; dy < size; dy++) {
-    for (let dx = 0; dx < size; dx++) {
-      const x = cx - offset + dx;
-      const y = cy - offset + dy;
-      if (!selectionContains(clip, x, y)) continue;
-      setPixel(buf, width, height, x, y, value);
-    }
+  for (const [dx, dy] of footprint(brush?.shape ?? 'square', size)) {
+    const x = cx - offset + dx;
+    const y = cy - offset + dy;
+    if (!selectionContains(clip, x, y)) continue;
+    writePixel(buf, width, height, x, y, value, lockAlpha);
   }
 }
 
@@ -93,8 +127,9 @@ export function drawLine(
   size: number,
   value: readonly number[],
   clip?: Selection | null,
+  brush?: BrushOptions,
 ): void {
   for (const p of linePoints(x0, y0, x1, y1)) {
-    stampBrush(buf, width, height, p.x, p.y, size, value, clip);
+    stampBrush(buf, width, height, p.x, p.y, size, value, clip, brush);
   }
 }

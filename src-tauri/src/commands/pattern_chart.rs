@@ -699,7 +699,7 @@ mod tests {
         let decoded = image::load_from_memory(&png_bytes).unwrap().to_rgba8();
 
         let layout = Layout::compute(&request);
-        let legend_y = (layout.margin_top + layout.grid_h + layout.pad + layout.legend_gap) as u32;
+        let legend_y = layout.margin_top + layout.grid_h + layout.pad + layout.legend_gap;
         let swatch_x = layout.margin_left;
         // Swatch corner is the legend entry's own color.
         assert_eq!(

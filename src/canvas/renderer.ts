@@ -796,6 +796,41 @@ export function drawBorder(ctx: CanvasRenderingContext2D, sprite: Sprite, vp: Vi
 }
 
 /**
+ * The mirror axes of symmetry drawing (`tools/symmetry.ts`) — thin dashed guides
+ * through the sprite's centre. Overlay only: never part of a cel or an export.
+ */
+export function drawSymmetryAxes(
+  ctx: CanvasRenderingContext2D,
+  sprite: Sprite,
+  vp: Viewport,
+  x: boolean,
+  y: boolean,
+): void {
+  if (!x && !y) return;
+  const left = Math.round(vp.panX);
+  const top = Math.round(vp.panY);
+  const w = sprite.width * vp.zoom;
+  const h = sprite.height * vp.zoom;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 120, 200, 0.9)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  if (x) {
+    const cx = Math.round(left + w / 2) + 0.5;
+    ctx.moveTo(cx, top - 6);
+    ctx.lineTo(cx, top + h + 6);
+  }
+  if (y) {
+    const cy = Math.round(top + h / 2) + 0.5;
+    ctx.moveTo(left - 6, cy);
+    ctx.lineTo(left + w + 6, cy);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
  * The active selection, drawn as marching ants (`docs/08-roadmap.md` Phase 3).
  *
  * Two offset dashed strokes, black and white, rather than one colour — a

@@ -23,7 +23,24 @@ serde_json = "1"
 # animated GIF export (`docs/08-roadmap.md` Phase 4 "Export: ... animated
 # GIF") — both already MIT-compatible, so no new top-level dependency is
 # needed for it.
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
+#
+# `webp`/`bmp`/`ico`/`tiff`/`tga`/`pnm`/`qoi`/`ff`/`hdr`/`exr` are added for
+# the standalone image-format-conversion command (`commands::format_convert`)
+# — a plain decode-and-re-encode utility, unrelated to the pixel-art
+# `pipeline::convert` path. Each is a codec `image` itself ships (no
+# system library — `bmp`/`ico`/`tiff`/`tga`/`pnm`/`qoi`/`ff`/`hdr` compile in
+# with no extra crate at all; `webp` pulls in `image-webp`, `tiff` pulls in
+# `tiff`, `exr` pulls in `exr` — all MIT/Apache-2.0, pure Rust, image-rs's own
+# org). **`avif` is deliberately left off**: its encoder needs `ravif` →
+# `rav1e`, a full AV1 encoder, which is real compile time and binary size for
+# one extra checkbox in a "convert a file" dialog — not worth risking this
+# project's locked 20 MB installer budget (`docs/07-tech-stack.md` §6) over.
+# `dds`/`avif-native`/`pcx` are not in this list either: `dds` has no encoder
+# in this crate at all (decode-only), `avif-native` is decode-only and needs
+# `dav1d`, and `Pcx` is `#[doc(hidden)]`/deprecated upstream.
+image = { version = "0.25.10", default-features = false, features = [
+    "png", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tga", "pnm", "qoi", "ff", "hdr", "exr",
+] }
 thiserror = "2.0.19"
 tauri-plugin-dialog = "2.7.2"
 # `.tess` is a ZIP archive (docs/10-decisions.md D3). Deflate only — the

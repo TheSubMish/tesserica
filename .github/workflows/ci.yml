@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    # Linux only: docs/10-decisions.md D5 — "CI runs Linux only; no
+    # cross-platform matrix yet." Do not add a Windows/macOS matrix here
+    # without re-reading D5 first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-build-env
+
+      - name: Format check (frontend)
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Golden parity suite (TS preview vs Rust export)
+        # docs/README.md and CLAUDE.md both call this the highest-value test
+        # in the project: it's the only thing standing between the codebase
+        # and a silent preview/export divergence. Not part of `npm run
+        # verify` (that script predates it being wired into CI) so it's
+        # called out as its own step here.
+        run: npm run test:golden
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Format check (Rust)
+        run: npm run format:rust -- --check
+
+      - name: Clippy
+        run: npm run clippy
+
+      - name: Rust tests
+        run: npm run test:rust

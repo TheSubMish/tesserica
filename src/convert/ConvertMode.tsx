@@ -19,9 +19,17 @@ export interface ConvertModeProps {
   readonly onExport: () => void;
   readonly onEdit: () => void;
   readonly onNotice: (text: string, error: boolean) => void;
+  readonly onOpenPhoto?: () => void;
+  readonly onOpenSample?: () => void;
 }
 
-export function ConvertMode({ onExport, onEdit, onNotice }: ConvertModeProps) {
+export function ConvertMode({
+  onExport,
+  onEdit,
+  onNotice,
+  onOpenPhoto,
+  onOpenSample,
+}: ConvertModeProps) {
   const store = useConvertStore();
 
   useEffect(() => {
@@ -46,7 +54,7 @@ export function ConvertMode({ onExport, onEdit, onNotice }: ConvertModeProps) {
   return (
     <div className="convert-mode">
       <div className="convert-stage">
-        <ConvertCanvas />
+        <ConvertCanvas onOpenPhoto={onOpenPhoto} onOpenSample={onOpenSample} />
         <div className="convert-viewswitch" role="group" aria-label="Comparison view">
           <button
             type="button"

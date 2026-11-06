@@ -5,6 +5,7 @@ import type { Effect } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
 import { useHistoryStore } from '../state/historyStore';
 import { usePaletteStore } from '../state/paletteStore';
+import { useUIStore } from '../state/uiStore';
 import { LayerEffectsSection } from './LayerEffectsSection';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -21,6 +22,8 @@ function render() {
 }
 
 beforeEach(() => {
+  // Effects starts folded for a first-time user; these tests exercise its contents.
+  useUIStore.setState({ foldedPanels: {} });
   history().clear();
   doc().newDocument(4, 4);
   history().clear();

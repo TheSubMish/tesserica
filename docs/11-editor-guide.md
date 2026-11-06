@@ -64,6 +64,20 @@ number field" convention holds everywhere in the app, not just here.
 
 **`X`** swaps the foreground/background swatches; **`D`** resets them to black/white.
 
+### 3.1 Brushes, inks and symmetry
+
+For the pencil, eraser and line tools the options bar offers four **brush shapes** —
+square, round, and two diagonals (they only matter above size 1). Round brushes are
+drawn the way pixel artists expect: size 3 is a plus-shaped dot, not a 3×3 square.
+
+The pencil and line tools also have an **ink**. *Normal* paints over anything. *Lock
+alpha* only recolours pixels that are already painted and keeps how see-through they
+are, so you can shade a finished sprite without ever painting outside its silhouette.
+
+**Mirror X / Mirror Y** (right end of the options bar) draw every stroke reflected across
+the sprite's centre, shown as a pink dashed guide. They work for pencil, eraser, line,
+rectangle and ellipse; turn on both for four-way symmetry.
+
 ## 4. Undo and redo
 
 **`Ctrl+Z`** / **`Ctrl+Shift+Z`** (or `Ctrl+Y`). One click-drag is one undo step, however
@@ -71,6 +85,10 @@ many pixels it touched — dragging a long pencil stroke across the canvas undoe
 step, not one step per pixel. Undo is unlimited within a budget (200 steps or roughly
 256 MB of retained changes, whichever comes first); the oldest steps drop first if you
 hit that ceiling, and the most recent step is never dropped even if it alone is large.
+
+The **History** panel (right column) lists every step. Click an earlier one to go back
+to it — later steps stay visible, dimmed, and can be clicked to redo — until you make a
+new edit.
 
 One thing worth knowing if you work at very large canvas sizes: finishing a freehand
 stroke on a full-size raster layer costs more the bigger that layer is, because Tesserica
@@ -101,6 +119,32 @@ layer, reorder up/down, delete.
 **Groups** have no pixels of their own — they composite their children and can carry a
 **clipping mask** flag (clip the group's content to whatever's directly below it),
 scoped to that one group. A hidden or locked group hides/locks every layer inside it.
+
+**Solo** (the target icon above the list) shows only the selected layer on the canvas. It
+is a view setting: it is never saved and never affects export.
+
+**Merge down** (the layer below must be a normal layer in the same group) composites the
+selected layer into it — with its opacity, blend mode and effects — and removes it.
+**Flatten** composites every visible layer into a single layer. Both are one undo step.
+Neither works on an indexed sprite (blending colours has no single right palette
+answer) and merge down refuses when the layer below has linked cels, because they share
+pixels between frames — unlink them first.
+
+### 5.1.1 The Sprite menu
+
+The **▦** menu in the title bar holds operations on the whole sprite, each a single undo
+step:
+
+- **Canvas Size…** — new width and height with a 3×3 anchor for where the existing pixels
+  sit. Growing adds transparent space; shrinking crops the side away from the anchor.
+- **Crop to Selection**
+- **Flip** the sprite horizontally or vertically, **Rotate** it 90° either way or 180°.
+- **Flip Layer** — the selected layer only.
+
+These refuse to run — and tell you why, changing nothing — if the sprite contains a
+**tilemap layer** (a tile grid can't be resampled) or a **conversion layer** (it
+re-renders from its source image, which would undo the edit). Convert those to normal
+layers first. Everything is also available from the command palette (`Ctrl+K`).
 
 ### 5.2 Effects
 

@@ -15,6 +15,7 @@
  * `aria-pressed`, never colour alone; the whole panel is reachable by keyboard.
  */
 
+import { Icon } from '../ui/icons';
 import { useRef, useState } from 'react';
 import { SliderField } from '../app/SliderField';
 import {
@@ -35,6 +36,9 @@ import {
 import { visibleLayerRows, wouldCreateCycle } from '../model/layerTree';
 import type { BlendMode, Layer } from '../model/types';
 import { useDocumentStore } from '../state/documentStore';
+import { useUIStore } from '../state/uiStore';
+import { flattenLayers, mergeDown } from '../history/mergeCommands';
+import type { SpriteOpResult } from '../history/spriteCommands';
 import { LayerEffectsSection } from './LayerEffectsSection';
 
 /** `docs/03-data-model.md` §2.1 — the full W3C set, in the order Photoshop-family tools use. */
@@ -62,6 +66,14 @@ export function LayerPanel() {
   const activeLayerId = useDocumentStore((s) => s.activeLayerId);
   const active = layers.find((l) => l.id === activeLayerId);
 
+  const soloLayerId = useUIStore((s) => s.soloLayerId);
+  const [opError, setOpError] = useState<string | null>(null);
+  /** Run a document operation and surface its refusal reason inline. */
+  const runOp = (op: () => SpriteOpResult): void => {
+    const result = op();
+    setOpError(result.ok ? null : result.message);
+  };
+
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
@@ -86,18 +98,40 @@ export function LayerPanel() {
       <div className="panel-head">
         <span>Layers</span>
         <span>
+          <button
+            title="Solo layer — show only this layer"
+            aria-label="Solo layer"
+            aria-pressed={soloLayerId === activeLayerId}
+            onClick={() => useUIStore.getState().toggleSolo(activeLayerId)}
+          >
+            <Icon name="solo" />
+          </button>
+          <button
+            title="Merge down into the layer below"
+            aria-label="Merge layer down"
+            onClick={() => runOp(mergeDown)}
+          >
+            <Icon name="merge" />
+          </button>
+          <button
+            title="Flatten all layers into one"
+            aria-label="Flatten layers"
+            onClick={() => runOp(flattenLayers)}
+          >
+            <Icon name="flatten" />
+          </button>
           <button title="Add layer" aria-label="Add layer" onClick={() => addLayer()}>
-            +
+            <Icon name="plus" />
           </button>
           <button title="New group" aria-label="New group" onClick={() => addGroup()}>
-            📁
+            <Icon name="folder" />
           </button>
           <button
             title="Group layer"
             aria-label="Group layer"
             onClick={() => groupLayer(activeLayerId)}
           >
-            ⊞
+            <Icon name="group" />
           </button>
           <button
             title="Ungroup"
@@ -105,31 +139,37 @@ export function LayerPanel() {
             disabled={active?.kind !== 'group'}
             onClick={() => ungroupLayer(activeLayerId)}
           >
-            ⊟
+            <Icon name="ungroup" />
           </button>
           <button
             title="Move layer up"
             aria-label="Move layer up"
             onClick={() => moveLayer(activeLayerId, 1)}
           >
-            ↑
+            <Icon name="up" />
           </button>
           <button
             title="Move layer down"
             aria-label="Move layer down"
             onClick={() => moveLayer(activeLayerId, -1)}
           >
-            ↓
+            <Icon name="down" />
           </button>
           <button
             title="Delete layer"
             aria-label="Delete layer"
             onClick={() => deleteLayer(activeLayerId)}
           >
-            🗑
+            <Icon name="trash" />
           </button>
         </span>
       </div>
+
+      {opError && (
+        <p className="hint error" role="alert">
+          {opError}
+        </p>
+      )}
 
       <div className="layer-list" role="listbox" aria-label="Layers">
         {visibleLayerRows(layers).map(({ layer: l, depth }) => (

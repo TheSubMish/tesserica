@@ -84,6 +84,14 @@ export interface DocumentApi {
    * why this is a separate primitive from `setSpritePalette`.
    */
   setColorMode(mode: Sprite['colorMode'], palette?: Palette): void;
+
+  // ---- whole-document operations (`docs/03-data-model.md` §6.1) ----
+  /**
+   * Set the sprite's size and, with it, every cel's — cels are always the
+   * sprite's size (`docs/03-data-model.md` §6.1). Pixel buffers are the
+   * caller's job; this only updates the metadata.
+   */
+  resizeSprite(width: number, height: number): void;
 }
 
 export interface Command {

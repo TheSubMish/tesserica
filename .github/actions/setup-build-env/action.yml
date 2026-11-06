@@ -1,0 +1,48 @@
+name: 'Set up Tauri build environment'
+description: >
+  Installs the Linux system packages Tauri v2 needs to compile
+  (docs/10-decisions.md D5: Linux only, no cross-platform matrix), a cached
+  Rust toolchain, and a cached Node install, then runs `npm ci`. Shared by
+  ci.yml and release.yml so the two workflows can't drift apart.
+
+runs:
+  using: 'composite'
+  steps:
+    # Tauri v2 Linux prerequisites (webkit2gtk-4.1 stack), per tauri.app's
+    # own prerequisites list. Needed even for `cargo check`/`clippy`/`test`,
+    # not just for bundling.
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libwebkit2gtk-4.1-dev \
+          build-essential \
+          curl \
+          wget \
+          file \
+          libxdo-dev \
+          libssl-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev
+
+    # Keep this version in sync with /rust-toolchain.toml.
+    - name: Install Rust 1.89 (clippy + rustfmt)
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: clippy, rustfmt
+
+    - name: Cache Rust build artifacts
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: src-tauri
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: npm
+
+    - name: Install npm dependencies
+      shell: bash
+      run: npm ci

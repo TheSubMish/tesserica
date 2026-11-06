@@ -49,6 +49,7 @@ function plot(ctx: ToolContext, x: number, y: number, color: RGBA): void {
     ctx.brushSize,
     pixelValueFor(ctx, color),
     ctx.selection,
+    { shape: ctx.brushShape, ink: ctx.ink },
   );
 
   if (!ctx.pixelPerfect || ctx.brushSize > 1) return;

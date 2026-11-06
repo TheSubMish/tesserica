@@ -20,10 +20,14 @@ import {
   MAX_PIXEL_SIZE,
   MIN_BACKGROUND_REMOVAL_TOLERANCE,
   MIN_PIXEL_SIZE,
+  AUTO_PALETTE_ID,
+  MAX_AUTO_COLORS,
+  MIN_AUTO_COLORS,
   paletteColors,
   targetSize,
   useConvertStore,
 } from '../state/convertStore';
+import { LooksGallery } from './LooksGallery.tsx';
 import { detectGrid, type GridDetectionResult } from './gridDetect.ts';
 import { previewRuntime } from './previewRuntime.ts';
 
@@ -50,7 +54,8 @@ export interface ConvertPanelProps {
 export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
   const state = useConvertStore();
   const { width, height } = targetSize(state);
-  const colors = paletteColors(state.paletteId);
+  const isAuto = state.paletteId === AUTO_PALETTE_ID;
+  const colors = isAuto ? [] : paletteColors(state.paletteId);
   const ready = state.source !== undefined;
 
   // `undefined` = not run yet this session; `'none'` = ran, found nothing
@@ -153,10 +158,13 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
         )}
       </section>
 
+      <LooksGallery />
+
       <section className="panel">
         <label className="field">
           <span>Palette</span>
           <select value={state.paletteId} onChange={(e) => state.setPaletteId(e.target.value)}>
+            <option value={AUTO_PALETTE_ID}>Auto — fit to image</option>
             {BUILTIN_PALETTES.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.colors.length})
@@ -165,15 +173,29 @@ export function ConvertPanel({ onExport, onEdit }: ConvertPanelProps) {
           </select>
         </label>
 
-        <ul className="swatch-strip" aria-label="Palette colours">
-          {colors.map((c, i) => (
-            <li
-              key={`${c[0]}-${c[1]}-${c[2]}-${i}`}
-              style={{ background: `rgb(${c[0]} ${c[1]} ${c[2]})` }}
-              title={`#${[c[0], c[1], c[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`}
-            />
-          ))}
-        </ul>
+        {isAuto && (
+          <SliderField
+            label="Colours"
+            min={MIN_AUTO_COLORS}
+            max={MAX_AUTO_COLORS}
+            step={1}
+            value={state.autoMaxColors}
+            format={(v) => String(Math.round(v))}
+            onChange={(v) => state.setAutoMaxColors(v)}
+          />
+        )}
+
+        {!isAuto && (
+          <ul className="swatch-strip" aria-label="Palette colours">
+            {colors.map((c, i) => (
+              <li
+                key={`${c[0]}-${c[1]}-${c[2]}-${i}`}
+                style={{ background: `rgb(${c[0]} ${c[1]} ${c[2]})` }}
+                title={`#${[c[0], c[1], c[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`}
+              />
+            ))}
+          </ul>
+        )}
 
         <label className="field">
           <span>Dither</span>

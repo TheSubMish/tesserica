@@ -9,8 +9,14 @@ import { useToolStore } from '../state/toolStore';
 import { useUIStore } from '../state/uiStore';
 import { openProject, saveCurrentProject } from './project';
 
-export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
-  const { onNewSprite } = options;
+export function useShortcuts(
+  options: {
+    onNewSprite?: () => void;
+    onCommandPalette?: () => void;
+    onShortcutSheet?: () => void;
+  } = {},
+): void {
+  const { onNewSprite, onCommandPalette, onShortcutSheet } = options;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -38,6 +44,11 @@ export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
         }
         if (key === 'o') {
           void openProject().catch(() => {});
+          e.preventDefault();
+          return;
+        }
+        if (key === 'k') {
+          onCommandPalette?.();
           e.preventDefault();
           return;
         }
@@ -90,6 +101,9 @@ export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
         case 'r':
           tools.setTool('transform');
           break;
+        case '?':
+          onShortcutSheet?.();
+          break;
         case 'x':
           tools.swapColors();
           break;
@@ -130,5 +144,5 @@ export function useShortcuts(options: { onNewSprite?: () => void } = {}): void {
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onNewSprite]);
+  }, [onNewSprite, onCommandPalette, onShortcutSheet]);
 }

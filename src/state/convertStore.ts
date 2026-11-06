@@ -48,7 +48,10 @@ interface ConvertState {
 
   // --- the four primary controls (`docs/05` §3) ---
   pixelSize: number;
+  /** A bundled palette id, or {@link AUTO_PALETTE_ID} to fit a palette to the image. */
   paletteId: string;
+  /** Colour budget for the auto palette (`docs/04` §4.3). */
+  autoMaxColors: number;
   dither: DitherMode;
   ditherStrength: number;
 
@@ -111,6 +114,7 @@ interface ConvertState {
   setSource(source: SourceMeta | undefined): void;
   setPixelSize(size: number): void;
   setPaletteId(id: string): void;
+  setAutoMaxColors(n: number): void;
   setDither(mode: DitherMode): void;
   setDitherStrength(strength: number): void;
   setAdvanced(patch: Partial<AdvancedSettings>): void;
@@ -155,11 +159,18 @@ export const MAX_MASK_FEATHER = 16;
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
+/** Sentinel palette id: derive the palette from the image (Wu + k-means in Oklab). */
+export const AUTO_PALETTE_ID = 'auto';
+export const MIN_AUTO_COLORS = 2;
+export const MAX_AUTO_COLORS = 64;
+export const DEFAULT_AUTO_COLORS = 16;
+
 export const useConvertStore = create<ConvertState>((set) => ({
   source: undefined,
 
   pixelSize: 12,
-  paletteId: BUILTIN_PALETTES[0].id,
+  paletteId: AUTO_PALETTE_ID,
+  autoMaxColors: DEFAULT_AUTO_COLORS,
   dither: 'none',
   ditherStrength: 0.8,
 
@@ -193,6 +204,8 @@ export const useConvertStore = create<ConvertState>((set) => ({
   setPixelSize: (size) =>
     set({ pixelSize: clamp(Math.round(size), MIN_PIXEL_SIZE, MAX_PIXEL_SIZE) }),
   setPaletteId: (paletteId) => set({ paletteId }),
+  setAutoMaxColors: (n) =>
+    set({ autoMaxColors: Math.round(clamp(n, MIN_AUTO_COLORS, MAX_AUTO_COLORS)) }),
   setDither: (dither) => set({ dither }),
   setDitherStrength: (ditherStrength) => set({ ditherStrength: clamp(ditherStrength, 0, 1) }),
   setAdvanced: (patch) => set(patch),
@@ -223,7 +236,10 @@ export function targetSize(state: ConvertState): { width: number; height: number
  */
 export function buildSettings(state: ConvertState): ConvertSettings {
   const { width, height } = targetSize(state);
-  const palette: PaletteSpec = { kind: 'fixed', colors: paletteColors(state.paletteId) };
+  const palette: PaletteSpec =
+    state.paletteId === AUTO_PALETTE_ID
+      ? { kind: 'auto', maxColors: state.autoMaxColors }
+      : { kind: 'fixed', colors: paletteColors(state.paletteId) };
 
   return {
     ...defaultSettings(Math.max(1, width), Math.max(1, height), palette),

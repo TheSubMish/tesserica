@@ -1942,6 +1942,18 @@ Needs a genuine hardware/fixed-spec palette candidate checked against a primary 
 before this phase can close.
 
 ---
+- [x] Editor operations borrowed from the Aseprite feature survey (ideas only — Aseprite's
+      EULA forbids redistributing its source, so nothing was copied and the behaviour was
+      specified in `03-data-model.md` §6.1–6.2 before it was written): **canvas size /
+      crop to selection / flip / rotate** (sprite) and **flip layer**; **merge down** and
+      **flatten**; **solo layer**; **symmetry** drawing (X, Y, both); **brush shapes**
+      (square, round, two diagonals) and a **lock-alpha ink**; an **undo history panel**.
+      Whole-document operations are one `SpriteTransformCommand` holding full before/after
+      buffers (deliberately not delta-encoded: a resize touches every pixel) and report
+      their real byte cost to the history budget. They are refused, with the reason and no
+      partial effect, on sprites containing tilemap or conversion layers; merge/flatten are
+      refused on indexed sprites. Not done from that survey: slices, custom brushes from a
+      selection, tiled-preview drawing, destructive filters, rebindable shortcuts.
 
 ## Sequencing rationale
 

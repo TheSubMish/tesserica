@@ -14,7 +14,16 @@ export interface FileMenuItem {
   onSelect: () => void;
 }
 
-export function FileMenu({ items }: { items: FileMenuItem[] }) {
+export function FileMenu({
+  items,
+  label = 'File',
+  glyph = '≡',
+}: {
+  items: FileMenuItem[];
+  /** Names the menu for assistive tech and the tooltip. */
+  label?: string;
+  glyph?: string;
+}) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
@@ -40,11 +49,11 @@ export function FileMenu({ items }: { items: FileMenuItem[] }) {
         className="menu-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="File menu"
-        title="File"
+        aria-label={`${label} menu`}
+        title={label}
         onClick={() => setOpen((v) => !v)}
       >
-        ≡
+        {glyph}
       </button>
 
       {open && (
